@@ -112,12 +112,13 @@ along with this software (see the LICENSE.md file). If not, see
         <histories historySeqId="01" versionName="01" changeDateTime="1485028800000"/></moqui.resource.wiki.WikiPage>
 
     <!-- demo override server and client footer pages -->
-    <moqui.resource.DbResource filename="footer.ftl" isFile="Y" resourceId="zzwr_srv_footer" parentResourceId="zzwrt_server_dir">
+    <!-- the server footer is an html page as the client one is: a wiki page renders by its type, never as a template
+        (plans/Security-Review.md SEC-SCR-81), so it names no signed-in user -->
+    <moqui.resource.DbResource filename="footer.html" isFile="Y" resourceId="zzwr_srv_footer" parentResourceId="zzwrt_server_dir">
         <file mimeType="text/html" versionName="01" rootVersionName="01">
             <fileData><![CDATA[
             <footer class="footer"><div class="container">
                 <p class="text-center">Built on Moqui Framework</p>
-                <#if ec.user.username??><p class="text-center"><small>Logged in as ${ec.user.username}</small></p></#if>
                 <p class="text-right text-muted"><small>from wiki server content, clear store config to see default</small></p>
             </div></footer>
             ]]></fileData>
@@ -208,9 +209,9 @@ along with this software (see the LICENSE.md file). If not, see
         <parameters parameterName="buyQuantity" parameterValue="1"/>
         <parameters parameterName="getQuantity" parameterValue="1"/>
         <parameters parameterName="discountPercent" parameterValue="50"/>
-        <codes promoCodeId="TEST1" promoCode="TEST1" requireParty="Y" useLimitPerCustomer="2">
+        <codes promoCodeId="TEST1" promoCode="TEST1" userEntered="Y" requireParty="Y" useLimitPerCustomer="2">
             <parties partyId="CustJqp"/></codes>
-        <codes promoCodeId="TEST2" promoCode="TEST2" requireParty="N" useLimitPerCode="5" useLimitPerCustomer="1"/>
+        <codes promoCodeId="TEST2" promoCode="TEST2" userEntered="Y" requireParty="N" useLimitPerCode="5" useLimitPerCustomer="1"/>
     </mantle.product.store.ProductStorePromotion>
     <mantle.product.store.ProductStorePromotion storePromotionId="PopcNewCustomer" productStoreId="POPC_DEFAULT"
             itemDescription="20% Discount for New Customers" serviceRegisterId="NewCustomerDiscount" sequenceNum="99">

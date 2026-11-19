@@ -25,7 +25,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="storePromotionId" required="true"/>
             <parameter name="promoCodeId"/>
             <parameter name="useLimit" type="BigDecimal"/>
-            <parameter name="itemDescription"/>
+            <parameter name="itemDescription"><description>The promotion's description, put on the promotion's order items as
+                plain text, never expanded as a template (plans/Security-Review.md SEC-BAP-83); a rule without one uses its
+                own text.</description></parameter>
         </in-parameters>
     </service>
     <service verb="apply" noun="OrderPromotions">
@@ -238,18 +240,30 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="add" noun="OrderPromoCode">
+        <description>A promotion code on an order, by its text (ignoring case), else by its record id; with promoCodeId, only
+            that code and only when its text is the promoCode given (Shop's cart, which has already chosen the store's code a
+            customer may enter: a shopper's text is never taken as a record id, SEC-PSS-81). Checks the code's and promotion's
+            store, dates, customer and use limits, and re-applies the order's promotions.</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
             <parameter name="promoCode" required="true"/>
+            <parameter name="promoCodeId"><description>The code chosen; its text must be promoCode. No fallback by id.</description></parameter>
         </in-parameters>
         <actions>
             <set field="openStatusIdList" from="['OrderPlaced', 'OrderProcessing', 'OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderHold']"/>
 
             <!-- make sure code is valid -->
-            <entity-find entity-name="mantle.product.store.ProductStorePromoCode" list="storePromoCodeList">
-                <econdition field-name="promoCode" ignore-case="true"/></entity-find>
-            <set field="storePromoCode" from="storePromoCodeList[0]"/>
-            <if condition="storePromoCode == null">
+            <if condition="promoCodeId"><then>
+                <entity-find-one entity-name="mantle.product.store.ProductStorePromoCode" value-field="storePromoCode">
+                    <field-map field-name="promoCodeId"/></entity-find-one>
+                <if condition="storePromoCode != null &amp;&amp; String(storePromoCode.promoCode || '').toUpperCase() != String(promoCode).toUpperCase()">
+                    <set field="storePromoCode" from="null"/></if>
+            </then><else>
+                <entity-find entity-name="mantle.product.store.ProductStorePromoCode" list="storePromoCodeList">
+                    <econdition field-name="promoCode" ignore-case="true"/></entity-find>
+                <set field="storePromoCode" from="storePromoCodeList[0]"/>
+            </else></if>
+            <if condition="storePromoCode == null &amp;&amp; !promoCodeId">
                 <entity-find-one entity-name="mantle.product.store.ProductStorePromoCode" value-field="storePromoCode">
                     <field-map field-name="promoCodeId" from="promoCode"/></entity-find-one>
             </if>
@@ -503,7 +517,7 @@ along with this software (see the LICENSE.md file). If not, see
                                  sourcePercentage:discountPercent, storePromotionId:storePromotionId,
                                  promoCodeId:promoCodeId, promoCodeText:storePromoCode?.promoCode,
                                  isPromo:'Y', promoQuantity:promoQuantity, promoTimesUsed:promoQuantity,
-                                 itemDescription:ec.resource.expand(itemDescription, '')||'New Customer Discount'}"/>
+                                 itemDescription:itemDescription||'New Customer Discount'}"/>
             </iterate>
         </actions>
     </service>
@@ -618,7 +632,7 @@ along with this software (see the LICENSE.md file). If not, see
                              sourcePercentage:discountPercent, storePromotionId:storePromotionId,
                              promoCodeId:promoCodeId, promoCodeText:storePromoCode?.promoCode,
                              isPromo:'Y', promoQuantity:promoQuantity, promoTimesUsed:timesToApply,
-                             itemDescription:ec.resource.expand(itemDescription, '')||('Buy ' + buyQuantity.toString() + ' Get ' + getQuantity.toString() + ' at ' + discountPercent.toString() + '% off')}"/>
+                             itemDescription:itemDescription||('Buy ' + buyQuantity.toString() + ' Get ' + getQuantity.toString() + ' at ' + discountPercent.toString() + '% off')}"/>
             </iterate>
         </actions>
     </service>
@@ -702,7 +716,7 @@ along with this software (see the LICENSE.md file). If not, see
                              itemTypeEnumId:'ItemDiscount', quantity:itemQuantity, unitAmount:toDecimal(discountAmount).multiply(-1), productId:orderItem.productId,
                              storePromotionId:storePromotionId, promoCodeId:promoCodeId, promoCodeText:storePromoCode?.promoCode,
                              isPromo:'Y', promoQuantity:promoQuantity, promoTimesUsed:eligibleQuantity,
-                             itemDescription:ec.resource.expand(itemDescription, '')||('Get ' + ec.l10n.format(discountAmount, '#,##0.00') + ' off')}"/>
+                             itemDescription:itemDescription||('Get ' + ec.l10n.format(discountAmount, '#,##0.00') + ' off')}"/>
             </iterate>
         </actions>
     </service>

@@ -359,7 +359,7 @@ feature("an image must be its type and is scanned; an export of a release with a
             path: "hero.png",
             contentBase64: jpegBytes
         })
-        const noScanner = System.getProperty("pass_scanner_service")
+        const noScanner = ec.factory.getConfValue("pass@scanner-service")
             ? {error: "SCANNER_UNAVAILABLE: skipped (a scanner is configured)"}
             : run(state.designer, T + "store#ThemeAsset", {
                   themeId: state.themeId,

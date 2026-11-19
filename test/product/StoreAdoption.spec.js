@@ -1,14 +1,15 @@
 // The adoption preview of an existing store (mr-pass impl-shop P8; design-shop §17.1; mantle.product.StoreAdoptionServices
 // over StoreAdoption.js): a legacy store's template roles mapped to the theme package's sections, with findings for the
-// syntax the theme renderer does not run (the demo's ZZWR_TMP server footer: FreeMarker and server context) and a convertible
+// syntax the theme renderer does not run (a legacy server footer: FreeMarker and server context) and a convertible
 // client footer; a setting Shop does not use, a missing purchase category role, a gateway with no hosted page and a sign-in
 // template that stays PASS Account's named; the publication rows proposed by Commerce P3's propose#StorePublication (its own
 // rules are StorePublication's) and nothing written; the store's scope; artifact authorization disabled (the rules are the
-// service's own checks). Standalone but for the demo's ZZWR_TMP wiki space:
-// spec-local organizations, user, store, category and product. Run: ./moq test mr-mantle --spec StoreAdoption
+// service's own checks). Standalone: spec-local organizations, user, store, category, product and template space (a
+// legacy store's pages as Java left them; the demo's ZZWR_TMP footer is an html page since SEC-SCR-81). Run: ./moq test mr-mantle --spec StoreAdoption
 const A = "mantle.product.StoreAdoptionServices."
 const S = "mantle.product.store."
 const prefix = "STADOPT"
+const SPACE = "STADOPTT"
 const ids = {
     org: prefix + "_ORG",
     other: prefix + "_OTHER_ORG",
@@ -144,8 +145,21 @@ spec({
                 paymentInstrumentEnumId: "PiCreditCard",
                 paymentGatewayConfigId: "TEST_APPROVE"
             })
-            // the template roles of the demo's ZZWR_TMP space (POPC_DEFAULT's): the server footer uses FreeMarker and ec, the
-            // client footer is plain HTML; the sign-in template stays PASS Account's
+            // the template roles of a legacy store's space, written as files as Java's stores have them (a wiki service
+            // would refuse the .ftl page): the server footer uses FreeMarker and ec, the client footer is plain HTML; the
+            // sign-in template stays PASS Account's
+            make("moqui.resource.wiki.WikiSpace", {wikiSpaceId: SPACE, description: "Adoption legacy templates",
+                rootPageLocation: `dbresource://WikiSpace/${SPACE}.html`})
+            ec.resource.getLocationReference(`dbresource://WikiSpace/${SPACE}.html`).putText("<h3>Adoption templates</h3>")
+            ec.resource.getLocationReference(`dbresource://WikiSpace/${SPACE}/server/footer.ftl`).putText(
+                '<footer class="footer"><div class="container">\n' +
+                    '    <p class="text-center">Built on Moqui Framework</p>\n' +
+                    '    <#if ec.user.username??><p class="text-center"><small>Logged in as ${ec.user.username}</small></p></#if>\n' +
+                    "</div></footer>\n"
+            )
+            ec.resource.getLocationReference(`dbresource://WikiSpace/${SPACE}/client/footer.html`).putText(
+                '<footer class="footer"><div class="container"><p class="text-center">Built on Moqui Framework</p></div></footer>\n'
+            )
             for (const [suffix, spaceTypeEnumId] of [
                 ["SRV", "PstTmpSrv"],
                 ["CLT", "PstTmpClt"]
@@ -155,7 +169,7 @@ spec({
                     productStoreId: ids.store,
                     spaceTypeEnumId,
                     fromDate: 0,
-                    wikiSpaceId: "ZZWR_TMP"
+                    wikiSpaceId: SPACE
                 })
             for (const [suffix, contentTypeEnumId, spaceTypeEnumId, pagePath] of [
                 ["SRV_FOOTER", "PsctFooterTemplateServer", "PstTmpSrv", "server/footer"],

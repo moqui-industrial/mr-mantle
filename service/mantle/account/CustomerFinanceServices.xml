@@ -27,8 +27,11 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="check" noun="CustomerScope" allow-remote="false">
         <description>The customer of an organization the user works in, or with side supplier its supplier: the permission
             given, a party no other user keeps private, and a relationship of that side (for a customer an invoice to it, a
-            credit from it, a sales order or a current relationship; for a supplier a bill from it, a purchase order or its
-            supplier profile). Refuses otherwise.</description>
+            credit from it, a sales order or a current customer relationship, PrtCustomer; for a supplier a bill from it, a
+            purchase order or its supplier profile), an employee's payroll invoices left out (net pay, an overpayment: those
+            of an employment). Refuses otherwise, and refuses an internal organization (the intercompany workflow's) and a
+            person with a current employment (PrtEmployee) with any internal organization (OrgInternal), whose
+            identifications and payroll bank accounts are People's and payroll's (SEC-BOS-82).</description>
         <implements service="mantle.account.CustomerFinanceServices.define#CustomerScope"/>
         <in-parameters><parameter name="permission"/></in-parameters>
         <out-parameters><parameter name="customer" type="Map"/></out-parameters>
@@ -47,7 +50,41 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="supplierSide" from="side == 'supplier'"/>
             <if condition="!['customer', 'supplier'].includes(side)">
                 <return error="true" message="SIDE_INVALID: Choose the customer or the supplier side"/></if>
+            <!-- SEC-BOS-82: an internal organization is no customer or supplier here (PaymentWorkflow.js INTERCOMPANY_EXCLUDED),
+                and an employee's identifications (their SSN) and payroll bank accounts are People's and payroll's -->
+            <entity-find-count entity-name="mantle.party.PartyRole" count-field="internalCount" disable-authz="true">
+                <econdition field-name="partyId" from="customerPartyId"/>
+                <econdition field-name="roleTypeId" value="OrgInternal"/>
+            </entity-find-count>
+            <if condition="internalCount">
+                <return error="true" message="INTERCOMPANY_EXCLUDED: Internal organizations use the intercompany workflow"/></if>
+            <!-- an employee of any internal organization: another organization's user would otherwise reach them as a supplier.
+                An employer recorded for a contact at an outside company (create#Person employerPartyId) is no employment here -->
+            <entity-find entity-name="mantle.party.PartyRelationship" list="employmentList" disable-authz="true">
+                <date-filter/>
+                <econdition field-name="relationshipTypeEnumId" value="PrtEmployee"/>
+                <econdition field-name="fromPartyId" from="customerPartyId"/>
+                <select-field field-name="toPartyId"/>
+            </entity-find>
+            <set field="employmentCount" from="0"/>
+            <if condition="employmentList.length">
+                <entity-find-count entity-name="mantle.party.PartyRole" count-field="employmentCount" disable-authz="true">
+                    <econdition field-name="partyId" operator="in" from="Array.from(employmentList).map((row) => row.toPartyId)"/>
+                    <econdition field-name="roleTypeId" value="OrgInternal"/>
+                </entity-find-count>
+            </if>
+            <if condition="employmentCount">
+                <return error="true" message="EMPLOYEE_EXCLUDED: An employee's finance details are kept in People"/></if>
             <entity-find-count entity-name="mantle.account.invoice.Invoice" count-field="invoiceCount" disable-authz="true">
+                <!-- an employee's pay run invoices (net pay from them, an overpayment to recover: an employment's) make no
+                    customer or supplier; a pay run's third-party payee (a benefit provider, an agency) stays a supplier -->
+                <econditions combine="or">
+                    <econdition field-name="partyRelationshipId" operator="is-null"/>
+                    <econditions>
+                        <econdition field-name="invoiceTypeEnumId" operator="not-equals" value="InvoicePayroll" or-null="true"/>
+                        <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true"/>
+                    </econditions>
+                </econditions>
                 <econditions combine="or">
                     <econditions>
                         <econdition field-name="fromPartyId" from="supplierSide ? customerPartyId : organizationPartyId"/>
@@ -76,6 +113,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-count entity-name="mantle.party.PartyRelationship" count-field="relationshipCount"
                         disable-authz="true">
                     <date-filter/>
+                    <econdition field-name="relationshipTypeEnumId" value="PrtCustomer"/>
                     <econditions combine="or">
                         <econditions><econdition field-name="fromPartyId" from="organizationPartyId"/>
                             <econdition field-name="toPartyId" from="customerPartyId"/></econditions>
@@ -97,7 +135,8 @@ along with this software (see the LICENSE.md file). If not, see
             RECEIVABLE_VIEW): contacts (get#PartyContactInfoList), the billing addresses invoices go to (sendTo), orders,
             receivables (find#Receivables), payments, agreements and, by currency, the open balance with its aging by due
             date (get#ReceivableStatementInfo), the amount billed this year and the last payment. Payment methods (masked)
-            only for treasury (BANK_RECONCILE and PAYMENT_EDIT), identifications for RECEIVABLE_EDIT, tax registrations for
+            only for treasury (BANK_RECONCILE and PAYMENT_EDIT), identifications for RECEIVABLE_EDIT (masked to their last four
+            characters, never a tax identification: PtidSsn, PtidFein, PtidFuid), tax registrations for
             TAX_STATEMENT_EDIT.</description>
         <implements service="mantle.account.CustomerFinanceServices.define#CustomerScope"/>
         <out-parameters>
@@ -272,9 +311,9 @@ along with this software (see the LICENSE.md file). If not, see
                     {customerPartyId:customerPartyId}).paymentMethods"/>
             </if>
             <if condition="capabilities.canEditIdentifications">
-                <entity-find entity-name="mantle.party.PartyIdentification" list="identifications" limit="100"
-                        disable-authz="true">
-                    <econdition field-name="partyId" from="customerPartyId"/></entity-find>
+                <set field="finance" value="component://mr-mantle/service/mantle/account/CustomerFinance.js"/>
+                <set field="identifications" from="ec.resource.script(finance).execute('identifications',
+                    {partyId:customerPartyId}).identifications"/>
             </if>
             <if condition="capabilities.canReadTaxRegistrations">
                 <entity-find entity-name="mantle.other.tax.TaxAuthorityParty" list="taxRegistrations" limit="100"
@@ -284,8 +323,9 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="CustomerIdentification" allow-remote="false">
         <description>Add or change a customer's identification of a PartyIdType; a change needs the lastUpdatedStamp read.
-            Only the fields given are written. Needs RECEIVABLE_EDIT in the organization, PAYABLE_EDIT for a
-            supplier's.</description>
+            Only the fields given are written, and on a change an empty idValue keeps the stored one (the reads answer it
+            masked). Refuses a tax identification (PtidSsn, PtidFein, PtidFuid: payroll's and tax setup's, SEC-BOS-82) and a
+            masked value. Needs RECEIVABLE_EDIT in the organization, PAYABLE_EDIT for a supplier's.</description>
         <implements service="mantle.account.CustomerFinanceServices.define#CustomerScope"/>
         <in-parameters>
             <parameter name="partyIdTypeEnumId" required="true"/>
@@ -307,6 +347,11 @@ along with this software (see the LICENSE.md file). If not, see
                 <field-map field-name="enumId" from="partyIdTypeEnumId"/></entity-find-one>
             <if condition="idType?.enumTypeId != 'PartyIdType'">
                 <return error="true" message="IDENTIFICATION_TYPE_INVALID: Choose an identification type"/></if>
+            <set field="finance" value="component://mr-mantle/service/mantle/account/CustomerFinance.js"/>
+            <if condition="ec.resource.script(finance).taxIdTypes.includes(partyIdTypeEnumId)">
+                <return error="true" message="IDENTIFICATION_TYPE_RESTRICTED: Tax identifications are kept in payroll and tax setup"/></if>
+            <if condition="idValue &amp;&amp; String(idValue).includes('•')">
+                <return error="true" message="IDENTIFICATION_VALUE_MASKED: Enter the whole identification, not its masked form"/></if>
             <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="existing" for-update="true"
                     disable-authz="true">
                 <field-map field-name="partyId" from="customerPartyId"/>
@@ -317,6 +362,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <return error="true" message="STALE_REVISION: The identification changed; reload before saving"/></if>
             <set field="identificationFields" from="Object.assign({partyId:customerPartyId, partyIdTypeEnumId:partyIdTypeEnumId},
                 Object.fromEntries(['idValue', 'issuedBy', 'issuedByPartyId', 'expireDate'].filter((field) => field in context)
+                    .filter((field) => !(field == 'idValue' &amp;&amp; existing != null &amp;&amp; !context.idValue))
                     .map((field) => [field, context[field] || null])))"/>
             <service-call name="${existing != null ? 'update' : 'create'}#mantle.party.PartyIdentification"
                     in-map="identificationFields" disable-authz="true"/>
@@ -369,8 +415,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="CustomerBankAccount" allow-remote="false">
         <description>Add a bank account to a customer, or change one it owns (paymentMethodId with the lastUpdatedStamp
             read), through create#BankAccount or update#BankAccount; a description defaults to the bank and the last four
-            digits, never the whole number, and no number is returned. Needs PAYMENT_EDIT and BANK_RECONCILE in the
-            organization.</description>
+            digits, never the whole number, and no number is returned. Refuses a payroll bank account (purpose PmpPayroll,
+            People's store#PayrollBankAccount). Needs PAYMENT_EDIT and BANK_RECONCILE in the organization.</description>
         <implements service="mantle.account.CustomerFinanceServices.define#CustomerScope"/>
         <in-parameters>
             <parameter name="paymentMethodId"/>
@@ -400,6 +446,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="existing?.ownerPartyId != customerPartyId">
                     <return error="true"
                             message="PAYMENT_METHOD_UNAVAILABLE: The bank account does not belong to this customer"/></if>
+                <!-- SEC-BOS-82: a payroll bank account is payroll's, changed in People (store#PayrollBankAccount) -->
+                <if condition="existing.purposeEnumId == 'PmpPayroll'">
+                    <return error="true"
+                            message="PAYMENT_METHOD_UNAVAILABLE: A payroll bank account is changed in People's payroll"/></if>
                 <if condition="lastUpdatedStamp == null || Number(existing.lastUpdatedStamp) != Number(lastUpdatedStamp)">
                     <return error="true" message="STALE_REVISION: The bank account changed; reload before saving"/></if>
             </if>

@@ -302,7 +302,7 @@ feature(
             const compute = () =>
                 lib.run("mantle.smithy.SmithyAgreementServices.compute#Agreement", {mergeRequestId: hosted(2).mergeRequestId})
                     .state
-            setProperty("smithy_agreement_max_commits", "1")
+            setConf("mantle@smithy-agreement-max-commits", "1")
             let tooLong
             try {
                 save("SMA_MAINT", {
@@ -315,7 +315,7 @@ feature(
                 lib.settle(ids.repositoryId)
                 tooLong = state(2)
             } finally {
-                setProperty("smithy_agreement_max_commits", "")
+                setConf("mantle@smithy-agreement-max-commits", "")
             }
             const readAll = compute()
             // 4. around the merge request: a write to the default branch (as the release notes are written), and the git

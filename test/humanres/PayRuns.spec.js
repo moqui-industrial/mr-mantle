@@ -601,6 +601,36 @@ feature("a mid-period hire's fixed allowance is prorated by its term's setting, 
     }
 })
 
+feature("an approval decides only its own run: another run's request never approves a run (SEC-BOS-91)", {
+    when() {
+        // the second run waits for approval; the first is back in review with no request waiting
+        const submitted = run(state.payroll, S + "submit#Run", {payrollRunId: state.run2, justification: "March allowances"})
+        const crossed = run(state.approver, S + "approve#Run", {
+            payrollRunId: state.runId,
+            peopleApprovalId: submitted.peopleApprovalId
+        })
+        const first = one("mantle.humanres.payroll.PayrollRun", {payrollRunId: state.runId})
+        const request = one("mantle.humanres.approval.PeopleApproval", {peopleApprovalId: submitted.peopleApprovalId})
+        // a run its request waits on but no longer in review (here put back to draft by hand) is decided by no one
+        call("update#mantle.humanres.payroll.PayrollRun", {payrollRunId: state.run2, statusId: "PrnDraft"})
+        const notInReview = run(state.approver, S + "approve#Run", {
+            payrollRunId: state.run2,
+            peopleApprovalId: submitted.peopleApprovalId
+        })
+        const requestAfter = one("mantle.humanres.approval.PeopleApproval", {peopleApprovalId: submitted.peopleApprovalId})
+        call("update#mantle.humanres.payroll.PayrollRun", {payrollRunId: state.run2, statusId: "PrnReview"})
+        return {submitted, crossed, first, request, notInReview, requestAfter}
+    },
+    then({submitted, crossed, first, request, notInReview, requestAfter}) {
+        submitted.error == ""
+        code(crossed) == "RECORD_UNAVAILABLE"
+        first.statusId == "PrnReview"
+        request.statusId == "PapPending"
+        code(notInReview) == "NOT_IN_REVIEW"
+        requestAfter.statusId == "PapPending"
+    }
+})
+
 feature(
     "an employment ended after its calculation makes it stale, and a run not approved is cancelled with its reason, releasing its inputs",
     {

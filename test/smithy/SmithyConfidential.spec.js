@@ -27,7 +27,7 @@ spec({
     setupSpec() {
         login(lib.OPERATOR)
         // the mail gateway whose Authentication-Results are trusted
-        setProperty("smtp_authserv_id", "gw.example.test")
+        setConf("smtp-server@authserv-id", "gw.example.test")
         lib.site(SITE)
         Object.assign(ids, lib.tracker(SITE, "SMC", "smctrack"))
         lib.account(SITE, "SMC_MOD", {member: true, siteRole: "moderator"})
@@ -318,7 +318,8 @@ feature(
                     headers: {
                         "delivered-to": to,
                         "message-id": "<" + ec.user.randomString(16) + "@smithy.test>",
-                        "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test"
+                        "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test",
+                        from
                     },
                     fields: {from, subject: "Re: an issue", toList: [to]},
                     bodyPartList: [{contentType: "text/plain; charset=utf-8", contentText: text}]

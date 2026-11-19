@@ -465,3 +465,25 @@ feature("a bundle whose group requires a factor leaves the acceptance at the fac
         rows("moqui.security.UserAuthcFactor", {userId: accepted.userId}).length == 1
     }
 })
+
+// SEC-BOS-84: a group granting a sealed permission is given by invitation only by a holder of it, checked at the invitation and
+// against the inviter again at acceptance; the operator, who does not hold it, was refused above
+feature("a holder of a sealed permission (ADMIN) invites into a group that grants it, and the acceptance gives the membership", {
+    when() {
+        const sent = invite("sealedHolder", {firstName: "Hal", lastName: "Holder", bundleGroupIdList: ["SINV_SEALED"]}, "john.doe")
+        const accepted = as(null, () =>
+            result(S + "accept#Invitation", {
+                token: tokens.sealedHolder,
+                username: "sinv.hal." + run,
+                newPassword: "Sinv-pass-" + run,
+                newPasswordVerify: "Sinv-pass-" + run
+            })
+        )
+        return {sent: sent.sent, accepted}
+    },
+    then({sent, accepted}) {
+        sent.applied == true
+        accepted.applied == true
+        rows("moqui.security.UserGroupMember", {userId: accepted.userId, userGroupId: "SINV_SEALED"}).length == 1
+    }
+})

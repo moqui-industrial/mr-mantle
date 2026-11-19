@@ -2524,9 +2524,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="filename" from="contentFile.getName()"/>
             <if condition="ResourceReference.isTextFilename(filename)"><then>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content'"/>
             </then><else>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-large-root') || 'dbresource://mantle/content'"/>
             </else></if>
             <set field="contentLocation" value="${contentRoot}/shipment/${shipmentId}/content_${shipmentContentId}/${filename}"/>
 

@@ -966,7 +966,7 @@ function executeExport(batch, summary) {
         .call()
     if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
     if (!out?.exported) denied(text(out?.reasonCode) || "EXPORT_REFUSED", text(out?.reason) || "The export was refused")
-    const root = ec.user.getPreference("mantle.content.large.root") || "dbresource://mantle/content"
+    const root = ec.factory.getConfValue("mantle@content-large-root") || "dbresource://mantle/content"
     const folder = root + "/payrollExchange/" + batch.payrollExchangeBatchId + "/"
     const fileName = text(out.filename) || batch.fileName
     ec.resource.getLocationReference(folder + fileName).putText(String(out.fileText || ""))

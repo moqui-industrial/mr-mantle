@@ -20,7 +20,10 @@ const ids = {
     promotion: prefix + "_PROMO",
     code: prefix + "_CODE",
     otherPromotion: prefix + "_PROMO2",
-    otherCode: prefix + "_CODE2"
+    otherCode: prefix + "_CODE2",
+    staffCode: prefix + "_CODE_STAFF",
+    secretCodeId: prefix + "_CODE_ID",
+    unsetCode: prefix + "_CODE_UNSET"
 }
 const state = {}
 function system(action) {
@@ -132,8 +135,37 @@ spec({
                 })
                 make(S + "ProductStorePromoParameter", {storePromotionId, parameterName: "discountAmount", parameterValue: "2"})
                 make(S + "ProductStorePromoProduct", {storePromotionId, productId: ids.book, excludeProduct: "N"})
-                make(S + "ProductStorePromoCode", {promoCodeId, storePromotionId, promoCode: promoCodeId, requireParty: "N"})
+                make(S + "ProductStorePromoCode", {
+                    promoCodeId,
+                    storePromotionId,
+                    promoCode: promoCodeId,
+                    userEntered: "Y",
+                    requireParty: "N"
+                })
             }
+            // the store's codes a shopper may not use: one staff apply themselves, and one known only by its text (its record
+            // id is not a code, SEC-PSS-81)
+            make(S + "ProductStorePromoCode", {
+                promoCodeId: ids.staffCode,
+                storePromotionId: ids.promotion,
+                promoCode: ids.staffCode,
+                userEntered: "N",
+                requireParty: "N"
+            })
+            // and one made with no userEntered, which is staff's (the field's default N)
+            make(S + "ProductStorePromoCode", {
+                promoCodeId: ids.unsetCode,
+                storePromotionId: ids.promotion,
+                promoCode: ids.unsetCode,
+                requireParty: "N"
+            })
+            make(S + "ProductStorePromoCode", {
+                promoCodeId: ids.secretCodeId,
+                storePromotionId: ids.promotion,
+                promoCode: "Q7XK2M9P",
+                userEntered: "Y",
+                requireParty: "N"
+            })
             state.johnPartyId = ec.user.userAccount.partyId
         })
     },
@@ -279,6 +311,15 @@ feature("a change naming an older revision is refused; an operation id answers o
             promoCode: "NO-SUCH-CODE",
             expectedRevision: revision
         })
+        const staffCode = cart("apply#PromoCode", {token: state.guestToken, promoCode: ids.staffCode, expectedRevision: revision})
+        const unsetCode = cart("apply#PromoCode", {token: state.guestToken, promoCode: ids.unsetCode, expectedRevision: revision})
+        const unsetEntered = ec.entity.find(S + "ProductStorePromoCode").condition("promoCodeId", ids.unsetCode).disableAuthz().one()
+            .userEntered
+        const byRecordId = cart("apply#PromoCode", {
+            token: state.guestToken,
+            promoCode: ids.secretCodeId,
+            expectedRevision: revision
+        })
         const applied = cart("apply#PromoCode", {
             token: state.guestToken,
             promoCode: ids.code.toLowerCase(),
@@ -289,9 +330,9 @@ feature("a change naming an older revision is refused; an operation id answers o
             promoCode: ids.code,
             expectedRevision: applied.result?.cart.revision
         })
-        return {seen, first, replay, stale, otherStoreCode, unknownCode, applied, removed}
+        return {seen, first, replay, stale, otherStoreCode, unknownCode, staffCode, unsetCode, unsetEntered, byRecordId, applied, removed}
     },
-    then({seen, first, replay, stale, otherStoreCode, unknownCode, applied, removed}) {
+    then({seen, first, replay, stale, otherStoreCode, unknownCode, staffCode, unsetCode, unsetEntered, byRecordId, applied, removed}) {
         first.result.cart.items[0].quantity == "3"
         Number(first.result.cart.revision) > Number(seen.revision)
         replay.result.alreadyApplied == true
@@ -299,6 +340,10 @@ feature("a change naming an older revision is refused; an operation id answers o
         stale.error.includes("STALE_REVISION")
         otherStoreCode.error.includes("PROMO_CODE_INVALID[promoCode]: This code cannot be used with this cart")
         unknownCode.error.includes("PROMO_CODE_INVALID[promoCode]: This code cannot be used with this cart")
+        staffCode.error.includes("PROMO_CODE_INVALID[promoCode]: This code cannot be used with this cart")
+        byRecordId.error.includes("PROMO_CODE_INVALID[promoCode]: This code cannot be used with this cart")
+        unsetCode.error.includes("PROMO_CODE_INVALID[promoCode]: This code cannot be used with this cart")
+        unsetEntered == "N"
         applied.result.cart.promoCodes.map(code => code.code) == [ids.code]
         applied.result.cart.totals.discounts.amount == "-2.00"
         applied.result.cart.totals.total.amount == "34.00"

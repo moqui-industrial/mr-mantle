@@ -133,8 +133,9 @@ along with this software (see the LICENSE.md file). If not, see
             PAYABLE_VIEW): its name, the bills (find#Payables) and payments, by currency the open payable, the amount in
             review, the part on hold and the overdue, agreements, and the supplier profile's rows, newest first, with the one
             in effect. Payment methods (masked) only for treasury (BANK_RECONCILE and PAYMENT_EDIT), identifications for
-            PAYABLE_EDIT, tax registrations for TAX_STATEMENT_EDIT. Refuses a supplier with no business relationship with
-            the organization (check#CustomerScope).</description>
+            PAYABLE_EDIT (masked to their last four characters, never a tax identification: PtidSsn, PtidFein, PtidFuid),
+            tax registrations for TAX_STATEMENT_EDIT. Refuses a supplier with no business relationship with the
+            organization, an internal organization and an employee (check#CustomerScope).</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="supplierPartyId" required="true"/>
@@ -226,9 +227,9 @@ along with this software (see the LICENSE.md file). If not, see
                     {customerPartyId:supplierPartyId}).paymentMethods"/>
             </if>
             <if condition="capabilities.canEditIdentifications">
-                <entity-find entity-name="mantle.party.PartyIdentification" list="identifications" limit="100"
-                        disable-authz="true">
-                    <econdition field-name="partyId" from="supplierPartyId"/></entity-find>
+                <set field="finance" value="component://mr-mantle/service/mantle/account/CustomerFinance.js"/>
+                <set field="identifications" from="ec.resource.script(finance).execute('identifications',
+                    {partyId:supplierPartyId}).identifications"/>
             </if>
             <if condition="capabilities.canReadTaxRegistrations">
                 <entity-find entity-name="mantle.other.tax.TaxAuthorityParty" list="taxRegistrations" limit="100"

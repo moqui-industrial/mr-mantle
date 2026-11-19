@@ -181,12 +181,12 @@ feature("a gateway is a registered provider type with that type's services, and 
             out.merchant = store("paymentGateway", ids.trace, {merchantId: "not-a-number"})
             out.currency = store("paymentGateway", ids.trace, {currencyUomId: "SPEC_NO_CURRENCY"})
             out.options = store("paymentGateway", ids.trace, {merchantId: "123456", integratorId: "SPEC1", currencyUomId: "USD"})
-            out.shippo = start("shippingGateway", {
+            // a shipping gateway serves every organization: only an instance administrator starts or changes one (SEC-PSS-83)
+            out.shippoByManager = start("shippingGateway", {
                 connectionId: ids.shippo,
                 description: "Spec Shippo",
                 gatewayTypeEnumId: "ShGtwyShippo"
             })
-            out.mode = store("shippingGateway", ids.shippo, {testMode: "N"})
             out.local = get("paymentGateway", ids.local)
             out.localTest = invoke(C + "test#Connection", {adapterKey: "paymentGateway", connectionKey: ids.local})
             out.tax = get("taxGateway", "LOCAL")
@@ -204,6 +204,15 @@ feature("a gateway is a registered provider type with that type's services, and 
                 connectionKey: ids.anet
             })
         })
+        admin(() => {
+            out.shippo = start("shippingGateway", {
+                connectionId: ids.shippo,
+                description: "Spec Shippo",
+                gatewayTypeEnumId: "ShGtwyShippo"
+            })
+            out.mode = store("shippingGateway", ids.shippo, {testMode: "N"})
+        })
+        out.modeByManager = as(users.manage, () => store("shippingGateway", ids.shippo, {testMode: "N"}))
         out.config = one(CONFIG, {paymentGatewayConfigId: ids.anet}).getMap()
         out.remote = one(REMOTE, {systemMessageRemoteId: ids.anet}).getMap()
         out.anetOptions = one("mantle.account.method.PaymentGatewayAuthorizeNet", {paymentGatewayConfigId: ids.anet})?.getMap()
@@ -251,6 +260,8 @@ feature("a gateway is a registered provider type with that type's services, and 
         out.shipping.requestLabelsServiceName === "mantle.ext.shipment.ShippoServices.request#ShippingLabels"
         out.shipping.testMode === "Y"
         out.mode.reasonCode === "USAGE_MISMATCH"
+        out.shippoByManager.reasonCode === "READ_ONLY"
+        out.modeByManager.reasonCode === "READ_ONLY"
         // a local gateway has no connection: nothing to enter, nothing reached
         out.local.secretList.length === 0
         out.local.state === "ready"
@@ -343,5 +354,38 @@ feature("a payment gateway is permitted for an organization by one dated service
         out.outside.error.includes("is not available")
         out.none.error.includes("ADMIN_CONNECTION_MANAGE")
         out.otherRow.isEnabled === "Y" && Number(out.otherRow.thruDate) < out.before
+    }
+})
+
+feature("a payment gateway another organization uses is read, changed and tested only by an instance administrator (SEC-PSS-83)", {
+    when() {
+        const out = {}
+        // the manager administers no organization; the local gateways are now permitted for the spec's organization, the
+        // Authorize.Net one for none
+        as(users.manage, () => {
+            out.read = get("paymentGateway", ids.local)
+            out.changed = store("paymentGateway", ids.local, {description: "Spec taken over"}, {expectedRevision: "x"})
+            out.tested = invoke(C + "test#Connection", {adapterKey: "paymentGateway", connectionKey: ids.local})
+            out.listed = invoke(C + "find#Connections", {adapterKey: "paymentGateway"}).connectionList.map(row => row.connectionKey)
+            out.unbound = get("paymentGateway", ids.anet)
+        })
+        admin(() => {
+            out.adminRead = get("paymentGateway", ids.local)
+            out.adminListed = invoke(C + "find#Connections", {adapterKey: "paymentGateway"}).connectionList.map(row => row.connectionKey)
+        })
+        out.description = one(CONFIG, {paymentGatewayConfigId: ids.local}).description
+        context.out = out
+    },
+    then() {
+        const out = context.out
+        out.read == null
+        out.changed.reasonCode === "RECORD_UNAVAILABLE"
+        out.tested.reasonCode === "RECORD_UNAVAILABLE" && out.tested.passed === false
+        !out.listed.includes(ids.local) && !out.listed.includes(ids.other)
+        out.listed.includes(ids.anet)
+        out.unbound.connectionKey === ids.anet
+        out.description === "Spec local gateway"
+        out.adminRead.connectionKey === ids.local
+        out.adminListed.includes(ids.local)
     }
 })

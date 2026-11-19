@@ -36,8 +36,8 @@ function source(row) {
         ...new Set(
             [
                 "dbresource://mantle/content",
-                ec.user.getPreference("mantle.content.root"),
-                ec.user.getPreference("mantle.content.large.root")
+                ec.factory.getConfValue("mantle@content-root"),
+                ec.factory.getConfValue("mantle@content-large-root")
             ]
                 .filter(root => root && String(root).startsWith("dbresource:"))
                 .map(root => canonicalDbLocation(root).replace(/\/+$/, ""))

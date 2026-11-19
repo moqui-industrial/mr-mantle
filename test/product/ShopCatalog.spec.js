@@ -459,3 +459,82 @@ feature(
         }
     }
 )
+
+feature("a product's name and description are read only from its own content folder; another location is not published (SEC-PSS-82)", {
+    when() {
+        const owned = "dbresource://mantle/content/product/" + ids.free + "/content_" + prefix + "_DESC_OWN/description.html"
+        const created = system(() => {
+            ec.resource.getLocationReference(owned).putText("<p>The product's own description</p>")
+            // rows of the store (ranked first) naming files of the server, and one of any store in the product's folder
+            make("mantle.product.ProductContent", {
+                productContentId: prefix + "_NAME_CONF",
+                productId: ids.free,
+                productStoreId: ids.store,
+                productContentTypeEnumId: "PcntProductName",
+                contentLocation: "component://mr-mantle/MoquiConf.xml"
+            })
+            make("mantle.product.ProductContent", {
+                productContentId: prefix + "_DESC_CONF",
+                productId: ids.free,
+                productStoreId: ids.store,
+                productContentTypeEnumId: "PcntDescriptionLong",
+                contentLocation: "component://mr-mantle/MoquiConf.xml"
+            })
+            make("mantle.product.ProductContent", {
+                productContentId: prefix + "_DESC_OWN",
+                productId: ids.free,
+                productContentTypeEnumId: "PcntDescriptionLong",
+                contentLocation: owned
+            })
+            // the product service makes no name or description row of another location
+            try {
+                call("mantle.product.ProductServices.create#ProductContent", {
+                    productId: ids.free,
+                    productContentTypeEnumId: "PcntDescription",
+                    contentLocation: "component://mr-mantle/MoquiConf.xml"
+                })
+                return "created"
+            } catch (error) {
+                ec.message.clearErrors()
+                return String(error.message || error)
+            }
+        })
+        const refusal = work =>
+            system(() => {
+                try {
+                    work()
+                    return "done"
+                } catch (error) {
+                    ec.message.clearErrors()
+                    return String(error.message || error)
+                }
+            })
+        // nor moves a row there by an update, nor takes an encoded step out of the product's folder
+        const updated = refusal(() =>
+            call("mantle.product.ProductServices.update#ProductContent", {
+                productContentId: prefix + "_DESC_OWN",
+                contentLocation: "component://mr-mantle/MoquiConf.xml"
+            })
+        )
+        const encoded = refusal(() =>
+            call("mantle.product.ProductServices.create#ProductContent", {
+                productId: ids.free,
+                productContentTypeEnumId: "PcntDescription",
+                contentLocation: "dbresource://mantle/content/product/" + ids.free + "/%2e%2e/" + ids.plain + "/x.html"
+            })
+        )
+        const location = system(() =>
+            ec.entity.find("mantle.product.ProductContent").condition("productContentId", prefix + "_DESC_OWN").one().contentLocation
+        )
+        return {created, updated, encoded, location, owned, free: read("get#Product", {productId: ids.free})}
+    },
+    then({created, updated, encoded, location, owned, free}) {
+        created.includes("a location is not taken")
+        updated.includes("a location is not taken")
+        encoded.includes("a location is not taken")
+        location == owned
+        free.result.product.name == "Catalog " + ids.free
+        free.result.product.description.$richText.includes("The product's own description")
+        !JSON.stringify(free.result).includes("mantle")
+    }
+})

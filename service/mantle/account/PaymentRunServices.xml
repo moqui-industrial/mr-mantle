@@ -245,9 +245,12 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="import" noun="RunReturn" allow-remote="false">
         <description>Import the bank's NACHA return file for an executed ACH run's bank account (import#NachaReturn): a
-            returned payment is declined, which reverses its posting and unapplies it, and the run's discount credits on its
-            bills are cancelled, so each bill is open again; its bills show Returned with the bank's reason. Refuses an
-            unreadable file. Needs PAYMENT_EDIT.</description>
+            returned payment is declined, which reverses its posting and unapplies it, and its runs' discount credits on its
+            bills are cancelled, so each bill is open again; its bills show Returned with the bank's reason. An entry naming a
+            payment that no executed run of the organization made from the run's bank account, or a return at another amount,
+            is skipped (SEC-BOS-81). Refuses an unreadable file and a bank account whose runs made no payments. Needs
+            PAYMENT_EDIT, and bank reconciliation (BANK_RECONCILE) or payment run approval (PAYMENT_RUN_APPROVE) authority
+            for the import (check#BankAccess).</description>
         <implements service="mantle.account.PaymentRunServices.define#RunParameters"/>
         <in-parameters><parameter name="nachaString" required="true" allow-html="any"/></in-parameters>
         <out-parameters><parameter name="returnedPaymentIds" type="List"/></out-parameters>

@@ -240,7 +240,9 @@ const publicOf = (shop, ids) =>
 
 // ===== projections =====
 // The store's text of a content type for these products: the store's own row first, then one for any store; the visitor's
-// locale, its language, then none.
+// locale, its language, then none. A row's file is read only in its product's own content folder (Content.js owned, as a
+// download's): a row naming any other location (a file, runtime:// or http) is left out (SEC-PSS-82).
+const productContent = () => ec.resource.script("component://mr-mantle/service/mantle/product/Content.js")
 function contentTexts(shop, productIds, typeEnumId) {
     const out = {}
     const locale = shop.locale.replace(/-/g, "_")
@@ -250,6 +252,10 @@ function contentTexts(shop, productIds, typeEnumId) {
     const byProduct = {}
     for (const row of rowsIn(CONTENT, "productId", productIds, {productContentTypeEnumId: typeEnumId})) {
         if (!activeAt(row, shop.at) || (row.productStoreId && row.productStoreId !== shop.productStoreId)) continue
+        if (row.contentLocation && !productContent().owned(row, productContent().config({}))) {
+            ec.logger.warn("Shop content " + row.productContentId + " of " + row.productId + " not read: its location is not the product's")
+            continue
+        }
         if (!byProduct[row.productId] || rank(row) < rank(byProduct[row.productId])) byProduct[row.productId] = row
     }
     for (const [productId, row] of Object.entries(byProduct)) {

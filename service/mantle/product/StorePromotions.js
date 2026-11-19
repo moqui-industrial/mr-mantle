@@ -413,6 +413,8 @@ function storePromotion(p) {
     if (Object.hasOwn(p, "itemDescription")) {
         const description = text(p.itemDescription)
         if (!description || description.length > 255) denied("VALUE_INVALID", "Describe the promotion in at most 255 characters")
+        // the description is plain text on each discount line, never a template (SEC-BAP-83): ${ is no part of one
+        if (description.includes("${")) denied("VALUE_INVALID", "A promotion's description is plain text, without ${")
         values.itemDescription = description
     }
     const dates = datesOf(p, promotion)

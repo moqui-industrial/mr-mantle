@@ -118,7 +118,7 @@ along `StatusFlowTransition`, so the Payment SECAs post, void, unapply and clear
 
 **Documents.** `issue#PaymentDocuments` issues a delivered payment's receipt (`PctReceipt`), detail
 (`PctPaymentDocument`) and, with a check number, check (`PctCheckImage`), each a PDF of
-`template/account/PaymentDocument.html.fancy` under `mantle.content.large.root`; a transfer gets its detail only.
+`template/account/PaymentDocument.html.fancy` under the `mantle@content-large-root` setting; a transfer gets its detail only.
 `get#PaymentDocumentInfo` gives the template's values and `get#PaymentOutput` reads an issued document; a check needs
 treasury authority. `save#PaymentContentFile` refuses to replace a file once the payment is posted.
 
@@ -156,10 +156,14 @@ effective-dated rows with audit-logged fields: the default payment term of its b
 self-billing (`selfBillingIndicator`). `mantle.party.SupplierServices.store#SupplierProfile` ends the row in effect and
 starts the next (`SUPPLIER_TERMS_EDIT` for these finance fields; Purchasing adds the buyer fields under
 `SUPPLIER_PROFILE_EDIT`); `get#SupplierFinance` reads a supplier's bills, payments, open, in-review, held and overdue
-amounts, agreements, profile rows and, by permission, its masked bank accounts, identifications and tax
-registrations. The `CustomerFinanceServices` writers take `side`: `check#CustomerScope` counts only that side's
-relationship (a customer's sales or current relationship; a supplier's bills, purchase orders or profile), and a
-supplier's identifications need `PAYABLE_EDIT`.
+amounts, agreements, profile rows and, by permission, its masked bank accounts, masked identifications (never a tax
+one: `PtidSsn`, `PtidFein`, `PtidFuid`) and tax registrations. The `CustomerFinanceServices` writers take `side`:
+`check#CustomerScope` counts only that side's relationship (a customer's sales or current `PrtCustomer` relationship;
+a supplier's bills, purchase orders or profile; an employee's payroll invoices, those of an employment, left out, while a
+pay run's third-party payee stays a supplier) and refuses an internal organization and a current employee of any
+organization, whose identifications and payroll bank accounts are People's (SEC-BOS-82: payroll changes them with
+`store#PayrollBankAccount`, and `store#CustomerBankAccount` refuses a `PmpPayroll` account); a supplier's
+identifications need `PAYABLE_EDIT`, and `store#CustomerIdentification` refuses the tax types.
 
 **Due date.** `checkSet#InvoiceDueDate` (the `InvoiceSetDueDate` EECA): the invoice's term, else the newest agreement
 term, else for a bill the supplier's term in effect on the invoice date, else for a receivable the organization's.
@@ -869,8 +873,8 @@ Accounting's customer and supplier pages are the PASS Billing and Supplier apps 
   posting guard). `authorize#OrderPayments` skips a promised payment whose attempt is unsettled, so a placement never
   authorizes a payment its provider is still deciding.
 - **Supplier bills.** `submit#SupplierBill` answers a repeat of the operation or of the supplier's bill number with the
-  first `SupplierBillSubmission`, stages the file under `pass_media_root/bills`, checks its leading bytes are the PDF,
-  PNG or JPEG it says (kept with that extension) and scans it (`pass_scanner_service`),
+  first `SupplierBillSubmission`, stages the file under `pass@media-root/bills`, checks its leading bytes are the PDF,
+  PNG or JPEG it says (kept with that extension) and scans it (`pass@scanner-service`),
   and makes the incoming draft through `import#Bill`'s core (`Payables.js` `portalBill`, the capability in place of
   `PAYABLE_IMPORT`), the file becoming its content only when clean. It never approves.
 - **Posting guard.** While Portal.js completes one checked portal payment it names it in the execution context's shared
@@ -1048,6 +1052,6 @@ authorization, capture and refund, `alwaysDecline#PaymentRelease`, `alwaysDeclin
 ./moq test mr-mantle --spec AccountingSetup
 ```
 
-The PDF specs need a Chromium for PDF (`moqui_chromium_path`; see [Run-Deploy](../../../../../docs/Run-Deploy.md) and
+The PDF specs need a Chromium for PDF (`screen-facade/pdf@chromium-path`; see [Run-Deploy](../../../../../docs/Run-Deploy.md) and
 [Client-Testing](../../../../docs/dev/Client-Testing.md)); without one every PDF spec fails. The results are in
 mr-boss's `plan/impl-accounting.md`.

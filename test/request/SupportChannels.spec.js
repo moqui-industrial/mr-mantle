@@ -183,7 +183,57 @@ spec({
             emailTextBlockId: prefix + "_ACK",
             ownerUserId: state.admin,
             title: "Ack",
-            bodyHtml: "<p>Thanks: case ${requestId} in ${queueName} is open.</p>"
+            bodyHtml: "<p>Thanks: case ${requestId} in ${queueName} is open. Not run: ${7 * 6}.</p>"
+        })
+        // text blocks a route may and may not name (SEC-BAP-81): one shared with the organization's service group; another
+        // user's own; one shared with another organization's service group (the administrator is in both groups)
+        for (const organizationPartyId of [org, otherOrg]) {
+            const userGroupId = "SVO_" + organizationPartyId
+            call("create#moqui.security.UserGroup", {userGroupId, description: "Service agents of " + organizationPartyId})
+            call("create#moqui.security.UserGroupMember", {userGroupId, userId: state.admin, fromDate: since})
+        }
+        call("store#moqui.basic.email.EmailTextBlock", {
+            emailTextBlockId: prefix + "_ACK_SHARED",
+            ownerUserId: state.agent,
+            userGroupId: "SVO_" + org,
+            title: "Shared ack",
+            bodyHtml: "<p>Case ${requestId}.</p>"
+        })
+        call("store#moqui.basic.email.EmailTextBlock", {
+            emailTextBlockId: prefix + "_ACK_AGENT",
+            ownerUserId: state.agent,
+            title: "Agent's own",
+            bodyHtml: "<p>Mine.</p>"
+        })
+        // teams: two of the organization's (the administrator in the first one's group only) and one of the other's (the
+        // administrator in its group too), each with a block shared with its group
+        for (const [team, owner, member] of [
+            ["_TEAM", org, true],
+            ["_TEAM_B", org, false],
+            ["_OTHER_TEAM", otherOrg, true]
+        ]) {
+            call("create#mantle.party.Party", {partyId: prefix + team, partyTypeEnumId: "PtyOrganization", ownerPartyId: owner})
+            call("create#moqui.security.UserGroup", {userGroupId: "SVT_" + prefix + team, description: "Service team " + team})
+            if (member)
+                call("create#moqui.security.UserGroupMember", {
+                    userGroupId: "SVT_" + prefix + team,
+                    userId: state.admin,
+                    fromDate: since
+                })
+            call("store#moqui.basic.email.EmailTextBlock", {
+                emailTextBlockId: prefix + "_ACK" + team,
+                ownerUserId: state.agent,
+                userGroupId: "SVT_" + prefix + team,
+                title: "Team ack" + team,
+                bodyHtml: "<p>Case ${requestId}.</p>"
+            })
+        }
+        call("store#moqui.basic.email.EmailTextBlock", {
+            emailTextBlockId: prefix + "_ACK_OTHER",
+            ownerUserId: state.otherAdmin,
+            userGroupId: "SVO_" + otherOrg,
+            title: "Other organization's",
+            bodyHtml: "<p>Theirs.</p>"
         })
         state.queue = run(state.admin, S + "save#ServiceQueue", {
             organizationPartyId: org,
@@ -228,6 +278,8 @@ feature("a queue's routes: mail with an acknowledgement, a replacement ending th
         const first = run(state.admin, S + "save#ServiceRoute", Object.assign({}, route, {defaultPriority: 3}))
         const second = run(state.admin, S + "save#ServiceRoute", Object.assign({}, route, {serviceRouteId: first.serviceRouteId}))
         state.mailRoute = second.serviceRouteId
+        const withBlock = suffix =>
+            run(state.admin, S + "save#ServiceRoute", Object.assign({}, route, {ackTextBlockId: prefix + suffix}))
         return {
             first,
             second,
@@ -238,10 +290,18 @@ feature("a queue's routes: mail with an acknowledgement, a replacement ending th
             channel: run(state.admin, S + "save#ServiceRoute", Object.assign({}, route, {channelEnumId: "SrcPigeon"})),
             site: run(state.admin, S + "save#ServiceRoute", {requestCategoryId: state.queue, channelEnumId: "SrcForum"}),
             priority: run(state.admin, S + "save#ServiceRoute", Object.assign({}, route, {defaultPriority: 12})),
-            block: run(state.admin, S + "save#ServiceRoute", Object.assign({}, route, {ackTextBlockId: "NO_SUCH_BLOCK"}))
+            block: run(state.admin, S + "save#ServiceRoute", Object.assign({}, route, {ackTextBlockId: "NO_SUCH_BLOCK"})),
+            // SEC-BAP-81: another user's own block and another organization's are refused; one shared with the organization's
+            // service group the editor is in is taken (and the route then back on its own block)
+            agentBlock: withBlock("_ACK_AGENT"),
+            otherBlock: withBlock("_ACK_OTHER"),
+            sharedBlock: withBlock("_ACK_SHARED"),
+            back: (state.mailRoute = run(state.admin, S + "save#ServiceRoute", route).serviceRouteId)
         }
     },
-    then({first, second, firstRow, inEffect, agent, otherOrg, channel, site, priority, block}) {
+    then(r) {
+        const {first, second, firstRow, inEffect, agent, otherOrg, channel, site, priority, block} = r
+        const {agentBlock, otherBlock, sharedBlock, back} = r
         first.error == ""
         second.error == ""
         firstRow.thruDate != null
@@ -253,6 +313,63 @@ feature("a queue's routes: mail with an acknowledgement, a replacement ending th
         code(site) == "SITE_REQUIRED"
         code(priority) == "PRIORITY_INVALID"
         code(block) == "TEXT_BLOCK_UNAVAILABLE"
+        code(agentBlock) == "TEXT_BLOCK_UNAVAILABLE"
+        code(otherBlock) == "TEXT_BLOCK_UNAVAILABLE"
+        code(sharedBlock) == ""
+        back != null
+    }
+})
+
+feature("a route names a team's text block only where the editor is in the team's group of the organization; it keeps its own (SEC-BAP-81)", {
+    when() {
+        const form = {requestCategoryId: state.queue, channelEnumId: "SrcWebForm", acknowledge: "N"}
+        const save = (fields = {}) => run(state.admin, S + "save#ServiceRoute", Object.assign({}, form, fields))
+        const team = save({ackTextBlockId: prefix + "_ACK_TEAM"})
+        const notMember = save({ackTextBlockId: prefix + "_ACK_TEAM_B"})
+        const otherTeam = save({ackTextBlockId: prefix + "_ACK_OTHER_TEAM"})
+        // a route whose block the editor may not name now (written as a data load would): changed, it keeps that block; a
+        // route that has ended, and another route of the queue, do not lend it
+        const written = call("create#mantle.request.support.ServiceRoute", {
+            organizationPartyId: org,
+            channelEnumId: "SrcWebForm",
+            requestCategoryId: state.queue,
+            acknowledge: "N",
+            ackTextBlockId: prefix + "_ACK_AGENT",
+            fromDate: new Date(Date.now() - 60000)
+        }).serviceRouteId
+        // a mail route of no account does not lend its block to a save that is the account's route (another route's key)
+        const noAccount = call("create#mantle.request.support.ServiceRoute", {
+            organizationPartyId: org,
+            channelEnumId: "SrcEmail",
+            requestCategoryId: state.queue,
+            acknowledge: "N",
+            ackTextBlockId: prefix + "_ACK_AGENT",
+            fromDate: new Date(Date.now() - 60000)
+        }).serviceRouteId
+        const otherKey = run(state.admin, S + "save#ServiceRoute", {
+            serviceRouteId: noAccount,
+            requestCategoryId: state.queue,
+            channelEnumId: "SrcEmail",
+            emailAccountId: account,
+            acknowledge: "Y",
+            ackTextBlockId: prefix + "_ACK_AGENT"
+        })
+        run(state.admin, S + "save#ServiceRoute", {serviceRouteId: noAccount, end: true})
+        const kept = save({serviceRouteId: written, ackTextBlockId: prefix + "_ACK_AGENT", rateLimitPerHour: 25})
+        const ended = save({serviceRouteId: written, ackTextBlockId: prefix + "_ACK_AGENT"})
+        const otherRoute = save({serviceRouteId: state.mailRoute, ackTextBlockId: prefix + "_ACK_AGENT"})
+        // the form route ends, as the later features start their own
+        run(state.admin, S + "save#ServiceRoute", {serviceRouteId: kept.serviceRouteId, end: true})
+        return {team, notMember, otherTeam, otherKey, kept, ended, otherRoute}
+    },
+    then({team, notMember, otherTeam, otherKey, kept, ended, otherRoute}) {
+        code(team) == ""
+        code(notMember) == "TEXT_BLOCK_UNAVAILABLE"
+        code(otherTeam) == "TEXT_BLOCK_UNAVAILABLE"
+        code(otherKey) == "TEXT_BLOCK_UNAVAILABLE"
+        code(kept) == ""
+        code(ended) == "TEXT_BLOCK_UNAVAILABLE"
+        code(otherRoute) == "TEXT_BLOCK_UNAVAILABLE"
     }
 })
 
@@ -304,6 +421,7 @@ feature("mail from a customer's contact is a case in the queue, timed by its rec
         first.stateEnumId == "SlsRunning"
         acks.length == 1
         acks[0].bodyText.includes("case " + request.requestId + " in Channel Support is open")
+        acks[0].bodyText.includes("Not run: ${7 * 6}.")
         String(acks[0].headersString).includes("Auto-Submitted")
         ackEvents.length == 0
         again.created == false

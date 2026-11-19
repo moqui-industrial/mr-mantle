@@ -412,6 +412,9 @@ function publishedArticle(p) {
         }
     }
 }
+// A space's public address is a pattern, filled by name as URL-encoded text, never run as a template (SEC-BAP-87)
+const fillPublicUrl = (pattern, values) =>
+    ec.resource.script("component://mr-mantle/service/mantle/other/PublicUrlPattern.js").fill(pattern, values)
 // get#ArticlePublicLink: the published URL of an article an agent sends a customer (Send to customer): a page of a customer
 // or public source of the user's organizations, published and not restricted, at the Support app's CustomerArticle of the
 // source organization's published site (impl-shop P3, F56), else at its space's publicPageUrl. A draft (ARTICLE_NOT_PUBLISHED), an internal or unsourced article
@@ -435,7 +438,7 @@ function publicLink(p) {
         ? apps.pageUrl(siteId, "support", "/CustomerArticle?wikiPageId=" + encodeURIComponent(page.wikiPageId))
         : null
     if (supportUrl) return {url: supportUrl, title: pageTitle(page), versionName: page.publishedVersionName}
-    let url = ec.resource.expand(String(space.publicPageUrl), "", {
+    let url = fillPublicUrl(space.publicPageUrl, {
         pagePath: page.pagePath,
         versionName: page.publishedVersionName,
         wikiPageId: page.wikiPageId,

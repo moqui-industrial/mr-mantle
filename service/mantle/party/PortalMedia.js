@@ -1,7 +1,7 @@
 // A public page's file (CX-PORTALS, impl-customer-service F58): staged under PASS's media root and scanned, as Forum stages an
 // attachment, then kept as a record's content. Moved here from Accounting's Portal.js (a supplier's bill, Purchasing's quote and
 // acknowledgement files) so the Support app's case files and return evidence (Customer Service P15) use the same rules: the
-// file's leading bytes must be the PDF, PNG or JPEG it says it is, at most 10 MB, clean by pass_scanner_service, kept under a
+// file's leading bytes must be the PDF, PNG or JPEG it says it is, at most 10 MB, clean by pass@scanner-service, kept under a
 // name whose extension is its type's; anything else is refused (Unprocessable), and with no scanner or media root nothing is
 // received (Unavailable). CC0 1.0 Universal plus Grant of Patent License.
 const fail = (kind, message) => {
@@ -35,8 +35,8 @@ function stage(file, noun = "file", folder = "support") {
         fail("Unprocessable", "Attach the " + noun + ", at most 10 MB")
     const type = String(file.contentType || "")
     if (!types.includes(type)) fail("Unprocessable", "Attach the " + noun + " as a PDF, PNG or JPEG file")
-    const scanner = System.getProperty("pass_scanner_service"),
-        root = System.getProperty("pass_media_root")
+    const scanner = ec.factory.getConfValue("pass@scanner-service"),
+        root = ec.factory.getConfValue("pass@media-root")
     if (!scanner || !root) fail("Unavailable", "Files cannot be received now")
     const location = String(root).replace(/\/$/, "") + "/" + folder + "/" + ec.user.randomString(32)
     file.write(location)
@@ -83,8 +83,8 @@ function unstage(staged) {
         ec.logger.warn("Staged public file " + staged.location + " was not removed")
     }
 }
-// The content root of a record's files (mantle.content.large.root, else the database resource store).
-const contentRoot = () => ec.user.getPreference("mantle.content.large.root") || "dbresource://mantle/content"
+// The content root of a record's files (the mantle@content-large-root setting, else the database resource store).
+const contentRoot = () => ec.factory.getConfValue("mantle@content-large-root") || "dbresource://mantle/content"
 // The type of a kept file by its name, for a download.
 function typeOf(filename) {
     const name = String(filename || "").toLowerCase()

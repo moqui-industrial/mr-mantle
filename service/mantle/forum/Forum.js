@@ -1417,7 +1417,8 @@ methods.publishPost = (p) => {
         const postId = id(),
             root = existing?.t.rootCommEventId || postId,
             ordinal = existing ? Number(existing.t.nextOrdinal) : 1
-        // Private messages are not queued for staff by default; a held rule still files a scoped review.
+        // Private messages are not queued for staff, and no rule holds or flags one: a participant's report alone files a
+        // review of a private post (SEC-PFS-83).
         const pending = gated.decision === 'hold' && !staffOnly,
             counted = !pending && !staffOnly
         create(E + 'CommunicationEvent', {
@@ -1496,7 +1497,9 @@ methods.publishPost = (p) => {
         const poll = p.poll || json(savedDraft?.pollJson, null)
         if (poll) createPoll(p.siteId, root, postId, poll)
         gateCommit(gated, { pending })
-        if (pending)
+        // a private message held (the mail gateway's spam verdict, the only hold a private post has) stays with its author
+        // and files no review item: staff read a private message only from a participant's report (SEC-PFS-83)
+        if (pending && !isPrivate)
             review(
                 p.siteId,
                 a.category.contactListId,
@@ -1642,6 +1645,7 @@ methods.updatePost = (p) => {
             source: p.body ?? '',
             sourceFormat: format,
             canModerate: a.canModerate,
+            isPrivate: t.kind === 'private',
             edit: true,
         }),
     )
@@ -2009,9 +2013,9 @@ methods.checkReadiness = (p) => {
     let scannerReady = false
     try {
         scannerReady =
-            !!System.getProperty('pass_scanner_service') &&
+            !!ec.factory.getConfValue('pass@scanner-service') &&
             !!ec.service.getServiceDefinition(
-                System.getProperty('pass_scanner_service'),
+                ec.factory.getConfValue('pass@scanner-service'),
             )
     } catch (error) {
         ec.message.clearErrors()
@@ -2021,7 +2025,7 @@ methods.checkReadiness = (p) => {
         {
             name: 'SSO package',
             ready:
-                !System.getProperty('pass_sso_flows') ||
+                !ec.factory.getConfValue('pass-authority@sso-flows') ||
                 ec.service.ssoAvailable,
         },
         {
@@ -2046,11 +2050,11 @@ methods.checkReadiness = (p) => {
         { name: 'scanner', ready: scannerReady },
         {
             name: 'media storage',
-            ready: !!System.getProperty('pass_media_root'),
+            ready: !!ec.factory.getConfValue('pass@media-root'),
         },
         {
             name: 'account verification',
-            ready: !!System.getProperty('pass_verification_template'),
+            ready: !!ec.factory.getConfValue('pass-authority@verification-template'),
         },
         {
             name: 'mail conversion',
@@ -2415,7 +2419,7 @@ methods.resolveDelivery = (p) => {
 }
 methods.storeMailSettings = (p) => {
     site(p.siteId, true)
-    const allowed = String(System.getProperty('pass_sender_addresses') || '')
+    const allowed = String(ec.factory.getConfValue('pass@sender-addresses') || '')
         .split(',')
         .map((x) => x.trim())
     if (!allowed.includes(p.senderAddress))
@@ -2423,7 +2427,7 @@ methods.storeMailSettings = (p) => {
     const template = one('moqui.basic.email.EmailTemplate', {
         emailTemplateId: p.templateId,
     })
-    const templates = String(System.getProperty('pass_mail_template_ids') || '')
+    const templates = String(ec.factory.getConfValue('pass@mail-template-ids') || '')
         .split(',')
         .map((x) => x.trim())
     if (
@@ -2585,8 +2589,8 @@ methods.stageAttachment = (p) => {
     )
     if (!counted)
         fail('Tarpit', 'limitReached: Daily upload limit reached; try again tomorrow')
-    const scanner = System.getProperty('pass_scanner_service'),
-        root = System.getProperty('pass_media_root')
+    const scanner = ec.factory.getConfValue('pass@scanner-service'),
+        root = ec.factory.getConfValue('pass@media-root')
     if (!scanner || !root)
         fail('Unavailable', 'Media scanning and storage must be configured')
     const attachmentId = id(),
@@ -2842,7 +2846,7 @@ methods.getSiteInfo = (p) => {
         },
         ssoFlows: String(
             ec.service.ssoAvailable
-                ? System.getProperty('pass_sso_flows') || ''
+                ? ec.factory.getConfValue('pass-authority@sso-flows') || ''
                 : '',
         )
             .split(',')
@@ -5038,6 +5042,47 @@ const bareAddress = (text) =>
         /([^<>"\s,;]+@[^<>"\s,;]+)/.exec(String(text || ''))?.[1] ||
         ''
     ).trim()
+/* The From mailbox of a message (SEC-PFS-81): its address and display name. A stored message's are the ones the store
+   parsed (fromAddress, the addr-spec, and fromName); a message an email rule names without a stored row (a polled one)
+   has only the rule's from text, read by ForumCore.fieldMailbox (the address that ends it, never one in its name). */
+const fromMailbox = (stored, from) =>
+    stored
+        ? {
+              address: String(stored.fromAddress || '').trim(),
+              name: String(stored.fromName || '').trim(),
+          }
+        : core.fieldMailbox(from)
+/* Why a message's From is not one plain mailbox, or null (SEC-PFS-81): no From field, or stored fields cut short where a
+   second one could be; more than one From field or address, or a From field whose own address is not the sender (a quoted
+   local part hides from the count); a display name that shows an address other than the sender's; and, unless the
+   gateway authenticated the sender's domain (DMARC proves the first From only), a Sender field of another address. Each
+   lets a mailbox at the domain show a reader another person as the author. */
+function fromProblem(headers, mailbox, sender, authenticated, headersCut) {
+    const froms = headerValues(headers, 'from')
+    if (!froms.length) return 'The message has no From field'
+    if (headersCut) return 'The stored header fields were cut short'
+    if (
+        froms.length > 1 ||
+        froms.some(
+            (value) =>
+                core.fieldAddressCount(value) > 1 ||
+                core.fieldMailbox(value).address.toLowerCase() !== sender,
+        )
+    )
+        return 'The message names more than one From address'
+    if (core.nameShowsOtherAddress(mailbox.name, sender))
+        return "The sender's display name shows another email address"
+    const senders = headerValues(headers, 'sender')
+    if (
+        !authenticated &&
+        (senders.length > 1 ||
+            senders.some(
+                (value) => core.fieldMailbox(value).address.toLowerCase() !== sender,
+            ))
+    )
+        return 'The Sender field names another address than From'
+    return null
+}
 const messageIds = (text) =>
     String(text || '').match(/<[^<>\s]+@[^<>\s]+>/g) || []
 /* Conservative reply text: drop quoted lines, the attribution before them and anything after a signature marker. */
@@ -5147,10 +5192,10 @@ function readAuthResults(text) {
     }
     return { authservId, results }
 }
-/* The authserv-ids of the mail gateway whose Authentication-Results are trusted (smtp_authserv_id, comma separated, in
-   lower case): with none configured nothing counts as authenticated. */
+/* The authserv-ids of the mail gateway whose Authentication-Results are trusted (smtp-server@authserv-id, comma
+   separated, in lower case): with none configured nothing counts as authenticated. */
 const trustedAuthservIds = () =>
-    String(System.getProperty('smtp_authserv_id') || '')
+    String(ec.factory.getConfValue('smtp-server@authserv-id') || '')
         .split(',')
         .map((value) => value.trim().toLowerCase())
         .filter(Boolean)
@@ -5262,8 +5307,10 @@ function processInbound(ctx) {
         !forumAccount(accountId, route)
     )
         return { handled: false }
+    // the sender is the From mailbox's address, never text of its display name (fromMailbox)
+    const mailbox = fromMailbox(stored, fields.from)
     const siteId = route.siteId,
-        sender = bareAddress(fields.from).toLowerCase(),
+        sender = mailbox.address.toLowerCase(),
         messageId =
             headerValues(headers, 'message-id')[0] ||
             ctx.message?.messageId ||
@@ -5362,6 +5409,10 @@ function processInbound(ctx) {
         headerValues(headers, 'authentication-results'),
         sender,
     )
+    // A From that is not one plain mailbox (fromProblem) is held: never posted, and never kept for an address to claim.
+    // The receipt names why, on the site's mail screen.
+    const problem = fromProblem(headers, mailbox, sender, authenticated, !!ctx.headersCut)
+    if (problem) return record('held', problem)
     // A report address (a security address) files through its app whatever the message names: a reply address's tag
     // and the threads it answers are not read, so a report never becomes a reply in a public conversation.
     const reportRoute = !!route.targetType && route.targetType !== 'category'
@@ -5385,8 +5436,7 @@ function processInbound(ctx) {
                       siteId,
                       route,
                       sender,
-                      senderName: String(fields.from || '')
-                          .replace(/<[^<>]*>/g, '')
+                      senderName: mailbox.name
                           .replace(/[<>"]/g, '')
                           .trim()
                           .slice(0, 100),
@@ -5726,6 +5776,7 @@ methods.retryInbound = (p) => {
 }
 /* A stored message as the context an email rule gets: its header fields, sender, subject, recipients and text. Its
    files are not read. */
+const STORED_HEADERS_MAX = 65536
 function storedContext(email) {
     const headers = {}
     let last = null
@@ -5744,12 +5795,18 @@ function storedContext(email) {
     }
     if (email.messageId && !headers['message-id'])
         headers['message-id'] = email.messageId
+    // the store keeps at most 64 KiB of the header block (crates/moqui-mail/src/store.rs HEADERS_MAX) and marks no cut, so
+    // a block that long may have lost the fields after it: processInbound holds it (fromProblem)
+    let headerBytes = 0
+    for (const char of String(email.headersString || ''))
+        headerBytes += char.codePointAt(0) < 0x80 ? 1 : char.codePointAt(0) < 0x800 ? 2 : char.codePointAt(0) < 0x10000 ? 3 : 4
     if (email.inReplyTo && !headers['in-reply-to'])
         headers['in-reply-to'] = email.inReplyTo
     return {
         emailMessageId: email.emailMessageId,
         emailAccountId: email.emailAccountId || null,
         headers,
+        headersCut: headerBytes >= STORED_HEADERS_MAX - 1024,
         fields: {
             from: email.fromAddress,
             subject: email.subject,

@@ -276,7 +276,7 @@ feature("a review needs the buyer's own delivered order line; a wrong-type or un
         const noProof = op(ids.other, K + "submit#Review", input)
         const first = op(ids.buyer, K + "submit#Review", Object.assign({file: photo("receipt.pdf", "application/pdf")}, input))
         const again = op(ids.buyer, K + "submit#Review", input)
-        const unscanned = withProperty("pass_scanner_service", null, () =>
+        const unscanned = withConf("pass@scanner-service", null, () =>
             op(
                 ids.buyer,
                 K + "submit#Review",

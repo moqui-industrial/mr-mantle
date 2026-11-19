@@ -325,8 +325,9 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="ProductStorePromotion" package="mantle.product.store" use="configuration" cache="true">
         <field name="storePromotionId" type="id" is-pk="true"/>
         <field name="productStoreId" type="id"/>
-        <field name="itemDescription" type="text-medium"><description>Description for the OrderItem (itemDescription), promo service
-            should run this through ResourceFacade.expand() with parameters depending on the promo service</description></field>
+        <field name="itemDescription" type="text-medium"><description>Description for the OrderItem (itemDescription), plain text:
+            a promo service puts it on its items as written and never expands it as a template, and a ${ in it is refused by
+            store#Promotion and needs DATABASE_ADMIN to write (StorePromotion.eecas.xml; SEC-BAP-83)</description></field>
         <field name="serviceRegisterId" type="id" not-null="true"><description>Registered Service of type ProductStorePromotion that implements the
             mantle.product.PromotionServices.apply#Promotion interface</description></field>
         <!-- the dates and use limits are audit-logged (impl-commerce P7, §2: promotion limits and dates); the limits are
@@ -369,7 +370,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="thruDate" type="date-time" enable-audit-log="true"/>
         <field name="useLimitPerCode" type="number-integer" enable-audit-log="true"/>
         <field name="useLimitPerCustomer" type="number-integer" enable-audit-log="true"/>
-        <field name="userEntered" type="text-indicator"/>
+        <!-- Y: customers enter it (Shop applies only these, SEC-PSS-81); N, the default: staff apply it themselves -->
+        <field name="userEntered" type="text-indicator" default="'N'"/>
         <field name="requireParty" type="text-indicator"/>
         <relationship type="one" related="mantle.product.store.ProductStorePromotion" short-alias="storePromotion"/>
         <relationship type="many" related="mantle.product.store.ProductStorePromoCodeParty" short-alias="parties">

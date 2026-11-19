@@ -972,17 +972,17 @@ function checkPanel(partyIds, organizationPartyId) {
             )
     }
 }
-// The site's own address for a link in an invitation, from the webapp properties (empty: a path alone).
+// The site's own address for a link in an invitation, from the webroot webapp's conf (empty: a path alone).
 function siteUrl() {
-    const property = name => {
-        const value = System.getProperty(name)
+    const setting = name => {
+        const value = ec.factory.getConfValue("webapp-list/webapp[webroot]@" + name)
         return value == null ? "" : String(value).trim()
     }
-    const host = property("webapp_http_host")
+    const host = setting("http-host")
     if (!host) return ""
-    const https = property("webapp_https_port")
+    const https = setting("https-port")
     if (https) return "https://" + host + (https === "443" ? "" : ":" + https)
-    const http = property("webapp_http_port")
+    const http = setting("http-port")
     return "http://" + host + (!http || http === "80" ? "" : ":" + http)
 }
 // schedule#Interview: a recruiter schedules an interview of an application that is not closed past Interview: a private event

@@ -1313,7 +1313,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="filter" noun="ContactAddresses" allow-remote="false">
         <description>
             Which of these email addresses are a user's contacts: the hook of the framework's
-            org.moqui.mail.EmailClientServices.filter#ContactAddresses (the email_contact_service property or the theme value
+            org.moqui.mail.EmailClientServices.filter#ContactAddresses (the email-client@contact-service property or the theme value
             STRT_EMAIL_CONTACT_SERVICE), which an automatic reply to contacts only asks. A contact is a party, not disabled,
             with the address (any case) on a current email contact mechanism, that is the user's personal contact
             (privateOwnerUserId the user), a current member of one of the user's personal books or of a shared book shared now
@@ -1468,7 +1468,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="find" noun="ContactPeople" allow-remote="false">
         <description>
             The contacts hook of chat's people (the framework's org.moqui.chat.ChatPeopleServices.find#ContactPeople calls
-            it, named by the chat_contact_service property or the theme value STRT_CHAT_CONTACT_SERVICE; MR Moqui
+            it, named by the conf's chat@contact-service or the theme value STRT_CHAT_CONTACT_SERVICE; MR Moqui
             plans/Comms-Messaging.md §11.1): of the contacts the user can see (filter#VisibleContacts), those with one of the
             addresses of addressList (tel:+E.164 on a current telecom number, matched on the ways it is stored and then the
             whole number in E.164: a +1 number by its area code and local number, another by its last seven digits;

@@ -196,9 +196,9 @@ kit => {
 
     // ===== accounts and whose a commit is =====
     /* How many commits of a merge request, and of one write, are checked: past it the answer is unsigned, never a guess.
-       The git host's compare gives at most 250 commits; the property lowers the bound. */
+       The git host's compare gives at most 250 commits; the setting lowers the bound. */
     const maxCommits = () => {
-        const set = Number(System.getProperty("smithy_agreement_max_commits") || 0)
+        const set = Number(ec.factory.getConfValue("mantle@smithy-agreement-max-commits") || 0)
         return set > 0 ? Math.min(set, 250) : 250
     }
     const partyOfUser = userId => (userId ? one("moqui.security.UserAccount", {userId})?.partyId || null : null)

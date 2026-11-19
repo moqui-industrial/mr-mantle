@@ -1,7 +1,8 @@
 // Payment run and term controls: a supplier paid once whatever runs it twice, an execution answered from its operation
 // record, a run whose bank file fails stays approved and holds its bills until the same key resumes it, a pay date in
 // the past and a bank account without NACHA settings are refused, a due schedule rewritten after Resume Changes and kept
-// in calendar days, bank accounts added or ended void approvals, a return imported twice changes nothing, and a payable
+// in calendar days, bank accounts added or ended void approvals, a return file returns only the run's payments at their
+// amounts and imported twice changes nothing, and a payable
 // discount within its terms is issued without approval while a write-off needs an approver. Standalone.
 const helper = () => ec.resource.script("component://mr-mantle/test/account/AccountingSettlementFixtures.js")
 const runs = (name, p) => helper().call("mantle.account.PaymentRunServices." + name, p)
@@ -163,43 +164,100 @@ feature("an ACH run whose bank file fails stays approved, holds its bills from o
     }
 })
 
-feature("a return imported again changes nothing", {
+// SEC-BOS-81: a return file names its payments by id; the run's import returns only the payments of the organization's executed
+// runs on the bank account, at the entry's amount, so an entry naming another organization's payment or a payment of the bank
+// account no run made is skipped while the run's proper entry is returned, and a file naming the run's payment at another
+// amount alone returns nothing. A payment editor needs bank reconciliation or payment run approval (payroll's) to import
+feature("a return file declines only the bank account's run payments at their amounts, and imported again changes nothing", {
     when() {
         login("john.doe")
         const run = rows("mantle.account.payment.PaymentRun", {organizationPartyId: f.org}).find(
             row => row.paymentInstrumentEnumId === "PiAch" && row.statusId === "PrunExecuted"
         )
         const item = rows("mantle.account.payment.PaymentRunItem", {paymentRunId: run.paymentRunId}).find(row => row.paymentId)
+        const otherOrg = prefix + "_OTHER_ORG"
+        const otherBankId = supplier(otherOrg, "4441009")
+        const delivered = (fromPartyId, paymentMethodId) =>
+            helper().call("create#mantle.account.payment.Payment", {
+                fromPartyId,
+                toPartyId: supplierB,
+                paymentMethodId,
+                paymentInstrumentEnumId: "PiAch",
+                paymentTypeEnumId: "PtInvoicePayment",
+                statusId: "PmntDelivered",
+                amount: "200",
+                amountUomId: "USD",
+                effectiveDate: ec.user.nowTimestamp
+            }).paymentId
+        const foreignId = delivered(otherOrg, otherBankId)
+        const outsideId = delivered(f.org, bankId)
         const pad = (text, n) => String(text).padEnd(n, " ").slice(0, n)
-        const text = [
+        const entry = (paymentId, cents) =>
             "6" +
-                "22" +
-                "01100001" +
-                "5" +
-                pad("4441002", 17) +
-                "0000020000" +
-                pad(item.paymentId, 15) +
-                pad("B", 22) +
-                "  1011000010000001",
-            "7" + "99" + "R01" + "011000010000001" + "      " + "01100001" + pad("Insufficient funds", 44) + "011000010000009",
-            "9" + " ".repeat(93)
-        ].join("\n")
+            "22" +
+            "01100001" +
+            "5" +
+            pad("4441002", 17) +
+            String(cents).padStart(10, "0") +
+            pad(paymentId, 15) +
+            pad("B", 22) +
+            "  1011000010000001"
+        const returned =
+            "7" + "99" + "R01" + "011000010000001" + "      " + "01100001" + pad("Insufficient funds", 44) + "011000010000009"
+        const end = "9" + " ".repeat(93)
+        const text = [
+            entry(foreignId, 20000),
+            returned,
+            entry(outsideId, 20000),
+            returned,
+            entry(item.paymentId, 20000),
+            returned,
+            end
+        ]
+        const payOnly = helper().user(f, "PAYONLY", ["PAYABLE_VIEW", "PAYMENT_EDIT"])
+        const payrollRunner = helper().user(f, "PAYRUN", ["PAYABLE_VIEW", "PAYMENT_EDIT", "PAYMENT_RUN_APPROVE"])
+        const request = {paymentRunId: run.paymentRunId, nachaString: text.join("\n")}
         login(users.treasury)
-        const first = runs("import#RunReturn", {paymentRunId: run.paymentRunId, nachaString: text})
-        const second = runs("import#RunReturn", {paymentRunId: run.paymentRunId, nachaString: text})
+        const wrongAmount = runs("import#RunReturn", {
+            paymentRunId: run.paymentRunId,
+            nachaString: [entry(item.paymentId, 19999), returned, end].join("\n")
+        })
+        const afterWrong = one("mantle.account.payment.Payment", {paymentId: item.paymentId}).statusId
+        login(payOnly)
+        const notImporter = refused("import#RunReturn", request)
+        login(payrollRunner)
+        const first = runs("import#RunReturn", request)
+        login(users.treasury)
+        const second = runs("import#RunReturn", request)
         login("john.doe")
         return {
+            wrongAmount,
+            afterWrong,
+            notImporter,
             first,
             second,
             responses: rows("mantle.account.method.PaymentGatewayResponse", {paymentId: item.paymentId}).length,
-            returned: runItem(run.paymentRunId, item.invoiceId)
+            returned: runItem(run.paymentRunId, item.invoiceId),
+            payment: one("mantle.account.payment.Payment", {paymentId: item.paymentId}),
+            foreign: one("mantle.account.payment.Payment", {paymentId: foreignId}),
+            outside: one("mantle.account.payment.Payment", {paymentId: outsideId}),
+            otherResponses:
+                rows("mantle.account.method.PaymentGatewayResponse", {paymentId: foreignId}).length +
+                rows("mantle.account.method.PaymentGatewayResponse", {paymentId: outsideId}).length
         }
     },
-    then({first, second, responses, returned}) {
+    then({wrongAmount, afterWrong, notImporter, first, second, responses, returned, payment, foreign, outside, otherResponses}) {
+        wrongAmount.returnedPaymentIds.length == 0
+        afterWrong == "PmntDelivered"
+        notImporter.includes("PERMISSION_DENIED")
         first.returnedPaymentIds.length == 1
         second.returnedPaymentIds.length == 0
         responses == 1
         returned.resultEnumId == "PrrReturned"
+        payment.statusId == "PmntDeclined"
+        foreign.statusId == "PmntDelivered"
+        outside.statusId == "PmntDelivered"
+        otherResponses == 0
     }
 })
 

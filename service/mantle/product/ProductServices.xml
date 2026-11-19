@@ -941,11 +941,12 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="productContentId"/></out-parameters>
         <actions>
-            <!-- a download's file is served only from its product's content folder (ShopFulfillment.js servedDownload) -->
-            <if condition="contentLocation &amp;&amp; productContentTypeEnumId == 'PcntDownload'">
-                <set field="contentLib" from="ec.resource.script('component://mr-mantle/service/mantle/product/Content.js')"/>
+            <!-- a download's file is served only from its product's content folder (ShopFulfillment.js servedDownload), and a
+                name's or description's is read only there (ShopCatalog.js contentTexts, SEC-PSS-82) -->
+            <set field="contentLib" from="ec.resource.script('component://mr-mantle/service/mantle/product/Content.js')"/>
+            <if condition="contentLocation &amp;&amp; (productContentTypeEnumId == 'PcntDownload' || contentLib.shopTextTypes.includes(productContentTypeEnumId))">
                 <if condition="!contentLib.owned({productId:productId}, contentLib.config({}), contentLocation)">
-                    <return error="true" message="${contentLib.downloadLocationRefused}"/></if>
+                    <return error="true" message="${productContentTypeEnumId == 'PcntDownload' ? contentLib.downloadLocationRefused : contentLib.textLocationRefused}"/></if>
             </if>
             <service-call name="create#mantle.product.ProductContent" in-map="context" out-map="context"/>
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0"><then>
@@ -955,8 +956,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="!contentText"><set field="contentText" value="[placeholder - delete me]"/></if>
                     <if condition="!filename"><set field="filename" value="${productContentTypeEnumId}_${productContentId}.${textExtension || 'html'}"/></if>
                     <set field="filename" from="ec.resource.script('component://mr-mantle/service/mantle/product/Content.js').safeName(filename)"/>
-                    <!-- NOTE: no need to use mantle.content.large.root for this -->
-                    <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
+                    <!-- NOTE: no need to use mantle@content-large-root for this -->
+                    <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content'"/>
                     <set field="contentLocation" value="${contentRoot}/product/${productId}/content_${productContentId}/${filename}"/>
                     <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
                     <script>docRr.putText(contentText)</script>
@@ -996,9 +997,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="filename" from="ec.resource.script('component://mr-mantle/service/mantle/product/Content.js').safeName(contentFile.getName())"/>
             <if condition="ResourceReference.isTextFilename(filename)"><then>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content'"/>
             </then><else>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-large-root') || 'dbresource://mantle/content'"/>
             </else></if>
             <set field="contentLocation" value="${contentRoot}/product/${productId}/content_${productContentId}/${filename}"/>
 
@@ -1032,8 +1033,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!contentText"><set field="contentText" value="[placeholder - delete me]"/></if>
                 <if condition="!filename"><set field="filename" value="${categoryContentTypeEnumId}_${productCategoryContentId}.${textExtension || 'html'}"/></if>
                 <set field="filename" from="ec.resource.script('component://mr-mantle/service/mantle/product/Content.js').safeName(filename)"/>
-                <!-- NOTE: no need to use mantle.content.large.root for this -->
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
+                <!-- NOTE: no need to use mantle@content-large-root for this -->
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content'"/>
                 <set field="contentLocation" value="${contentRoot}/productCategory/${productCategoryId}/content_${productCategoryContentId}/${filename}"/>
                 <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
                 <script>docRr.putText(contentText)</script>
@@ -1073,9 +1074,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="filename" from="ec.resource.script('component://mr-mantle/service/mantle/product/Content.js').safeName(contentFile.getName())"/>
             <if condition="ResourceReference.isTextFilename(filename)"><then>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content'"/>
             </then><else>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-large-root') || 'dbresource://mantle/content'"/>
             </else></if>
             <set field="contentLocation" value="${contentRoot}/productCategory/${productCategoryId}/content_${productCategoryContentId}/${filename}"/>
 

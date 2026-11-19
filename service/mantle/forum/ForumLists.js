@@ -44,7 +44,10 @@
         systemAudit,
         receipt,
         plainText,
-        json
+        json,
+        fieldMailbox,
+        fieldAddressCount,
+        nameShowsOtherAddress
     } = core
     const MAP = F + "ForumImportMap"
     const HELD = F + "ForumHeldMail"
@@ -217,8 +220,18 @@
         }
         return {type: lower(parts[0]), parameters}
     }
-    const address = value =>
-        lower(/<([^<>@\s]+@[^<>\s]+)>/.exec(value)?.[1] || /([^<>"\s,;()]+@[^<>"\s,;()]+)/.exec(value)?.[1] || "")
+    /* An archived message's author address (SEC-PFS-81): its From mailbox's own address, the one that ends the field
+       (ForumCore.fieldMailbox), never one written in its name. A From that names more than one address, comes more than
+       once, or whose name shows another address is no one's: "" (the archive's unknown author, whom no account claims). */
+    function authorAddress(fromFields) {
+        const raw = fromFields[0] || ""
+        const mailbox = fieldMailbox(decodeWords(raw))
+        const suspect =
+            fromFields.length > 1 ||
+            fieldAddressCount(raw) > 1 ||
+            nameShowsOtherAddress(mailbox.name, mailbox.address)
+        return {address: suspect ? "" : lower(mailbox.address), suspect}
+    }
     /* The name a From field shows, never its address: the phrase before the address, or the comment after it. */
     function displayName(value) {
         const decoded = decodeWords(value)
@@ -348,12 +361,14 @@
         const tooLong = html.length > MAX_BODY
         if (tooLong) html = StringUtilities.cleanHtml(html.slice(0, MAX_BODY))
         const from = field("from")
+        const author = authorAddress(head.fields.from || [])
         return {
             messageId: ids(field("message-id"))[0] || "",
             parents: [...ids(field("in-reply-to")), ...ids(field("references")).reverse()],
             subject: decodeWords(field("subject")).slice(0, 250),
             date: mailDate(field("date")),
-            address: address(decodeWords(from)),
+            address: author.address,
+            suspectFrom: author.suspect,
             name: displayName(from),
             html,
             attachments: found.attachments,
@@ -380,7 +395,7 @@
         ).slice(0, 32)
     const isReply = subject => /^\s*(re|aw|sv|antw)\s*(\[\d+\])?:/i.test(subject || "")
     const importDir = () => {
-        const dir = System.getProperty("pass_import_dir")
+        const dir = ec.factory.getConfValue("pass@import-dir")
         if (!dir) fail("Unavailable", "The import directory is not configured")
         return String(dir).replace(/\/$/, "")
     }
@@ -504,7 +519,8 @@
                 runId: imp.importRunId || null,
                 runState: run?.state || null,
                 // what was made and what could not be carried: messages, topics, replies, duplicates, attachments
-                // (files left out), unknownCharset, tooLong, oversize (passed: over the byte cap), empty, unreadable, failed
+                // (files left out), unknownCharset, tooLong, oversize (passed: over the byte cap), empty, unreadable, failed,
+                // suspectFrom (a From of more than one address or whose name shows another: put on the unknown author)
                 report: json(imp.reconciliationJson, null) || live || {}
             }
         }
@@ -551,6 +567,7 @@
         bump(counts, "attachments", message.attachments)
         bump(counts, "tooLong", message.tooLong ? 1 : 0)
         bump(counts, "unknownCharset", message.unknownCharset ? 1 : 0)
+        bump(counts, "suspectFrom", message.suspectFrom ? 1 : 0)
         const date = message.date || millis(now())
         create(MAP, {
             siteId: run.siteId,
@@ -577,10 +594,10 @@
         })
         bump(counts, "messages")
     }
-    /* The most bytes a message of an archive may have (pass_mbox_max_message_bytes, 10 MB by default): a larger one is
+    /* The most bytes a message of an archive may have (pass@mbox-max-message-bytes, 10 MB by default): a larger one is
        passed and counted (oversize), so what a piece holds in memory is bounded by it and a window. */
     function maxMessageBytes() {
-        const value = Number(System.getProperty("pass_mbox_max_message_bytes") || 0)
+        const value = Number(ec.factory.getConfValue("pass@mbox-max-message-bytes") || 0)
         return Number.isFinite(value) && value > 0 ? value : 10 * 1024 * 1024
     }
     const sizeOf = lines => lines.reduce((total, line) => total + line.length + 1, 0)

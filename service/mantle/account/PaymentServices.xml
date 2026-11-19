@@ -2726,9 +2726,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="filename" from="contentFile.getName()"/>
             <!-- the content type, and so text or not, comes from the file name's extension -->
             <if condition="ec.resource.getLocationReference('dbresource://' + filename).isText()"><then>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content'"/>
             </then><else>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-large-root') || 'dbresource://mantle/content'"/>
             </else></if>
             <set field="contentLocation" value="${contentRoot}/payment/${paymentId}/content_${paymentContentId}/${filename}"/>
 
@@ -3827,7 +3827,7 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="issue" noun="PaymentDocuments" allow-remote="false">
         <description>Issue the documents of a delivered payment as its content, each a PDF of the PaymentDocument template
-            under mantle.content.large.root: the receipt (PctReceipt) and detail (PctPaymentDocument), and the check
+            under the content-large-root setting (mantle@content-large-root): the receipt (PctReceipt) and detail (PctPaymentDocument), and the check
             (PctCheckImage) of a payment with a check number; an internal transfer gets its detail only. Once the payment
             is posted save#PaymentContentFile keeps these files as issued. Refuses a payment that is not
             delivered.</description>
@@ -3851,7 +3851,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="outputTypeList" from="payment.paymentTypeEnumId == 'PtInternalTransfer' ? ['detail']
                     : (checkCount &gt; 0 ? ['receipt', 'detail', 'check'] : ['receipt', 'detail'])"/>
             <set field="contentTypes" from="{receipt:'PctReceipt', detail:'PctPaymentDocument', check:'PctCheckImage'}"/>
-            <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
+            <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-large-root') || 'dbresource://mantle/content'"/>
             <set field="documentTemplate" value="component://mr-mantle/template/account/PaymentDocument.html.fancy"/>
             <set field="outputRows" from="[]"/>
             <iterate list="outputTypeList" entry="outputType">

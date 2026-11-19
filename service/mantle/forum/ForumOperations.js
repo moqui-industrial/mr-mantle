@@ -89,7 +89,7 @@
             .split('\n')[0]
             .slice(0, 200)
     function storageRoot() {
-        const root = System.getProperty('pass_media_root')
+        const root = ec.factory.getConfValue('pass@media-root')
         if (!root)
             fail(
                 'Unavailable',
@@ -328,6 +328,9 @@
         }
         if (p.operation === 'export-site') {
             config.exportId = pendingExport(p.siteId, 'site', p.contactListId)
+            // the run exports only the topics of the categories its starter moderates (SEC-PFS-84); an operator moderates
+            // every one, which the run, made with no user, cannot ask later
+            config.operator = ec.user.isInGroup('ADMIN')
         }
         const runId = startRun(p.siteId, jobType, config)
         audit(
@@ -430,7 +433,7 @@
                 case 'op-retention':
                     return applyRetention(run.siteId, itemId)
                 case 'op-export-site':
-                    return exportTopic(run.siteId, config, itemId)
+                    return exportTopic(run, config, itemId)
                 case 'op-export-personal':
                     return exportPersonal(run.siteId, config, itemId)
                 case 'op-erasure':
@@ -518,9 +521,13 @@
         partyId
             ? one(S + 'PublicSiteProfile', { siteId, partyId })?.handle || null
             : null
-    function exportTopic(siteId, config, rootCommEventId) {
+    function exportTopic(run, config, rootCommEventId) {
+        const siteId = run.siteId
         const t = one(F + 'ForumTopic', { rootCommEventId })
         if (!t || t.siteId !== siteId || t.kind !== 'category') return
+        // a topic of a category its starter does not moderate (one bound to a private group or repository they may not
+        // view, SEC-PFS-84) is left out of the export
+        if (!startedModerates(run, config, t.contactListId)) return
         const root = one(E + 'CommunicationEvent', {
             communicationEventId: rootCommEventId,
         })
@@ -584,7 +591,12 @@
         )
     }
     /* Settings without credentials, tokens or secrets; private conversations are not part of a site export. */
-    function exportSettings(siteId, dir) {
+    // whether the run's starter moderates a category, which the site export holds only then (SEC-PFS-84)
+    const startedModerates = (run, config, contactListId) =>
+        !!config.operator ||
+        !!categoryAccess(contactListId, run.partyId)?.canModerate
+    function exportSettings(run, config, dir) {
+        const siteId = run.siteId
         const s = one(S + 'PublicSite', { siteId })
         writeJson(dir + '/site.json', {
             ...pick(
@@ -600,16 +612,18 @@
         })
         writeJson(
             dir + '/categories.json',
-            rows(F + 'ForumCategory', { siteId }, 1000).map((c) => ({
-                ...pick(
-                    c,
-                    'contactListId parentContactListId sequenceNum slug publicationState visibility mode rules qualifyingSources',
-                ),
-                name:
-                    one('mantle.marketing.contact.ContactList', {
-                        contactListId: c.contactListId,
-                    })?.contactListName || '',
-            })),
+            rows(F + 'ForumCategory', { siteId }, 1000)
+                .filter((c) => startedModerates(run, config, c.contactListId))
+                .map((c) => ({
+                    ...pick(
+                        c,
+                        'contactListId parentContactListId sequenceNum slug publicationState visibility mode rules qualifyingSources',
+                    ),
+                    name:
+                        one('mantle.marketing.contact.ContactList', {
+                            contactListId: c.contactListId,
+                        })?.contactListName || '',
+                })),
         )
         writeJson(
             dir + '/tags.json',
@@ -622,9 +636,13 @@
         )
         writeJson(
             dir + '/mail-routes.json',
-            rows(F + 'ForumMailRoute', { siteId }, 1000).map((r) =>
-                pick(r, 'routeId address contactListId enabled'),
-            ),
+            rows(F + 'ForumMailRoute', { siteId }, 1000)
+                .filter(
+                    (r) =>
+                        !r.contactListId ||
+                        startedModerates(run, config, r.contactListId),
+                )
+                .map((r) => pick(r, 'routeId address contactListId enabled')),
         )
         // The effective policy, without credentials: policy sections hold limits and rules only.
         writeJson(dir + '/policy.json', core.policy(siteId))
@@ -647,7 +665,7 @@
             schemaVersion: SCHEMA_VERSION,
             kind,
             siteId: run.siteId,
-            authority: System.getProperty('pass_authority_name') || 'local',
+            authority: ec.factory.getConfValue('pass@authority-name') || 'local',
             createdAt: millis(now()),
             files: files.map((f) => ({
                 path: f.path,
@@ -1007,7 +1025,7 @@
         if (handlers[run.jobType]?.finish)
             handlers[run.jobType].finish(run, config, failed)
         if (!failed && run.jobType === 'op-export-site')
-            exportSettings(run.siteId, exportDir(config.exportId))
+            exportSettings(run, config, exportDir(config.exportId))
         if (!failed && run.jobType === 'op-export-site')
             finishArchive(
                 run,
@@ -1469,6 +1487,17 @@
                 b.posts,
             ])
         } else if (p.report === 'moderation') {
+            // the actions of a category the caller moderates, or of none (SEC-PFS-84: not of a scope they may not view)
+            const moderated = new Map()
+            const shown = (contactListId) => {
+                if (!contactListId) return true
+                if (!moderated.has(contactListId))
+                    moderated.set(
+                        contactListId,
+                        !!categoryAccess(contactListId)?.canModerate,
+                    )
+                return moderated.get(contactListId)
+            }
             header = [
                 'createdAt',
                 'action',
@@ -1492,15 +1521,17 @@
                     .orderBy('createdAt')
                     .limit(10000)
                     .list(),
-            ).map((v) => [
-                new Date(millis(v.createdAt)).toISOString(),
-                v.action,
-                v.targetType,
-                v.targetId,
-                handleOf(p.siteId, v.staffPartyId) ||
-                    (v.staffPartyId ? 'staff' : 'system'),
-                v.reason,
-            ])
+            )
+                .filter((v) => shown(v.contactListId))
+                .map((v) => [
+                    new Date(millis(v.createdAt)).toISOString(),
+                    v.action,
+                    v.targetType,
+                    v.targetId,
+                    handleOf(p.siteId, v.staffPartyId) ||
+                        (v.staffPartyId ? 'staff' : 'system'),
+                    v.reason,
+                ])
         } else if (p.report === 'deliveries') {
             if (!siteStaff || p.contactListId)
                 fail('Unauthorized', 'Site staff export deliveries')

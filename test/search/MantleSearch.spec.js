@@ -68,6 +68,9 @@ function fixture() {
     <mantle.party.PartyRelationship partyRelationshipId="SF_EMP_REL" relationshipTypeEnumId="PrtEmployee" fromPartyId="SF_EMP"
             fromRoleTypeId="Employee" toPartyId="ORG_ZIZI_RETAIL" toRoleTypeId="OrgInternal" fromDate="${d30}"/>
     <moqui.security.UserAccount userId="SF_ORG_USER" username="sf.org.user" partyId="SF_EMP" userFullName="Olga Orgonly"/>
+    <mantle.party.Party partyId="SF_PRIVATE" partyTypeEnumId="PtyPerson" ownerPartyId="ORG_ZIZI_RETAIL" privateOwnerUserId="SF_ORG_USER">
+        <mantle.party.Person firstName="Pia" lastName="Sfixture"/>
+    </mantle.party.Party>
     <moqui.security.UserGroup userGroupId="SF_ORG_GROUP" description="Search fixture org users"/>
     <moqui.security.UserGroupMember userGroupId="SF_ORG_GROUP" userId="SF_ORG_USER" fromDate="${d30}"/>
     <moqui.security.ArtifactGroup artifactGroupId="SF_SEARCH" description="General search, limited to the user's organizations">
@@ -259,7 +262,8 @@ feature("a user limited to their organizations finds only their records", {
         allowed.includes("ORG_ZIZI_RETAIL")
         // the user's own organization's records
         limited.documentList.length > 0
-        limited.documentList.every((document) => allowed.includes(document.ownerPartyId))
+        // (a party of no organization, _NA_, is everyone's, as the universal search has it; other types by their own fields)
+        limited.documentList.every((document) => document.ownerPartyId == null || allowed.includes(document.ownerPartyId) || document.ownerPartyId == "_NA_")
         // the limit removes other organizations' records
         num(limited.documentListCount) < everything
 
@@ -270,5 +274,61 @@ feature("a user limited to their organizations finds only their records", {
         facetTotal == num(universal.total)
         universal.results.every((result) => result.entityType != "MantleCommunicationEvent")
         unowned.length == 0
+    },
+})
+
+// the general search takes only the index's own document types but messages and wiki pages, which have access rules of
+// their own screens, for any user; under an organization limit each type by its own organization fields, as the universal
+// search has them; a personal contact only for its owner, in a list of types too (SEC-DAT-81)
+feature("the general search takes only its index's types, each under the user's organization limit", {
+    when() {
+        const typed = (documentType, queryString = "*:*") => {
+            const out = call("mantle.GeneralServices.search#MantleFiltered",
+                { indexName: "mantle", documentType, queryString, pageSize: 100 })
+            const messages = String(ec.message.messagesString || "")
+            ec.message.clearAll()
+            return Object.assign({ messages }, out)
+        }
+        const ids = (out) => (out.documentList || []).map((document) => document._id)
+        // an administrator: no organization limit
+        const admin = {
+            orders: num(typed("MantleOrder").documentListCount),
+            otherIndex: typed("MantleSalesOrderItem"),
+            messages: typed("MantleCommunicationEvent"),
+            wiki: typed("MantleWikiPage", '"About Us"'),
+            any: ids(typed(null, '"About Us"')),
+            listed: ids(typed("MantleParty,MantleProduct", "Sfixture")),
+        }
+        ec.user.internalLoginUser("sf.org.user")
+        ec.artifactExecution.enableAuthz()
+        try {
+            call("mantle.party.PartyServices.setup#UserOrganizationInfo", {})
+            const orders = typed("MantleOrder")
+            return { admin, orders, ordersOwned: (orders.documentList || []).every((document) =>
+                (document.parts || []).some((part) => ["ORG_ZIZI_RETAIL"].includes(part.vendorPartyId) || ["ORG_ZIZI_RETAIL"].includes(part.customerPartyId))),
+                ownList: ids(typed("MantleParty,MantleProduct", "Sfixture")) }
+        } finally {
+            ec.message.clearAll()
+            ec.artifactExecution.disableAuthz()
+            for (const name of ["userOrgIds", "filterOrgIds", "activeOrgId"]) delete ec.user.context[name]
+            login("john.doe")
+        }
+    },
+    then({ admin, orders, ordersOwned, ownList }) {
+        admin.orders > 0
+        num(admin.otherIndex.documentListCount) == 0
+        admin.otherIndex.messages.includes("MantleSalesOrderItem is not available")
+        num(admin.messages.documentListCount) == 0
+        admin.messages.messages.includes("MantleCommunicationEvent is not available")
+        num(admin.wiki.documentListCount) == 0
+        admin.any.length == 0
+        // another user's personal contact is not found in a list of types; its owner finds it
+        admin.listed.includes("SF_CUST_A")
+        !admin.listed.includes("SF_PRIVATE")
+        ownList.includes("SF_PRIVATE")
+        // the organization's orders, by the order's own organization fields
+        num(orders.documentListCount) > 0
+        num(orders.documentListCount) < admin.orders
+        ordersOwned
     },
 })

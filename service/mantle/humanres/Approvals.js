@@ -1276,7 +1276,7 @@ function summaryOf(approval) {
 // A decision of the step waiting of a request (by peopleApprovalId, else the latest of the kind's source), at the revision the
 // caller read (sourceRevision, from the notice): approve, or refuse with a reason. A decision this user already made of the
 // request answers the first (repeated). Refused: a caller without PEOPLE_REQUEST_APPROVE (PERMISSION_DENIED);
-// no request (RECORD_UNAVAILABLE); another decision than the caller's first (ALREADY_DECIDED); a request no longer waiting
+// no request, or one of another source than the sourceId given (RECORD_UNAVAILABLE); another decision than the caller's first (ALREADY_DECIDED); a request no longer waiting
 // (NOT_PENDING); a notice of an earlier request or revision (REVISION_CHANGED); a source changed since the request
 // (SOURCE_CHANGED); a refusal with no reason (REASON_REQUIRED); the requester or the person it is about (SELF_APPROVAL); anyone
 // not an approver of the step waiting (NOT_APPROVER).
@@ -1298,6 +1298,14 @@ function recordDecision(p) {
     }
     if (!approval || (p.approvalKindEnumId && approval.approvalKindEnumId !== p.approvalKindEnumId))
         denied("RECORD_UNAVAILABLE", "This approval is not available")
+    // a request named by its id decides the record the caller acts on, never another one (SEC-BOS-91): with a sourceId, the
+    // request is that source's, of the entity asked (the kind's own when none is named)
+    if (text(p.sourceId)) {
+        const kind = kinds[approval.approvalKindEnumId]
+        const entityName = kind ? sourceOf(kind, text(p.sourceEntityName) || null).entityName : text(p.sourceEntityName)
+        if (approval.sourceId !== text(p.sourceId) || (entityName && approval.sourceEntityName !== entityName))
+            denied("RECORD_UNAVAILABLE", "This approval is not available")
+    }
     // the row is locked and read again, so two approvers of one step do not both record it and a decision made meanwhile (a
     // refusal, the last approval, a supersession) is seen
     approval = find(APPROVAL, {peopleApprovalId: approval.peopleApprovalId}).forUpdate(true).one()

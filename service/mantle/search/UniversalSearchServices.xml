@@ -74,44 +74,11 @@ along with this software (see the LICENSE.md file). If not, see
             capabilities = ec.search.isAvailable() ? ec.search.capabilities() : []
             if (!ec.search.isAvailable()) { ec.message.addError('Search is not configured'); return }
 
-            // what shows a record of each document type under an organization limit: org fields holding one of the user's
-            // organizations, user fields holding the user's party, and party fields holding either; a type that is not here
-            // shows nothing, and null is not limited
-            // TODO: only current party rows (parties.partyThruDate empty or later than now) once the Postgres backend can
-            //     compare a date in a child list (it casts the stored text, which the feed writes as epoch millis)
-            const scopes = {MantleParty: {org: ['ownerPartyId']}, MantleProduct: {org: ['ownerPartyId']},
-                MantleFacility: {org: ['ownerPartyId']}, MantleAsset: {org: ['ownerPartyId']},
-                MantleOrder: {org: ['parts.vendorPartyId', 'parts.customerPartyId']},
-                MantleInvoice: {org: ['fromPartyId', 'toPartyId']}, MantlePayment: {org: ['fromPartyId', 'toPartyId']}, MantleAcctgTrans: {org: ['organizationPartyId']}, MantleGlAccount: {org: ['organizationPartyIds']}, MantleShipment: {org: ['fromPartyId', 'toPartyId']},
-                MantleProject: {party: ['ownerPartyId', 'parties.partyId']}, MantleTask: {party: ['ownerPartyId', 'parties.partyId']},
-                MantleEvent: {party: ['ownerPartyId', 'parties.partyId']},
-                MantleRequest: {org: ['storeOrganizationPartyId', 'facilityOwnerPartyId'], user: ['filedByPartyId'], party: ['parties.partyId']},
-                MantleCommunicationEvent: {user: ['fromPartyId', 'toPartyId', 'parties.partyId']},
-                MantleWikiPage: null}
-
-            // the user's organization limit, as get#RecordLinkInfo has it: every filter set on a party find is looked at
-            // (an authorization may carry MANTLE_PRIVATE_CONTACT and others beside the organization set)
-            if (ec.user.context.filterOrgIds === undefined) ec.service.sync().name('mantle.party.PartyServices.setup#UserOrganizationInfo').call()
-            const filterSetIds = () => new Set(Array.from(ec.artifactExecution.getFindFiltersForUser('mantle.party.Party') || [])
-                    .map((filter) => filter.entityFilterSetId))
-            const activeOrgId = ec.user.context.activeOrgId || null
-            const filterOrgIds = Array.from(ec.user.context.filterOrgIds || [])
-            let filterSets = filterSetIds()
-            let orgIds = null
-            if (filterSets.has('MANTLE_USER_ORG')) orgIds = filterOrgIds
-            else if (filterSets.has('MANTLE_ACTIVE_ORG')) orgIds = activeOrgId ? [activeOrgId] : filterOrgIds
-            else if (!activeOrgId) {
-                // MANTLE_ACTIVE_ORG applies only with an active organization (its applyCond): whether the authorization
-                // names it is asked with one in the user context for the moment
-                const hadActive = 'activeOrgId' in ec.user.context
-                const oldActive = ec.user.context.activeOrgId
-                ec.user.context.activeOrgId = '_NA_'
-                try { filterSets = filterSetIds() } finally {
-                    if (hadActive) ec.user.context.activeOrgId = oldActive ?? null
-                    else delete ec.user.context.activeOrgId
-                }
-                if (filterSets.has('MANTLE_ACTIVE_ORG')) orgIds = filterOrgIds
-            }
+            // the organization fields of each type and the user's organization limit (SearchScope.js, shared with Marble's
+            // search#MantleFiltered)
+            const searchScope = ec.resource.script('component://mr-mantle/service/mantle/search/SearchScope.js')
+            const scopes = searchScope.scopes
+            const orgIds = searchScope.organizationLimit()
 
             // the clauses that show a type's records under the limit, any one of them; none leaves the type out
             const userPartyId = ec.user.userAccount?.partyId || null
@@ -120,17 +87,9 @@ along with this software (see the LICENSE.md file). If not, see
                     .parameter('partyId', userPartyId).call()
             const readableMailboxIds = mailboxAccess?.readableContactListIds || []
             const hiddenMailboxIds = mailboxAccess?.hiddenContactListIds || []
-            const scopeClauses = (type, scope) => {
-                const orgValues = type === 'MantleParty' ? orgIds.concat(['_NA_']) : orgIds
-                const partyValues = userPartyId ? orgIds.concat([userPartyId]) : orgIds
-                const any = []
-                if (orgValues.length) for (const name of scope.org || []) any.push({field: {name: name, op: 'in', values: orgValues}})
-                if (userPartyId) for (const name of scope.user || []) any.push({field: {name: name, op: 'eq', value: userPartyId}})
-                if (partyValues.length) for (const name of scope.party || []) any.push({field: {name: name, op: 'in', values: partyValues}})
-                if (type === 'MantleCommunicationEvent' && readableMailboxIds.length)
-                    any.push({field: {name: 'contactListId', op: 'in', values: readableMailboxIds}})
-                return any
-            }
+            const scopeClauses = (type, scope) => searchScope.scopeClauses(type, scope, orgIds, userPartyId,
+                    type === 'MantleCommunicationEvent' && readableMailboxIds.length
+                        ? [{field: {name: 'contactListId', op: 'in', values: readableMailboxIds}}] : [])
 
             // the document types the user may see: view authz on the primary entity, and an organization scope under a limit
             const requested = entityType ? String(entityType).split(',').map((type) => type.trim()).filter((type) => type) : null
@@ -154,7 +113,7 @@ along with this software (see the LICENSE.md file). If not, see
                 const document = ec.entity.find('moqui.entity.document.DataDocument').condition('dataDocumentId', documentId)
                         .useCache(true).one()
                 if (document == null || !ec.artifactExecution.isPermitted(document.primaryEntityName, 'AT_ENTITY', 'view')) continue
-                const scope = Object.prototype.hasOwnProperty.call(scopes, documentId) ? scopes[documentId] : {}
+                const scope = searchScope.scopeOf(documentId)
                 const limit = orgIds != null && scope != null ? scopeClauses(documentId, scope) : null
                 if (limit != null && limit.length === 0) continue
                 let trustedLimit = limit
@@ -195,9 +154,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             // the trusted filter: per type, the type and its organization and user limit; a party that is a personal
             // contact (privateOwnerUserId) only for its owner, with or without a limit
-            const notPrivate = {field: {name: 'privateOwnerUserId', op: 'exists', negate: true}}
-            const privateClause = ec.user.userId ? {bool: {any: [notPrivate,
-                    {field: {name: 'privateOwnerUserId', op: 'eq', value: ec.user.userId}}]}} : notPrivate
+            const privateClause = searchScope.privateClause()
             // a post of a mailbox the user may not read only for the parties it is from, to or a recipient of
             const mailboxClause = hiddenMailboxIds.length ? {bool: {any: [
                 {field: {name: 'contactListId', op: 'exists', negate: true}},
@@ -375,8 +332,23 @@ along with this software (see the LICENSE.md file). If not, see
             // invoices, payments and transactions, so the index's counts never tell the payroll matches
             const origin = ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js')
             const payrollTypes = !origin.canRead() && origin.anyMarked() ? ['MantleInvoice', 'MantlePayment', 'MantleAcctgTrans'].filter((type) => types.includes(type)) : []
+            // a type of which this page left out a hit (a record the entity filters refuse, a confidential case or its message,
+            // a hidden applicant, a protected, confidential or maintenance task, a maintenance request): its count is the page's,
+            // so the index never counts, for a query, a record the user may not see (SEC-DAT-82)
+            const hitsOf = {}, shownOf = {}
+            for (const hit of page.hits) hitsOf[hit.documentId] = (hitsOf[hit.documentId] || 0) + 1
+            for (const result of results) shownOf[result.entityType] = (shownOf[result.entityType] || 0) + 1
+            const droppedTypes = Object.keys(hitsOf).filter((type) => (shownOf[type] || 0) < hitsOf[type])
+            // and when this page is not the whole match (a later page, or more matches than it holds), every type with a
+            // per-hit rule: a page cannot tell whether the hits it does not hold are hidden ones, so its counts are the
+            // page's (SEC-DAT-82, a second page)
+            const ruledTypes = ['MantleParty', 'MantleTask', 'MantleRequest', 'MantleCommunicationEvent', 'MantleAcctgTrans',
+                'MantleInvoice', 'MantlePayment']
+            const wholeMatch = Number(offset || 0) === 0 && page.hits.length >= Number(page.total || 0)
+            const unseenTypes = wholeMatch ? [] : types.filter((type) => ruledTypes.includes(type))
             const liveTypes = [...new Set((liveMailboxCounts ? ['MantleCommunicationEvent'] : [])
-                    .concat(financeDropped || !bothSides ? sidedTypes : []).concat(payrollTypes))]
+                    .concat(financeDropped || !bothSides ? sidedTypes : []).concat(payrollTypes).concat(droppedTypes)
+                    .concat(unseenTypes))]
             if (liveTypes.length) { total = results.length; totalRelation = 'gte' }
             // facets over the whole authorized match, not the page
             const facetList = facets ?? []

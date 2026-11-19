@@ -51,8 +51,8 @@ function servlet(method, path, headers = {}, remoteAddr = null) {
 }
 spec({
     setupSpec() {
-        setProperty("pass_client_" + CLIENT + "_secret", "pass-authority-spec-secret")
-        setProperty("pass_client_" + CLIENT + "_sites", SITE)
+        setConf("pass-authority/client[" + CLIENT + "]@secret", "pass-authority-spec-secret")
+        setConf("pass-authority/client[" + CLIENT + "]@sites", SITE)
         login("john.doe")
         sys(() =>
             call("create#mantle.public.PublicSite", {

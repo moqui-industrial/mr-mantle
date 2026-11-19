@@ -317,7 +317,7 @@
             GitHub provider names the same id (UserAccount.externalUserId)</description></field>
         <field name="githubHost" type="text-medium"><description>The GitHub githubUserId and githubLogin are of: github.com
             (also when empty), or a GitHub Enterprise Server's host, whose login is kept as login@host so it is apart
-            from github.com's. The import sets it from the API it reads (smithy_github_api); a claim needs a GitHub
+            from github.com's. The import sets it from the API it reads (mantle@smithy-github-api); a claim needs a GitHub
             sign-in of the same host</description></field>
         <field name="placeholder" type="text-indicator"><description>Y: made by the import, not yet claimed</description></field>
         <field name="claimedAt" type="date-time"/>

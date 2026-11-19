@@ -398,14 +398,10 @@ along with this software (see the LICENSE.md file). If not, see
             description="Half Due In Advance, Half Due 30 Days after Invoice" termValue="30" termValueUomId="TF_day"
             orderPmtServiceRegisterId="OrderPayment50Split"/>
 
-    <!-- ========== Global Preferences ========== -->
+    <!-- ========== Content root ========== -->
 
-    <!-- User Group Preference for mantle content root, used in various services; these may be modified after install or for custom installs -->
-    <moqui.security.UserGroupPreference userGroupId="ALL_USERS" preferenceKey="mantle.content.root"
-            preferenceValue="dbresource://mantle/content"/>
-    <moqui.security.UserGroupPreference userGroupId="ALL_USERS" preferenceKey="mantle.content.large.root"
-            preferenceValue="dbresource://mantle/content"/>
-
+    <!-- The folders of the default content root; the root itself is the mantle@content-root and
+        mantle@content-large-root settings (MoquiConf.xml), not a preference -->
     <moqui.resource.DbResource resourceId="MANTLE" filename="mantle" isFile="N"/>
     <moqui.resource.DbResource resourceId="MANTLE_CONTENT" filename="content" isFile="N" parentResourceId="MANTLE"/>
     <moqui.resource.DbResource resourceId="MCNT_ASSET" filename="asset" isFile="N" parentResourceId="MANTLE_CONTENT"/>

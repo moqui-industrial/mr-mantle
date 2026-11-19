@@ -540,13 +540,15 @@ const codeOf = value => {
         refuse("Unprocessable", "PROMO_CODE_INVALID", "This code cannot be used with this cart", "promoCode")
     return code
 }
-// The store's code of a shopper's text (ignoring case), or null: a code of another store is none.
+// The store's code of a shopper's text (ignoring case), or null: a code of another store is none. A code is matched by its text
+// only, never by its record id, and only one customers enter (userEntered Y); a code staff apply themselves is none (SEC-PSS-81).
 function storeCodeOf(shop, code) {
     const found = Array.from(
         find("mantle.product.store.ProductStorePromoCode")
             .condition(ec.entity.conditionFactory.makeCondition("promoCode", "equals", code).ignoreCase())
+            .condition("userEntered", "Y")
             .list()
-    ).concat(Array.from(find("mantle.product.store.ProductStorePromoCode", {promoCodeId: code}).list()))
+    )
     return (
         found.find(row => {
             const promotion = one("mantle.product.store.ProductStorePromotion", {storePromotionId: row.storePromotionId})
@@ -572,7 +574,8 @@ function applyPromoCode(p) {
     if (!on()) {
         lib.call("mantle.product.PromotionServices.add#OrderPromoCode", {
             orderId: cart.row.orderId,
-            promoCode: storeCode.promoCode
+            promoCode: storeCode.promoCode,
+            promoCodeId: storeCode.promoCodeId
         })
         if (!on()) refused()
     }
@@ -634,7 +637,8 @@ function merge(shop, from, into) {
         try {
             lib.call("mantle.product.PromotionServices.add#OrderPromoCode", {
                 orderId: into.row.orderId,
-                promoCode: storeCode.promoCode
+                promoCode: storeCode.promoCode,
+                promoCodeId: storeCode.promoCodeId
             })
         } catch (error) {
             ec.message.clearErrors()

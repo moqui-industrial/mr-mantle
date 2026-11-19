@@ -206,7 +206,7 @@ function attachStaged(invoiceId, p) {
     const filename = String(p.stagedFilename || "bill")
         .replace(/[^a-zA-Z0-9._ -]/g, "_")
         .slice(0, 100)
-    const root = ec.user.getPreference("mantle.content.large.root") || "dbresource://mantle/content"
+    const root = ec.factory.getConfValue("mantle@content-large-root") || "dbresource://mantle/content"
     const contentLocation = root + "/invoice/" + invoiceId + "/content_" + out.invoiceContentId + "/" + filename
     const stream = ec.resource.getLocationReference(p.stagedLocation).openStream()
     try {

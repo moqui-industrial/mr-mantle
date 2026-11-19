@@ -395,6 +395,29 @@ feature(
             out.afterRefusal = run(state.operator, G + "find#Components", {payrollComponentId: id}).terms[0].statusId
             // asked again and approved: published from its date, by who asked
             ask()
+            // another draft decided with this request's approval publishes nothing and leaves the request waiting (SEC-BOS-91)
+            const waitingApproval = Array.from(
+                ec.entity
+                    .find("mantle.humanres.approval.PeopleApproval")
+                    .condition({approvalKindEnumId: "PakPayrollConfig", statusId: "PapPending"})
+                    .orderBy("-requestedDate")
+                    .limit(1)
+                    .list()
+            )[0]
+            const crossedStructure = run(state.config, G + "store#Structure", {
+                organizationPartyId: orgA,
+                structureName: "Crossed",
+                currencyUomId: "USD",
+                payBasisEnumId: "PpbSalaried"
+            }).payrollStructureId
+            out.crossed = code(
+                run(state.approver, G + "decide#Publication", {
+                    payrollStructureId: crossedStructure,
+                    peopleApprovalId: waitingApproval?.peopleApprovalId,
+                    decision: "approve"
+                })
+            )
+            out.crossedState = run(state.operator, G + "find#Structures", {payrollStructureId: crossedStructure}).structure.state
             out.approved = decide(state.approver)
             const term = run(state.operator, G + "find#Components", {payrollComponentId: id}).terms[0]
             out.published = [term.statusId, term.state].join()
@@ -453,6 +476,8 @@ feature(
             out.noReason === "REASON_REQUIRED"
             out.refused === ""
             out.afterRefusal === "PtsDraft"
+            out.crossed === "RECORD_UNAVAILABLE"
+            out.crossedState === "draft"
             out.approved === ""
             out.published === "PtsPublished,current"
             out.publishedBy === state.config

@@ -202,8 +202,12 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <service-call name="mantle.party.ConstitutionServices.read#OrganizationConstitutionText" out-map="stored"
                     in-map="{organizationPartyId: organizationPartyId}"/>
-            <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
-            <set field="contentLocation" from="stored.contentLocation || (contentRoot + '/party/' + organizationPartyId + '/constitution/Constitution.json')"/>
+            <set field="contentRoot" from="String(ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content').replace(/\/+$/, '')"/>
+            <!-- the stored file is written again only under the content root, in the organization's own folder; any other
+                stored location gets a new file there (SEC-PFS-82) -->
+            <set field="ownFolder" from="contentRoot + '/party/' + organizationPartyId + '/constitution/'"/>
+            <set field="contentLocation" from="String(stored.contentLocation || '').startsWith(ownFolder) &amp;&amp; !String(stored.contentLocation).includes('#')
+                    &amp;&amp; !String(stored.contentLocation).split('/').includes('..') ? stored.contentLocation : ownFolder + 'Constitution.json'"/>
             <script>ec.resource.getLocationReference(contentLocation).putText(documentText)</script>
             <if condition="stored.partyContentId"><then>
                 <service-call name="update#mantle.party.PartyContent" disable-authz="true"
@@ -238,8 +242,10 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.party.PartyContent" list="contentList" disable-authz="true">
                 <econdition field-name="partyId" from="organizationPartyId"/>
                 <econdition field-name="partyContentTypeEnumId" value="PcntConstitution"/></entity-find>
+            <set field="ownFolder" from="String(ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content').replace(/\/+$/, '') + '/party/' + organizationPartyId + '/constitution/'"/>
             <iterate list="contentList" entry="content">
-                <if condition="content.contentLocation"><script>
+                <!-- only a file in the organization's own folder under the content root is removed (SEC-PFS-82) -->
+                <if condition="content.contentLocation &amp;&amp; String(content.contentLocation).startsWith(ownFolder)"><script>
                     try { ec.resource.getLocationReference(content.contentLocation).delete() }
                     catch (e) { ec.logger.warn("The Constitution file " + content.contentLocation + " was not removed: " + e) }
                 </script></if>

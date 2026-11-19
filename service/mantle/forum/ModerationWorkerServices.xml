@@ -30,7 +30,7 @@
     </actions>
   </service>
   <service verb="classify" noun="Posts" authenticate="false" allow-remote="false">
-    <description>Send queued posts to the operator-configured classifier (pass_classifier_service); results only file review items.</description>
+    <description>Send queued posts to the operator-configured classifier (pass@classifier-service); results only file review items.</description>
     <out-parameters>
       <parameter name="result" type="Map"/>
     </out-parameters>

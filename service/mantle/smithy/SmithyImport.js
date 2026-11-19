@@ -18,7 +18,7 @@
  *   applied (a censor replaces, a block leaves the text out and reports it), no hold, no daily limit, no notice.
  * - Final states and dates are written on the rows (a task's status and resolution, a merge request's state and dates),
  *   so no status rule writes a line now or sends a notice for history.
- * - The API: smithy_github_api names its base, https://api.github.com by default; a GitHub Enterprise Server's /api/v3,
+ * - The API: mantle@smithy-github-api names its base, https://api.github.com by default; a GitHub Enterprise Server's /api/v3,
  *   or a resource location of recorded responses (a file a request: its path and query with each run of other characters
  *   as _, .json, holding status, headers and body), which is how the specs and a replayed rehearsal run without the
  *   network.
@@ -155,7 +155,7 @@ kit => {
     const inNew = work => ec.transaction.runRequireNew(null, "A Smithy import write failed", work)
 
     // ===== the API =====
-    const apiBase = () => text(System.getProperty("smithy_github_api") || "https://api.github.com").replace(/\/+$/, "")
+    const apiBase = () => text(ec.factory.getConfValue("mantle@smithy-github-api") || "https://api.github.com").replace(/\/+$/, "")
     const recorded = base => !/^https?:\/\//.test(base)
     const recordName = path => path.replace(/^\/+/, "").replace(/[^A-Za-z0-9.-]+/g, "_") + ".json"
     /* One GET of the API: {status, headers (link and the rate limit's, lower case), body (parsed JSON or null)}. */
@@ -177,7 +177,7 @@ kit => {
             .addHeader("User-Agent", "moqui-smithy-import")
             .addHeader("Authorization", "Bearer " + token)
             .timeout(30)
-            // the GitHub API host is the operator's smithy_github_api, which may be a GitHub Enterprise on a private network
+            // the GitHub API host is the operator's mantle@smithy-github-api, which may be a GitHub Enterprise on a private network
             .allowInternal()
             .call()
         const headers = {}

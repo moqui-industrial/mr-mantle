@@ -1787,7 +1787,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="ReleaseNotes">
         <description>Keeps a release's notes (markdown) as its WorkEffortContent of type WectReleaseNotes, a file under the
-            content root (mantle.content.root) at work/releaseId/release-notes.md.</description>
+            content root (the mantle@content-root setting) at work/releaseId/release-notes.md.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="notesText" allow-html="any"/>
@@ -1801,13 +1801,18 @@ along with this software (see the LICENSE.md file). If not, see
             if (release == null || release.workEffortTypeEnumId !== 'WetRelease') { ec.message.addError(ec.resource.expand('Release ${workEffortId} not found', '', {workEffortId})); return }
             const content = Array.from(ec.entity.find('mantle.work.effort.WorkEffortContent').condition('workEffortId', workEffortId)
                     .condition('contentTypeEnumId', 'WectReleaseNotes').orderBy('-contentDate').list())[0] || null
-            const root = String(ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content').replace(/\/+$/, '')
-            const location = content?.contentLocation || (root + '/work/' + workEffortId + '/release-notes.md')
+            const root = String(ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content').replace(/\/+$/, '')
+            // the stored file is written again only where this service puts it, under the content root; any other stored
+            // location (a row made elsewhere, a root since changed) gets a new file under the root (SEC-PFS-82)
+            const own = root + '/work/' + workEffortId + '/'
+            const stored = String(content?.contentLocation || '')
+            const location = stored.startsWith(own) && !stored.includes('#') && !stored.split('/').includes('..') ? stored
+                    : own + 'release-notes.md'
             ec.resource.getLocationReference(location).putText(String(notesText || ''))
             if (content != null) {
                 workEffortContentId = content.workEffortContentId
                 ec.service.sync().name('update#mantle.work.effort.WorkEffortContent').parameters({workEffortContentId: workEffortContentId,
-                    contentDate: ec.user.nowTimestamp, userId: ec.user.userId || null}).call()
+                    contentLocation: location, contentDate: ec.user.nowTimestamp, userId: ec.user.userId || null}).call()
             } else {
                 workEffortContentId = ec.service.sync().name('create#mantle.work.effort.WorkEffortContent').parameters({workEffortId: workEffortId,
                     contentTypeEnumId: 'WectReleaseNotes', contentLocation: location, description: ec.resource.expand('Release notes of ${version}', '',
@@ -3844,7 +3849,7 @@ along with this software (see the LICENSE.md file). If not, see
                     ec.service.sync().name('mantle.work.ProjectServices.store#ProjectSetting').parameters({workEffortId: milestoneId, settingTypeEnumId: type, settingValue: value}).call()
                 }
                 if (ec.message.hasError()) return
-                const root = String(ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content').replace(/\/+$/, '')
+                const root = String(ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content').replace(/\/+$/, '')
                 const stamp = ec.l10n.format(ec.user.nowTimestamp, 'yyyyMMdd-HHmmss')
                 const location = root + '/work/' + milestoneId + '/estimate-' + stamp + '.html'
                 const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + String(L('Estimate')) + '</title><style>body{font-family:sans-serif;font-size:10pt}'
@@ -4133,7 +4138,8 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="link" noun="ProjectOrderItem">
         <description>The order line a project fulfils (design-projects.md §4 ProjectMoneyStep, Commercial; §10 OrderDetail): an
-            OrderItemWorkEffort of the project and a line of a sales order to the project's client (OrderPart customerPartyId), not
+            OrderItemWorkEffort of the project and a line of a sales order to the project's client (OrderPart customerPartyId) from
+            the project's organization (vendorPartyId its owner or a current Vendor or VendorBillFrom party, SEC-BOS-95), not
             cancelled; with remove the link is taken off (refused while its milestones' shares on the line are billed: they are taken
             off with it otherwise). By one who manages money and manages the project.</description>
         <in-parameters>
@@ -4180,6 +4186,11 @@ along with this software (see the LICENSE.md file). If not, see
                 const client = ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', workEffortId).condition('roleTypeId', 'in', ['Customer', 'CustomerBillTo'])
                         .condition('partyId', part?.customerPartyId || '_NA_').conditionDate('fromDate', 'thruDate', null).count() > 0
                 if (!client) { ec.message.addError(L('The order is not to the project\'s client')); return }
+                // and from the project's organization: its owner or a current Vendor or VendorBillFrom party, never another
+                // organization's order to a client both share (SEC-BOS-95)
+                const vendors = new Set([project.ownerPartyId].concat(Array.from(ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', workEffortId)
+                        .condition('roleTypeId', 'in', ['Vendor', 'VendorBillFrom']).conditionDate('fromDate', 'thruDate', null).list()).map((row) => row.partyId)).filter((id) => id))
+                if (!vendors.has(part?.vendorPartyId)) { ec.message.addError(L('The order is not from the project\'s organization')); return }
                 ec.service.sync().name('create#mantle.order.OrderItemWorkEffort').parameters({orderId: orderId, orderItemSeqId: orderItemSeqId, workEffortId: workEffortId}).call()
             } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
         ]]></script></actions>

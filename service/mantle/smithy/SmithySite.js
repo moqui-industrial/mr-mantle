@@ -9,7 +9,7 @@
  * - A release is Mantle's (a WorkEffort of type WetRelease of the repository's project) linked to a tag by a
  *   WorkEffortGitRef; its notes are its WectReleaseNotes content (mantle.work.ProjectServices); published is its status
  *   (WeComplete or WeClosed), its revision the WorkEffort's revisionNumber. A draft is a Maintainer's. Its assets are
- *   SmithyReleaseAsset rows with their files at contentLocation, under the content root (mantle.content.root).
+ *   SmithyReleaseAsset rows with their files at contentLocation, under the content root (the mantle@content-root setting).
  * - A component is a repository whose root has a component.xml: read when the default branch moves (readComponent, the
  *   gitECA rule SmithyComponent) and at a release's tag, cached by commit id.
  * - Every list and read keeps each record's own rule: the view rule of a repository (and so of its docs, releases,
@@ -904,7 +904,7 @@ kit => {
     // ===== assets =====
     const ASSET_NAME = /^[A-Za-z0-9][A-Za-z0-9._+ -]{0,119}$/
     const assetRoot = siteId =>
-        String(ec.user.getPreference("mantle.content.root") || "dbresource://mantle/content").replace(/\/+$/, "") +
+        String(ec.factory.getConfValue("mantle@content-root") || "dbresource://mantle/content").replace(/\/+$/, "") +
         "/smithy/" +
         siteId +
         "/release-assets"
@@ -1100,7 +1100,8 @@ kit => {
             const artifact = others ? null : one("moqui.resource.GitRunArtifact", {artifactId: asset.artifactId})
             if (artifact && artifact.keep === "Y") update(artifact, {keep: "N"})
         }
-        if (asset.contentLocation)
+        // only a file this site keeps under the content root is removed, never another stored location (SEC-PFS-82)
+        if (asset.contentLocation && String(asset.contentLocation).startsWith(assetRoot(asset.siteId) + "/"))
             try {
                 ec.resource.getLocationReference(asset.contentLocation).delete()
             } catch (error) {

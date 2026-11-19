@@ -62,6 +62,7 @@ const dec = (value) => value == null ? null : String(toDecimal(value).setScale(2
 const statusOf = (workEffortId) => one("mantle.work.effort.WorkEffort", { workEffortId }).statusId
 const billing = (parameters) => call(`${PROJECT}.get#MilestoneBilling`, parameters)
 const shareOf = (milestoneId) => billing({ workEffortId: milestoneId }).shareList[0]
+const OTHER_VENDOR = "TMS_OTHER_VENDOR"
 const unbilledRow = () => call(`${PROJECT}.get#UnbilledSummary`, { workEffortId: "TMS", withEntries: true }).projectList[0]
 
 feature("a client project in planning with a work breakdown, its client rate, and a sales order line it fulfils, linked by link#ProjectOrderItem", {
@@ -100,13 +101,26 @@ feature("a client project in planning with a work breakdown, its client rate, an
             itemTypeEnumId: "ItemServiceProduct", itemDescription: "Monthly retainer", quantity: 1, unitAmount: 500 }).orderItemSeqId
         call("update#mantle.order.OrderHeader", { orderId: baseId, orderPurposeEnumId: "OrpRecurringTemplate" })
         const baseRefused = errorOf(`${PROJECT}.link#ProjectOrderItem`, { workEffortId: "TMS", orderId: baseId, orderItemSeqId: baseLine })
+        // another organization's order to the same client is not the project's (SEC-BOS-95)
+        if (!one("mantle.party.Party", { partyId: OTHER_VENDOR })) {
+            call("create#mantle.party.Party", { partyId: OTHER_VENDOR, partyTypeEnumId: "PtyOrganization", ownerPartyId: OTHER_VENDOR })
+            call("create#mantle.party.Organization", { partyId: OTHER_VENDOR, organizationName: "Milestone Walk Other Vendor" })
+        }
+        const otherId = call("mantle.order.OrderServices.create#Order", { customerPartyId: CLIENT, vendorPartyId: OTHER_VENDOR, currencyUomId: "USD",
+            orderName: "Milestone walk, another vendor" }).orderId
+        const otherLine = call("mantle.order.OrderServices.create#OrderItem", { orderId: otherId, orderPartSeqId: one("mantle.order.OrderPart", { orderId: otherId }).orderPartSeqId,
+            itemTypeEnumId: "ItemServiceProduct", itemDescription: "Their work", quantity: 1, unitAmount: 900 }).orderItemSeqId
+        const otherRefused = errorOf(`${PROJECT}.link#ProjectOrderItem`, { workEffortId: "TMS", orderId: otherId, orderItemSeqId: otherLine })
         return { link: one("mantle.order.OrderItemWorkEffort", { orderId: made.orderId, orderItemSeqId: made.lineSeq, workEffortId: "TMS" }), baseRefused,
-            baseLink: one("mantle.order.OrderItemWorkEffort", { orderId: baseId, orderItemSeqId: baseLine, workEffortId: "TMS" }) }
+            baseLink: one("mantle.order.OrderItemWorkEffort", { orderId: baseId, orderItemSeqId: baseLine, workEffortId: "TMS" }), otherRefused,
+            otherLink: one("mantle.order.OrderItemWorkEffort", { orderId: otherId, orderItemSeqId: otherLine, workEffortId: "TMS" }) }
     },
-    then({ link, baseRefused, baseLink }) {
+    then({ link, baseRefused, baseLink, otherRefused, otherLink }) {
         link != null
         String(baseRefused).includes("RECURRING_TEMPLATE")
         baseLink == null
+        String(otherRefused).includes("not from the project's organization")
+        otherLink == null
     },
 })
 

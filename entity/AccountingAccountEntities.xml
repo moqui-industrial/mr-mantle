@@ -953,11 +953,12 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="PaymentMethod" package="mantle.account.method" short-alias="paymentMethods" cache="never">
         <field name="paymentMethodId" type="id" is-pk="true"/>
         <field name="paymentMethodTypeEnumId" type="id"/>
-        <field name="purposeEnumId" type="id"/>
+        <!-- SEC-BOS-82: who made an account a payroll account (or any purpose), and who ended it, is the audit log's -->
+        <field name="purposeEnumId" type="id" enable-audit-log="true"/>
         <field name="ownerPartyId" type="id" enable-audit-log="update"/>
         <field name="description" type="text-medium"/>
         <field name="fromDate" type="date-time"/>
-        <field name="thruDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
         <field name="thruDateSetAuto" type="text-indicator"><description>If Y then expire (set thruDate) once allowed (no active Payment)</description></field>
         <field name="openedDate" type="date-time"/>
 

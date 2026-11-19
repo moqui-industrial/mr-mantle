@@ -179,6 +179,9 @@ spec({
             users.reader = user("reader", orgA, ["COMMERCE_VIEW"])
             users.manager = user("manager", orgA, ["COMMERCE_VIEW", "COMMERCE_PROMOTION_EDIT"])
             users.other = user("other", orgB, ["COMMERCE_VIEW", "COMMERCE_PROMOTION_EDIT"])
+            // an ADMIN without DATABASE_ADMIN (not in ADMIN_ADV), who writes the entity directly
+            users.admin = user("admin", orgA, [])
+            make("moqui.security.UserGroupMember", {userId: users.admin, userGroupId: "ADMIN", fromDate: 0})
         })
     }
 })
@@ -270,6 +273,85 @@ feature("a promotion takes only a registered rule, its parameters typed by the r
         code(r.otherFind) == "RECORD_UNAVAILABLE"
         r.rules.options.map(option => option.value).includes("FlatDiscount")
         r.rules.options.map(option => option.value).includes("OrderManualApprove") == false
+    }
+})
+
+feature("a promotion's description is plain text: a rule puts it on the line as written, and ${ is refused (SEC-BAP-83)", {
+    when() {
+        const flat = flatPromotion("Plain flat")
+        const orderId = cart(customer("Plain"), ids.store, flat.productId)
+        const orderPartSeqId = list("mantle.order.OrderPart", {orderId})[0].orderPartSeqId
+        // a rule called with a description holding ${...}: the text is kept, never run
+        system(() =>
+            call("mantle.product.PromotionServices.apply#FlatDiscount", {
+                orderId,
+                orderPartSeqId,
+                storePromotionId: flat.storePromotionId,
+                discountAmount: 1,
+                useLimit: 1,
+                itemsWithPromo: true,
+                itemDescription: "Save ${6 * 7} now"
+            })
+        )
+        const base = {productStoreId: ids.store, serviceRegisterId: "FlatDiscount", requireCode: "N"}
+        const made = manage("store#Promotion", Object.assign({itemDescription: "Five ${ec.user.userId} off"}, base))
+        const changed = manage("store#Promotion", {storePromotionId: flat.storePromotionId, itemDescription: "Plain ${1}"})
+        // the entity written directly, by an ADMIN without DATABASE_ADMIN (StorePromotion.eecas.xml), and plain text passes
+        const direct = itemDescription => {
+            login(users.admin)
+            let error = ""
+            ec.message.pushErrors()
+            try {
+                ec.artifactExecution.runAsUser("component://tools/screen/System.xml", () =>
+                    make(S + "ProductStorePromotion", {
+                        productStoreId: ids.store,
+                        serviceRegisterId: "FlatDiscount",
+                        itemDescription
+                    })
+                )
+            } catch (error_) {
+                error = String(error_.message || error_)
+            }
+            error += ec.message.getErrorsString() || ""
+            ec.message.clearErrors()
+            ec.message.popErrors()
+            login("john.doe")
+            return error
+        }
+        const directScript = direct("Ten ${ec.user.userId} off"),
+            directPlain = direct("Ten off")
+        const written = list(S + "ProductStorePromotion", {productStoreId: ids.store}).filter(row =>
+            /^Ten (off|\$\{)/.test(row.itemDescription)
+        )
+        // the direct rows have no rule parameters: gone before another cart of the store is priced
+        system(() =>
+            written.forEach(row =>
+                ec.entity
+                    .find(S + "ProductStorePromotion")
+                    .condition("storePromotionId", row.storePromotionId)
+                    .deleteAll()
+            )
+        )
+        return {
+            descriptions: promoItems(orderId, flat.storePromotionId)
+                .map(item => item.itemDescription)
+                .sort(),
+            made,
+            changed,
+            kept: list(S + "ProductStorePromotion", {storePromotionId: flat.storePromotionId})[0].itemDescription,
+            directScript,
+            directPlain,
+            written: written.map(row => row.itemDescription)
+        }
+    },
+    then(r) {
+        r.descriptions == ["Plain flat", "Save ${6 * 7} now"]
+        code(r.made) == "VALUE_INVALID"
+        code(r.changed) == "VALUE_INVALID"
+        r.kept == "Plain flat"
+        r.directScript.includes("DATABASE_ADMIN")
+        r.directPlain == ""
+        r.written == ["Ten off"]
     }
 })
 

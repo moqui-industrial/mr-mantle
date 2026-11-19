@@ -73,11 +73,11 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- the content type, and so text or not, comes from the file name's extension, as save#PaymentContentFile -->
             <if condition="ec.resource.getLocationReference('dbresource://' + filename).isText()">
                 <then>
-                    <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
+                    <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content'"/>
                 </then>
                 <else>
                     <set field="contentRoot"
-                            from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
+                            from="ec.factory.getConfValue('mantle@content-large-root') || 'dbresource://mantle/content'"/>
                 </else>
             </if>
             <set field="contentLocation"

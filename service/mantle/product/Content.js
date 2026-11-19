@@ -68,15 +68,19 @@ function access(p, edit = false) {
     })
 }
 const downloadLocationRefused = "A download's file is kept in its product's content folder: upload the file, a location is not taken"
+// the text types Shop publishes (a product's name and descriptions): their file too is only in the product's folder (SEC-PSS-82)
+const shopTextTypes = ["PcntProductName", "PcntDescription", "PcntDescriptionLong"]
+const textLocationRefused = "A product's name or description is kept in its product's content folder: enter the text, a location is not taken"
 function owned(row, c, location = row.contentLocation) {
     const value = String(location || ""),
         roots = [
             "dbresource://mantle/content",
-            ec.user.getPreference("mantle.content.root"),
-            ec.user.getPreference("mantle.content.large.root")
+            ec.factory.getConfValue("mantle@content-root"),
+            ec.factory.getConfValue("mantle@content-large-root")
         ].filter(Boolean)
+    // no step out of the folder: a .. segment, a backslash or an encoded dot, slash or backslash (as ShopCatalog's image rule)
     return (
-        !value.split("/").includes("..") &&
+        !/(?:^|[\/\\])\.\.(?:[\/\\]|$)|\\|%2e|%2f|%5c/i.test(value) &&
         roots.some(root => value.startsWith(String(root).replace(/\/+$/, "") + "/" + c.folder + "/" + row[c.owner] + "/"))
     )
 }
@@ -122,7 +126,7 @@ function retainConflict(row, c, p, currentRevision) {
         hasText = p.contentText != null,
         filename = hasFile ? safeName(file.getName()) : "submitted.txt",
         location =
-            (ec.user.getPreference("mantle.content.root") || "dbresource://mantle/content") +
+            (ec.factory.getConfValue("mantle@content-root") || "dbresource://mantle/content") +
             "/" +
             c.folder +
             "/" +
@@ -195,10 +199,13 @@ function update(p, category = false) {
         } else ref.putText(String(p.contentText))
         delete data.contentLocation
     }
-    // a download's file stays in the product's own content folder (ShopFulfillment serves no other location)
+    // a download's file, and a name's or description's, stays in the product's own content folder (ShopFulfillment and
+    // ShopCatalog read no other location)
     const merged = Object.assign({}, row, data)
     if (c.kind === "product" && merged[c.type] === "PcntDownload" && merged.contentLocation && !owned(merged, c))
         throw new Error(downloadLocationRefused)
+    if (c.kind === "product" && shopTextTypes.includes(merged[c.type]) && merged.contentLocation && !owned(merged, c))
+        throw new Error(textLocationRefused)
     call("update#" + c.entity, data)
     return {
         [c.id]: row[c.id],
@@ -359,7 +366,7 @@ function store(p, translation = false) {
         }).resource
         if (!source || source.isDirectory) throw new Error("Source file is not available")
         const location =
-                (ec.user.getPreference("mantle.content.root") || "dbresource://mantle/content") +
+                (ec.factory.getConfValue("mantle@content-root") || "dbresource://mantle/content") +
                 "/" +
                 c.folder +
                 "/" +
@@ -591,4 +598,4 @@ function execute(op, p) {
     if (!p[c.id] && p.contentId) p[c.id] = p.contentId
     return {list, detail, store, upload, resource, restore, translations, translate, datasheet}[op](p)
 }
-;({execute, update, revision, config, owned, safeName, get, downloadLocationRefused})
+;({execute, update, revision, config, owned, safeName, get, downloadLocationRefused, shopTextTypes, textLocationRefused})

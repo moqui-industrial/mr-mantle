@@ -10,8 +10,10 @@
 //   EmploymentSalary stays the salary and RateAmount the hourly rate, and assigning a structure changes neither;
 // - a payroll tax profile (PayrollTaxProfile) holds the values of the fields a localization declares (PayrollLocalizationField)
 //   from a date, so only the installed localizations' fields exist (the demonstration's alone in this build); Employment's and
-//   Employee's historical US tax fields are neither read nor written (F33). Bank details stay the person's payment methods,
-//   changed through Accounting's payment-method services: here only a masked reference is read;
+//   Employee's historical US tax fields are neither read nor written (F33). Bank details stay the person's payment methods:
+//   payroll adds and changes their payroll bank accounts here (store#PayrollBankAccount, purpose PmpPayroll, through
+//   Accounting's create#BankAccount and update#BankAccount; SEC-BOS-82: Accounting's finance details refuse employees), and
+//   reads them as masked references;
 // - benefits are Mantle's EmploymentBenefit rows (a type from a date, its cost and the employer's share), added and ended here;
 // - a salary (EmploymentSalary) from a date ends the row in effect on it (F4); a later row set already, or one from the same
 //   moment, is refused. The pay change (Employment.js, kind EckPayChange) writes through writeSalary after its approval.
@@ -1022,8 +1024,117 @@ function storePayrollProfile(p) {
     }
 }
 
+// ===== payroll bank accounts (SEC-BOS-82) =====
+// store#PayrollBankAccount: a payroll editor of the employer adds a payroll bank account (purpose PmpPayroll) for the employee
+// of an employment in scope, or changes one of the person's current payroll accounts at its lastUpdatedStamp (update#BankAccount
+// ends it and starts its successor, which pays from then on; an open payment run paying it loses its approval). Numbers in,
+// never out: the answer is the method and its masked reference. Every payer pays the newest payroll account first, and the
+// account is the person's, not the employment's: so the employer's payroll writes it only while the person works for no
+// internal organization outside the editor's scope, and for an ended employment only while it still has pay to settle (an
+// unpaid payroll invoice of the employment). The person is told (PayrollBankAccountChanged, direct to their own accounts, by
+// email too) and the audit log keeps who wrote the purpose and who ended an account (PaymentMethod's audited fields).
+const digits = value => text(value).replace(/[\s-]/g, "")
+const unpaidPayrollStatuses = ["InvoiceIncoming", "InvoiceReceived", "InvoiceApproved"]
+function payrollBankWriter(userScope, employment) {
+    const now = nowMs()
+    const employers = rows(RELATIONSHIP, {relationshipTypeEnumId: "PrtEmployee", fromPartyId: employment.partyId})
+        .filter(row => openAt(row, now))
+        .map(row => row.toPartyId)
+        .filter(organizationPartyId => one("mantle.party.PartyRole", {partyId: organizationPartyId, roleTypeId: "OrgInternal"}))
+    if (employers.some(organizationPartyId => !userScope.organizationPartyIds.includes(organizationPartyId)))
+        denied("EMPLOYED_ELSEWHERE", "The person works for another employer, whose payroll keeps their bank account")
+    if (openAt({fromDate: employment.fromMs, thruDate: employment.thruMs}, now)) return
+    const owed = find("mantle.account.invoice.Invoice", {
+        partyRelationshipId: employment.partyRelationshipId,
+        invoiceTypeEnumId: "InvoicePayroll",
+        fromPartyId: employment.partyId
+    })
+        .condition("statusId", "in", unpaidPayrollStatuses)
+        .count()
+    if (!owed) denied("EMPLOYMENT_ENDED", "The employment has ended and no pay is left to settle")
+}
+// PayrollBankAccountChanged to the person's own accounts alone (directOnly), by email as the topic sets: the employer, the bank
+// and last four digits, and who changed it, never the number. A failure is logged and the change stays.
+function tellPayee(employment, paymentMethodId, added) {
+    try {
+        const userIds = unique(
+            rows("moqui.security.UserAccount", {partyId: employment.partyId})
+                .filter(row => row.disabled !== "Y")
+                .map(row => row.userId)
+        ).filter(Boolean)
+        if (!userIds.length) {
+            ec.logger.warn("Payroll bank account " + paymentMethodId + " of " + employment.partyId + ": no user account to tell")
+            return 0
+        }
+        const reference = paymentMethodsOf(employment.partyId, nowMs()).find(row => row.paymentMethodId === paymentMethodId)
+        ec.makeNotificationMessage()
+            .topic("PayrollBankAccountChanged")
+            .message({
+                paymentMethodId,
+                organizationName:
+                    people.organizationNames([employment.organizationPartyId])[employment.organizationPartyId] || "",
+                accountText: reference?.referenceText || "",
+                actionText: added ? "added" : "changed",
+                changedByName: ec.user.userAccount?.userFullName || ec.user.username || "",
+                changedDateText: dateText(ec.user.nowTimestamp)
+            })
+            .userIds(userIds)
+            .directOnly()
+            .send()
+        return userIds.length
+    } catch (error) {
+        ec.logger.error("Payroll bank account notice of " + paymentMethodId + " was not sent: " + error.message)
+        return 0
+    }
+}
+function storePayrollBankAccount(p) {
+    const userScope = editorScope()
+    const employment = employmentIn(userScope, p.partyRelationshipId)
+    payrollBankWriter(userScope, employment)
+    const fields = {purposeEnumId: "PmpPayroll"}
+    for (const field of ["bankName", "typeEnumId", "description"]) if (!blank(p[field])) fields[field] = text(p[field])
+    if (!blank(p.accountNumber)) {
+        if (!/^[0-9]{4,17}$/.test(digits(p.accountNumber)))
+            denied("ACCOUNT_NUMBER_INVALID", "An account number is 4 to 17 digits")
+        fields.accountNumber = digits(p.accountNumber)
+    }
+    if (!blank(p.routingNumber)) {
+        if (!/^[0-9]{9}$/.test(digits(p.routingNumber))) denied("ROUTING_NUMBER_INVALID", "A routing number is 9 digits")
+        fields.routingNumber = digits(p.routingNumber)
+    }
+    const paymentMethodId = text(p.paymentMethodId)
+    if (paymentMethodId) {
+        const method = one("mantle.account.method.PaymentMethod", {paymentMethodId})
+        if (
+            !method ||
+            method.ownerPartyId !== employment.partyId ||
+            method.paymentMethodTypeEnumId !== "PmtBankAccount" ||
+            method.purposeEnumId !== "PmpPayroll" ||
+            !openAt(method, nowMs()) ||
+            !one("mantle.account.method.BankAccount", {paymentMethodId})
+        )
+            denied(
+                "PAYMENT_METHOD_UNAVAILABLE",
+                "Bank account " + paymentMethodId + " is not one of the person's current payroll accounts"
+            )
+        if (blank(p.lastUpdatedStamp) || stampOf(method) !== ms(p.lastUpdatedStamp))
+            denied("REVISION_CHANGED", "The bank account changed since you read it; open it again")
+        const saved = call("mantle.account.PaymentMethodServices.update#BankAccount", Object.assign({paymentMethodId}, fields))
+        const changedId = saved.paymentMethodId || paymentMethodId
+        return {paymentMethodId: changedId, notifiedCount: tellPayee(employment, changedId, false)}
+    }
+    if (!fields.accountNumber || !fields.routingNumber)
+        denied("BANK_DETAILS_REQUIRED", "Give the account number and the routing number")
+    if (!fields.bankName) denied("BANK_DETAILS_REQUIRED", "Give the bank's name")
+    const made = call(
+        "mantle.account.PaymentMethodServices.create#BankAccount",
+        Object.assign({ownerPartyId: employment.partyId, typeEnumId: "BatChecking"}, fields)
+    )
+    return {paymentMethodId: made.paymentMethodId, notifiedCount: tellPayee(employment, made.paymentMethodId, true)}
+}
+
 // ===== get#Compensation =====
-// The person's bank accounts as masked references: changed through Accounting's payment-method services, never here.
+// The person's bank accounts as masked references, payroll's first (store#PayrollBankAccount changes them).
 function paymentMethodsOf(partyId, at) {
     const methods = Array.from(
         people
@@ -1043,7 +1154,14 @@ function paymentMethodsOf(partyId, at) {
     return methods.map(row => {
         const number = String(accounts[row.paymentMethodId]?.accountNumber || "")
         const bank = accounts[row.paymentMethodId]?.bankName || row.description || "Bank account"
-        return {paymentMethodId: row.paymentMethodId, referenceText: bank + (number ? " •••• " + number.slice(-4) : "")}
+        return {
+            paymentMethodId: row.paymentMethodId,
+            referenceText: bank + (number ? " •••• " + number.slice(-4) : ""),
+            bankName: accounts[row.paymentMethodId]?.bankName || "",
+            payroll: row.purposeEnumId === "PmpPayroll",
+            purposeText: row.purposeEnumId === "PmpPayroll" ? "Payroll" : "",
+            lastUpdatedStamp: row.lastUpdatedStamp
+        }
     })
 }
 // The employment's tax profile for the localization: its declared fields with the values in effect, and its revision.
@@ -1210,6 +1328,7 @@ const operations = {
     findAssignments,
     assignPayStructure,
     storePayrollProfile,
+    storePayrollBankAccount,
     getCompensation,
     salaryAccess: p => (salaryAccess(p), {}),
     createSalary

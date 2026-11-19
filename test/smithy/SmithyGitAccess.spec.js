@@ -169,7 +169,7 @@ feature("an account with no password to give again signs in again instead", {
         const recent = add("sga-provider-2")
         // through a remote frontend the visitor's own sign-in counts, its delegation's issue, not the account's latest
         // anywhere (SEC-PFS-63): a delegation of ten minutes ago is refused though the account signed in just now
-        setProperty("pass_client_sgaspec_sites", SITE)
+        setConf("pass-authority/client[sgaspec]@sites", SITE)
         const delegation = (token, issued) =>
             lib.make("moqui.security.public.DelegatedSession", {
                 delegationId: "SGA_DEL_" + token.slice(4, 7),

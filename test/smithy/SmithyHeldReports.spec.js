@@ -21,7 +21,8 @@ const mail = (from, subject, text, more = {}) =>
         headers: {
             "delivered-to": ADDRESS,
             "message-id": "<" + ec.user.randomString(16) + "@shr.test>",
-            "authentication-results": "gw.example.test; dmarc=pass header.from=" + from.replace(/^.*@|>.*$/g, "")
+            "authentication-results": "gw.example.test; dmarc=pass header.from=" + from.replace(/^.*@|>.*$/g, ""),
+            from
         },
         fields: {from, subject, toList: [ADDRESS]},
         bodyPartList: [{contentType: "text/plain; charset=utf-8", contentText: text}],
@@ -43,8 +44,8 @@ spec({
     requires: ["git"],
     setupSpec() {
         login(lib.OPERATOR)
-        setProperty("pass_route_domains", "reports.shr.test")
-        setProperty("smtp_authserv_id", "gw.example.test")
+        setConf("pass@route-domains", "reports.shr.test")
+        setConf("smtp-server@authserv-id", "gw.example.test")
         lib.site(SITE)
         Object.assign(ids, lib.tracker(SITE, "SHR", "shrgroup"))
         lib.account(SITE, "SHR_MOD", {member: true, siteRole: "moderator"})
@@ -117,7 +118,8 @@ feature("mail from a confirmed address files a confidential issue as that accoun
             headers: {
                 "delivered-to": "security+shr-reply-token@reports.shr.test",
                 "message-id": "<shr-tagged@shr.test>",
-                "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test"
+                "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test",
+                from: "shr_author@smithy.test"
             }
         })
         return {

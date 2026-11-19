@@ -8,6 +8,10 @@
 const lib = ec.resource.script("component://mr-mantle/test/smithy/SmithySpecLib.js")
 const ids = {}
 const op = (username, operation, input) => lib.op(username, lib.SITE7, operation, {repositoryId: ids.repositoryId, ...input})
+// a user's own content-root preference, which moves no file (SEC-PFS-82), and the content root setting
+const MOVED = "runtime://tmp/sst-content-root-moved"
+const SET_ROOT = "dbresource://spec-smithy-content-root"
+const ROOT = String(ec.factory.getConfValue("mantle@content-root") || "dbresource://mantle/content").replace(/\/+$/, "")
 // over the 64 KiB a stored file keeps in its row, so its content is a blob
 const ARTIFACT_TEXT = "the release's archive, as a runner uploaded it\n".repeat(2000)
 
@@ -67,13 +71,20 @@ spec({
 
 feature("a Maintainer makes a tag's release; a draft is the Maintainer's; publishing takes the tag's run artifact", {
     when() {
-        const draft = op("SST_MAINT", "storeRelease", {
-            tag: "v1.2.0",
-            name: "Spring",
-            notes: "# Notes\n\nFixed the widget.<script>alert(3)</script>",
-            published: false,
-            operationId: "sst-release-1"
-        })
+        // SEC-PFS-82: the notes are written under the mantle@content-root setting, not the Maintainer's own preference
+        lib.as("SST_MAINT", () => ec.user.setPreference("mantle.content.root", MOVED))
+        let draft
+        try {
+            draft = op("SST_MAINT", "storeRelease", {
+                tag: "v1.2.0",
+                name: "Spring",
+                notes: "# Notes\n\nFixed the widget.<script>alert(3)</script>",
+                published: false,
+                operationId: "sst-release-1"
+            })
+        } finally {
+            lib.as("SST_MAINT", () => ec.user.setPreference("mantle.content.root", null))
+        }
         const draftRead = {
             stranger: op(null, "getRelease", {tag: "v1.2.0"}).kind,
             maintainer: op("SST_MAINT", "getRelease", {tag: "v1.2.0"})
@@ -91,10 +102,11 @@ feature("a Maintainer makes a tag's release; a draft is the Maintainer's; publis
             stale,
             read: op(null, "getRelease", {tag: "v1.2.0"}),
             listed: lib.op(null, lib.SITE7, "findReleases", {groupId: ids.groupId}),
-            release: lib.row("mantle.smithy.SmithyReleaseTag", {repositoryId: ids.repositoryId, refName: "refs/tags/v1.2.0"})
+            release: lib.row("mantle.smithy.SmithyReleaseTag", {repositoryId: ids.repositoryId, refName: "refs/tags/v1.2.0"}),
+            moved: lib.privileged(() => ec.resource.getLocationReference(MOVED).getExists())
         }
     },
-    then({draft, draftRead, byStranger, noTag, published, stale, read, listed, release}) {
+    then({draft, draftRead, byStranger, noTag, published, stale, read, listed, release, moved}) {
         draft.tag == "v1.2.0"
         draft.revision == 1
         draftRead.stranger == "NotFound"
@@ -118,6 +130,16 @@ feature("a Maintainer makes a tag's release; a draft is the Maintainer's; publis
             "/code/sstgroup/site/-/archive/v1.2.0.zip,/code/sstgroup/site/-/archive/v1.2.0.tar.gz"
         read.component.name == "sst-site"
         listed.releaseList.map(row => row.repositoryPath + "@" + row.tag).join() == "sstgroup/site@v1.2.0"
+        lib.privileged(() =>
+            Array.from(
+                ec.entity
+                    .find("mantle.work.effort.WorkEffortContent")
+                    .condition("workEffortId", release.workEffortId)
+                    .condition("contentTypeEnumId", "WectReleaseNotes")
+                    .list()
+            ).map(row => row.contentLocation)
+        ).join() == ROOT + "/work/" + release.workEffortId + "/release-notes.md"
+        !moved
     }
 })
 
@@ -265,5 +287,43 @@ feature("notes keep the site's rules, an artifact of another commit is not a rel
         otherCommit.kind == "Unprocessable"
         announced.reason == "notAvailable"
         announced.message.includes("more people")
+    }
+})
+
+// SEC-PFS-82: a release file is written under the mantle@content-root setting; the Maintainer's own preference of the old
+// key moves it nowhere
+feature("a release file is kept under the content root setting, whatever the Maintainer's content-root preference says", {
+    when() {
+        const location = "runtime://tmp/sst-upload-" + ec.user.randomString(8)
+        lib.privileged(() => ec.resource.getLocationReference(location).putText("Uploaded\n"))
+        lib.make("mantle.forum.ForumAttachment", {
+            attachmentId: "SST_UP_FILE",
+            siteId: lib.SITE7,
+            purpose: "repositoryFile",
+            ownerPartyId: "SST_MAINT",
+            location,
+            filename: "notes.txt",
+            mimeType: "text/plain",
+            byteSize: 9,
+            scanState: "clean"
+        })
+        lib.as("SST_MAINT", () => ec.user.setPreference("mantle.content.root", MOVED))
+        let added
+        try {
+            // the root set apart from its default, so the setting is seen to be read
+            added = withConf("mantle@content-root", SET_ROOT, () =>
+                op("SST_MAINT", "addReleaseAsset", {tag: "v1.2.0", attachmentId: "SST_UP_FILE", name: "notes-file.txt", operationId: "sst-asset-root"})
+            )
+        } finally {
+            lib.as("SST_MAINT", () => ec.user.setPreference("mantle.content.root", null))
+        }
+        const asset = lib.row("mantle.smithy.SmithyReleaseAsset", {repositoryId: ids.repositoryId, name: "notes-file.txt"})
+        return {added, asset, moved: lib.privileged(() => ec.resource.getLocationReference(MOVED).getExists())}
+    },
+    then({added, asset, moved}) {
+        added.assetId != null
+        asset.contentLocation == SET_ROOT + "/smithy/" + lib.SITE7 + "/release-assets/" + asset.assetId + "/notes-file.txt"
+        lib.privileged(() => ec.resource.getLocationReference(asset.contentLocation).getText()) == "Uploaded\n"
+        !moved
     }
 })

@@ -19,8 +19,9 @@
 // Commerce (checkout) read the enabled, current rows as before and change no credential.
 //
 // Reading needs ADMIN_CONNECTION_VIEW, a change ADMIN_CONNECTION_MANAGE, and an organization is one the caller
-// administers (Identity.js scope(): the organization filters of the authorization the call runs under). Stands without
-// BOSS.
+// administers (Identity.js scope(): the organization filters of the authorization the call runs under): a payment gateway
+// another organization uses is not read, changed or tested by anyone but an instance administrator, nor is a shipping or
+// tax gateway changed (SEC-PSS-83). Stands without BOSS.
 const lib = ec.resource.script("component://framework/service/org/moqui/admin/ConfigurationLib.js")
 const connections = ec.resource.script("component://framework/service/org/moqui/admin/ConfigurationConnections.js").lib
 const identityLib = () => ec.resource.script("component://mr-mantle/service/mantle/party/Identity.js")
@@ -34,7 +35,7 @@ const STORE = "mantle.product.store.ProductStore"
 const STORE_GATEWAY = "mantle.product.store.ProductStorePaymentGateway"
 const SHIPPING = "mantle.shipment.carrier.ShippingGatewayConfig"
 const TAX = "mantle.other.tax.TaxGatewayConfig"
-const production = () => text(System.getProperty("instance_purpose")) === "production"
+const production = () => text(ec.factory.getConfValue("instance@purpose")) === "production"
 const nowMs = () => ms(ec.user.nowTimestamp)
 const current = (row, at = nowMs()) => (ms(row.fromDate) ?? -Infinity) <= at && (ms(row.thruDate) ?? Infinity) > at
 const count = (entity, conditions) => Number(find(entity, conditions).count())
@@ -42,6 +43,24 @@ const enumName = enumId => (enumId ? one("moqui.basic.Enumeration", {enumId})?.d
 const organizationName = partyId =>
     one("mantle.party.Organization", {partyId})?.organizationName || one("mantle.party.Party", {partyId})?.pseudoId || partyId
 const scopeIds = () => identityLib().scope().organizationIds
+// An instance administrator (Identity.js scope().all) reads, changes and tests every gateway. Anyone else reads, changes and
+// tests a payment gateway only when every organization it is permitted for, and every store that takes payments through it,
+// is one they administer (one bound to none, a new one, is theirs to set up), and changes no shipping or tax gateway, which
+// serve every organization (SEC-PSS-83).
+const instanceAdmin = () => identityLib().scope().all === true
+function paymentGatewayHidden(paymentGatewayConfigId) {
+    const userScope = identityLib().scope()
+    if (userScope.all) return null
+    const scope = new Set(userScope.organizationIds)
+    const organizations = rows(BINDING, {paymentGatewayConfigId}).map(row => row.organizationPartyId)
+    for (const productStoreId of new Set(rows(STORE_GATEWAY, {paymentGatewayConfigId}).map(row => row.productStoreId)))
+        organizations.push(one(STORE, {productStoreId})?.organizationPartyId || null)
+    return organizations.every(partyId => partyId && scope.has(partyId))
+        ? null
+        : refused("RECORD_UNAVAILABLE", "This payment gateway is not available: another organization uses it")
+}
+const sharedGatewayReadOnly = what =>
+    instanceAdmin() ? null : "A " + what + " gateway serves every organization: an instance administrator changes it"
 
 // ===== the provider types =====
 // Each type a gateway is started as: its services (the type's, never entered), the hosts of its provider with the usage
@@ -300,6 +319,7 @@ const paymentDefinition = {
         enumName(parts.main.paymentGatewayTypeEnumId) ||
         "Payment gateway",
     summary: parts => (parts.remote ? hostOf(parts.remote.sendUrl) : "Local, no connection"),
+    hidden: parts => paymentGatewayHidden(parts.main.paymentGatewayConfigId),
     listKeys: p => {
         const keys = Array.from(
             find(CONFIG).selectField("paymentGatewayConfigId").orderBy("paymentGatewayConfigId").limit(500).list()
@@ -476,7 +496,7 @@ const shippingDefinition = {
             : Array.from(
                   find(SHIPPING).selectField("shippingGatewayConfigId").orderBy("shippingGatewayConfigId").limit(500).list()
               ).map(row => String(row.shippingGatewayConfigId)),
-    readOnly: parts => connections.remoteReadOnly(parts.remote),
+    readOnly: parts => sharedGatewayReadOnly("shipping") || connections.remoteReadOnly(parts.remote),
     incomplete: parts => {
         const type = typeOf(shippingTypes, parts.main.shippingGatewayTypeEnumId)
         if (!parts.remote) return type ? "The gateway has no connection: an instance administrator gives it one in Tools" : null
@@ -497,6 +517,7 @@ const shippingDefinition = {
             ? connections.remoteTest(parts.remote, context)
             : [{check: "Gateway", ok: true, text: "A local gateway with no connection: nothing is reached"}],
     newParts: values => {
+        if (!instanceAdmin()) return refused("READ_ONLY", sharedGatewayReadOnly("shipping"))
         const typeEnumId = text(values.gatewayTypeEnumId)
         if (!Object.hasOwn(shippingTypes, typeEnumId))
             return refused(
@@ -581,6 +602,7 @@ const taxDefinition = {
             : Array.from(find(TAX).selectField("taxGatewayConfigId").orderBy("taxGatewayConfigId").limit(500).list()).map(row =>
                   String(row.taxGatewayConfigId)
               ),
+    readOnly: () => sharedGatewayReadOnly("tax"),
     incomplete: parts =>
         text(parts.main.calculateServiceName)
             ? null

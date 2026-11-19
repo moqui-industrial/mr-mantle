@@ -321,11 +321,11 @@ kit => {
     /* Where git over SSH is reached, as the framework builds a clone address (get#GitCloneUrls) from the server's
        settings: what stands before a repository's path; none where the SSH server has no port. */
     function sshAddress() {
-        const setting = name => text(System.getProperty(name)).trim()
-        const port = setting("ssh_public_port") || setting("ssh_port")
+        const setting = selector => text(ec.factory.getConfValue(selector)).trim()
+        const port = setting("ssh-server@public-port") || setting("ssh-server@port")
         if (!port || port === "0") return null
         const host =
-            [setting("ssh_public_host"), setting("webapp_http_host"), setting("ssh_host")].find(
+            [setting("ssh-server@public-host"), setting("webapp-list/webapp[webroot]@http-host"), setting("ssh-server@host")].find(
                 name => name && name !== "0.0.0.0"
             ) || "localhost"
         const user = ec.user.username || "username"

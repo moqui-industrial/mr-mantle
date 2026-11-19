@@ -541,9 +541,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="filename" from="contentFile.getName()"/>
             <if condition="ResourceReference.isTextFilename(filename)"><then>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content'"/>
             </then><else>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-large-root') || 'dbresource://mantle/content'"/>
             </else></if>
             <!-- IronStone People P21: a confidential case's files are kept outside the Records drive's request folder (an unmapped
                 folder, as an employment's files), so the drive never lists them -->
@@ -1343,9 +1343,10 @@ along with this software (see the LICENSE.md file). If not, see
             message that made it) it answers that message in its thread. The sent message is on the request
             (RequestEmailMessage), so a reply to it joins the request. Never fails: a send that does not go is logged and
             waits in the account's Outbox. A queue's route (Customer Service P6) gives its text (emailTextBlockId, a Comms text
-            block with ${requestId}, ${requestName} and ${queueName}) and the identity it goes from (emailIdentityId, one of
-            the account's); it is marked Auto-Submitted, and it is never filed on the request's conversation, so it is no
-            response (CpAcknowledgement on any event made for it).</description>
+            block with ${requestId}, ${requestName}, ${projectName} and ${queueName}, each replaced by its value as escaped
+            text; the block's text is never run as a template, and any other ${...} stays as written: SEC-BAP-81) and the
+            identity it goes from (emailIdentityId, one of the account's); it is marked Auto-Submitted, and it is never filed
+            on the request's conversation, so it is no response (CpAcknowledgement on any event made for it).</description>
         <in-parameters>
             <parameter name="requestId" required="true"/>
             <parameter name="emailAccountId" required="true"/>
@@ -1381,11 +1382,16 @@ along with this software (see the LICENSE.md file). If not, see
                 const lines = [ec.resource.expand(project ? 'We received your request ${requestId} for ${projectName}: ${requestName}' : 'We received your request ${requestId}: ${requestName}', '', vars),
                     L('We will be in touch. To add to it, reply to this email.')]
                 const escape = (text) => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                // the route's text: the block's, its variables escaped
+                        .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+                // the route's text: the block's, each ${name} of these values replaced by the value escaped; the stored text
+                // is never expanded as a template, so any other ${...} stays as written (SEC-BAP-81). The placeholder form
+                // is the one framework/entity/Security.eecas.xml EmailTextBlockScript lets any author write.
                 const escapedVars = Object.fromEntries(Object.entries(vars).map(([key, value]) => [key, escape(value)]))
-                const blockHtml = block?.bodyHtml ? ec.resource.expand(String(block.bodyHtml), '', escapedVars) : null
+                const blockHtml = block?.bodyHtml ? String(block.bodyHtml).replace(/\$\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/g,
+                        (all, name) => Object.hasOwn(escapedVars, name) ? escapedVars[name] : all) : null
                 const blockText = blockHtml ? blockHtml.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n\n').replace(/<[^>]*>/g, '')
-                        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim() : null
+                        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+                        .replace(/&amp;/g, '&').trim() : null
                 const drafts = Array.from(ec.entity.find('moqui.basic.email.EmailFolder').condition('emailAccountId', emailAccountId).condition('folderKindEnumId', 'EfkDrafts').list())[0] || null
                 const references = parent ? [].concat(String(parent.referencesHeader || '').split(/\s+/), parent.messageId ? [parent.messageId] : []).filter((id) => id) : []
                 const draft = ec.entity.makeValue('moqui.basic.email.EmailMessage')

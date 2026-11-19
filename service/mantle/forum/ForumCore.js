@@ -159,7 +159,7 @@ function routeAddress(address) {
         .toLowerCase()
     const m = /^([a-z0-9._-]{1,64})@([a-z0-9.-]{1,190})$/.exec(value)
     if (!m) invalid('A route address is local@domain without a plus tag')
-    const domains = String(System.getProperty('pass_route_domains') || '')
+    const domains = String(ec.factory.getConfValue('pass@route-domains') || '')
         .split(',')
         .map((d) => d.trim().toLowerCase())
         .filter(Boolean)
@@ -763,6 +763,58 @@ function plainText(html) {
         .replace(/&amp;/g, '&')
         .replace(/\s+/g, ' ')
         .trim()
+}
+/* Mail From and Sender fields (SEC-PFS-81). A field is `name <address>`, `"name" <address>`, `address (comment)` or an
+   address alone; the address of its mailbox is the angle-bracketed address that ends it, or the bare address before a
+   trailing comment, never an address written in the name. Quoted strings and comments are text, so only an address
+   outside them is one of the field's (fieldAddressCount). */
+const ADDRESS_TOKEN = /[^\s<>()\[\],;:"'@]+@[^\s<>()\[\],;:"'@]+/g
+const QUOTED = /"(?:[^"\\]|\\.)*"/g
+const COMMENT = /\((?:[^()\\]|\\.)*\)/g
+/* An addr-spec as the store keeps it: a quoted local part unquoted ("john.doe"@x is john.doe@x). */
+function plainAddress(local, domain) {
+    const unquoted = /^"([\s\S]*)"$/.exec(local)
+    return (unquoted ? unquoted[1].replace(/\\(.)/g, '$1') : local) + '@' + domain
+}
+const LOCAL = '("(?:[^"\\\\]|\\\\.)*"|[^<>"\\s(),;:@]+)'
+const DOMAIN = '([^<>"\\s(),;:@]+)'
+const TRAILING_COMMENTS = /\s*((?:\((?:[^()\\]|\\.)*\)\s*)*)$/
+function fieldMailbox(text) {
+    const value = String(text || '').trim()
+    // a comment after an angle-bracketed address is no part of it: Bob <bob@x> (work)
+    const comments = TRAILING_COMMENTS.exec(value)
+    const body = value.slice(0, comments.index).trim()
+    const commentText = comments[1].replace(/^\(|\)\s*$/g, '').replace(/\)\s*\(/g, ' ').trim()
+    const bracketed = new RegExp('<' + LOCAL + '@' + DOMAIN + '>$').exec(body)
+    if (bracketed)
+        return {
+            address: plainAddress(bracketed[1], bracketed[2]),
+            name: body
+                .slice(0, bracketed.index)
+                .trim()
+                .replace(/^"([\s\S]*)"$/, '$1')
+                .replace(/\\(.)/g, '$1')
+                .trim(),
+        }
+    const bare = new RegExp('^' + LOCAL + '@' + DOMAIN + '$').exec(body)
+    if (bare) return { address: plainAddress(bare[1], bare[2]), name: commentText }
+    return { address: '', name: value }
+}
+/* How many addresses a raw header field names outside its quoted strings and comments (an encoded word holds no @). */
+function fieldAddressCount(text) {
+    let rest = String(text || '').replace(QUOTED, ' ')
+    for (let depth = 0, before = null; depth < 5 && before !== rest; depth++) {
+        before = rest
+        rest = rest.replace(COMMENT, ' ')
+    }
+    return (rest.match(ADDRESS_TOKEN) || []).length
+}
+/* Whether a display name shows an address other than the mailbox's own (in any width of @: NFKC). */
+function nameShowsOtherAddress(name, address) {
+    const own = String(address || '').trim().toLowerCase()
+    return (String(name || '').normalize('NFKC').match(ADDRESS_TOKEN) || []).some(
+        (token) => token.replace(/^[.]+|[.]+$/g, '').toLowerCase() !== own,
+    )
 }
 function clearAnswer(t, a, postId, reason) {
     if (!postId || t.acceptedAnswerId !== postId) return
@@ -1421,7 +1473,8 @@ function confirmedParty(partyId) {
 /* g: siteId, actorPartyId, contactListId (the scope category), kind ('topic' | 'reply' | 'issue' | 'comment' |
    'mergeRequest' | 'review' | 'reviewComment' | 'fork' | 'repository' | 'group' | 'pipelineRun'), title and body (the
    cleaned text of the revision; either may be absent), source (the text as typed, for the length), sourceFormat,
-   canModerate (the caller moderates the scope: limits and holds do not apply), isPrivate (no first-post hold),
+   canModerate (the caller moderates the scope: limits and holds do not apply), isPrivate (no first-post hold; rules only
+   block or censor, never hold or flag),
    confirmed (true: the caller has checked the address),
    slowIntervalSeconds and rootCommEventId (a reply in a topic in slow mode), mailVerdict ({spam, reason}), edit (a new
    revision of a post that is there: no interval, limit or first-post hold).
@@ -1601,6 +1654,12 @@ function gate(g) {
         approve = approve || ruled.approve
         flag = flag || ruled.flag
     }
+    // A private message reaches staff only through a participant's report (SEC-PFS-83): on it a rule blocks or censors,
+    // and one that would hold or flag it files no review item.
+    if (g.isPrivate) {
+        approve = false
+        flag = false
+    }
     if (nameKind) {
         if (approve)
             return refuse(
@@ -1637,6 +1696,7 @@ function gate(g) {
             Number(memberState.approvedContributions || 0) <
                 pol.firstContributionCount,
         ruleHold = !g.isPrivate && approve && !mod,
+        // a private post is held for spam too, with no review item (publishPost, SEC-PFS-83)
         spam = !!g.mailVerdict?.spam && !mod
     if (firstPost || ruleHold || spam)
         return {
@@ -1657,7 +1717,7 @@ function gate(g) {
         decision: 'allow',
         body,
         title,
-        flag: flag || (!!g.isPrivate && approve),
+        flag,
         memberState,
         counter,
     }
@@ -1717,6 +1777,9 @@ function privateTopic(t) {
     F,
     S,
     E,
+    fieldMailbox,
+    fieldAddressCount,
+    nameShowsOtherAddress,
     now,
     millis,
     dayKey,
