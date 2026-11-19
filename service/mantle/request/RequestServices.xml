@@ -408,7 +408,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="requestId" required="true"/>
             <parameter name="communicationEventId" required="true"/>
             <parameter name="subject"/>
-            <parameter name="body" allow-html="safe"/>
+            <parameter name="body" allow-html="app"/>
             <parameter name="contentType" default-value="text/plain"/>
         </in-parameters>
         <out-parameters><parameter name="editedDate" type="Timestamp"/></out-parameters>

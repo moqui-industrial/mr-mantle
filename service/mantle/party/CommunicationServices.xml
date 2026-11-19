@@ -4015,7 +4015,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
             <parameter name="recordId" required="true"/>
-            <parameter name="body" required="true" allow-html="safe"/>
+            <parameter name="body" required="true" allow-html="app"/>
             <parameter name="subject"/>
             <parameter name="contentType" default-value="text/plain"/>
             <parameter name="parentCommEventId"><description>The note or message this answers</description></parameter>
@@ -4155,7 +4155,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="recordEntityName" required="true"/>
             <parameter name="recordId" required="true"/>
             <parameter name="communicationEventId" required="true"/>
-            <parameter name="body" required="true" allow-html="safe"/>
+            <parameter name="body" required="true" allow-html="app"/>
             <parameter name="subject"><description>Empty keeps the subject</description></parameter>
             <parameter name="contentType"><description>Empty keeps the content type</description></parameter>
             <parameter name="mentionUserIds" type="List"><description>The users the new body mentions</description></parameter>
