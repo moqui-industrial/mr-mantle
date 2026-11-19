@@ -859,6 +859,13 @@ feature("the sender is the From address, never its display name: a name holding 
         lib.settled(SITE, "MLS_MEMBER")
         const sentFor = mail(member, to, "Mine through an assistant", "MLS-SPOOF-SENTFOR",
             withHeaders({from: member, sender: "Assistant <mls_other@smithy.test>"}))
+        // one mailbox written with a comment after its address, or with a quoted local part, is the member's
+        lib.settled(SITE, "MLS_MEMBER")
+        const commented = mail("Member <" + member + ">", to, "Mine with a comment", "MLS-SPOOF-COMMENT",
+            withHeaders({from: "Member <" + member + "> (work)"}))
+        lib.settled(SITE, "MLS_MEMBER")
+        const quotedOne = mail(member, to, "Mine with a quoted local part", "MLS-SPOOF-QUOTEDONE",
+            withHeaders({from: '"mls_member"@smithy.test'}))
         const receipt = id => lib.row("mantle.forum.ForumInboundReceipt", {receiptId: id})
         return {
             polled,
@@ -867,6 +874,7 @@ feature("the sender is the From address, never its display name: a name holding 
             named,
             ownAddress,
             sentFor,
+            ownForms: [commented, quotedOne].map(out => out.result),
             heldReasons: [encoded, twoFrom, quotedLocal, noFrom, otherSender, cut].map(out => out.result + ": " + out.reason),
             senders: [receipt(polled.receiptId).senderAddress, receipt(stored.receiptId).senderAddress],
             found: posts(ids.list)
@@ -876,7 +884,7 @@ feature("the sender is the From address, never its display name: a name holding 
             kept: held("mls_member@smithy.test").length + held("mls_other@smithy.test").length
         }
     },
-    then({polled, stored, plain, named, ownAddress, sentFor, heldReasons, senders, found, kept}) {
+    then({polled, stored, plain, named, ownAddress, sentFor, ownForms, heldReasons, senders, found, kept}) {
         polled.result == "held"
         stored.result == "held"
         senders == ["mls_other@smithy.test", "mls_other@smithy.test"]
@@ -893,10 +901,13 @@ feature("the sender is the From address, never its display name: a name holding 
         named.result == "posted"
         ownAddress.result == "posted"
         sentFor.result == "posted"
+        ownForms == ["posted", "posted"]
         found ==
             [
                 "Mine by mail MLS_MEMBER",
                 "Mine through an assistant MLS_MEMBER",
+                "Mine with a comment MLS_MEMBER",
+                "Mine with a quoted local part MLS_MEMBER",
                 "Mine with my address MLS_MEMBER",
                 "Mine with my name MLS_MEMBER"
             ]

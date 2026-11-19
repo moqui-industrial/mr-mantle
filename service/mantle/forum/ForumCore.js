@@ -771,25 +771,33 @@ function plainText(html) {
 const ADDRESS_TOKEN = /[^\s<>()\[\],;:"'@]+@[^\s<>()\[\],;:"'@]+/g
 const QUOTED = /"(?:[^"\\]|\\.)*"/g
 const COMMENT = /\((?:[^()\\]|\\.)*\)/g
+/* An addr-spec as the store keeps it: a quoted local part unquoted ("john.doe"@x is john.doe@x). */
+function plainAddress(local, domain) {
+    const unquoted = /^"([\s\S]*)"$/.exec(local)
+    return (unquoted ? unquoted[1].replace(/\\(.)/g, '$1') : local) + '@' + domain
+}
+const LOCAL = '("(?:[^"\\\\]|\\\\.)*"|[^<>"\\s(),;:@]+)'
+const DOMAIN = '([^<>"\\s(),;:@]+)'
+const TRAILING_COMMENTS = /\s*((?:\((?:[^()\\]|\\.)*\)\s*)*)$/
 function fieldMailbox(text) {
     const value = String(text || '').trim()
-    const bracketed = /<([^<>\s]+@[^<>\s]+)>$/.exec(value)
+    // a comment after an angle-bracketed address is no part of it: Bob <bob@x> (work)
+    const comments = TRAILING_COMMENTS.exec(value)
+    const body = value.slice(0, comments.index).trim()
+    const commentText = comments[1].replace(/^\(|\)\s*$/g, '').replace(/\)\s*\(/g, ' ').trim()
+    const bracketed = new RegExp('<' + LOCAL + '@' + DOMAIN + '>$').exec(body)
     if (bracketed)
         return {
-            address: bracketed[1],
-            name: value
+            address: plainAddress(bracketed[1], bracketed[2]),
+            name: body
                 .slice(0, bracketed.index)
                 .trim()
                 .replace(/^"([\s\S]*)"$/, '$1')
                 .replace(/\\(.)/g, '$1')
                 .trim(),
         }
-    const commented = /^([^<>"\s(),;:]+@[^<>"\s(),;:]+)\s*((?:\((?:[^()\\]|\\.)*\)\s*)*)$/.exec(value)
-    if (commented)
-        return {
-            address: commented[1],
-            name: commented[2].replace(/^\(|\)\s*$/g, '').replace(/\)\s*\(/g, ' ').trim(),
-        }
+    const bare = new RegExp('^' + LOCAL + '@' + DOMAIN + '$').exec(body)
+    if (bare) return { address: plainAddress(bare[1], bare[2]), name: commentText }
     return { address: '', name: value }
 }
 /* How many addresses a raw header field names outside its quoted strings and comments (an encoded word holds no @). */
