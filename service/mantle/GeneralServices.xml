@@ -277,6 +277,8 @@ along with this software (see the LICENSE.md file). If not, see
                         all.push({bool: {any: any}})
                     }
                     if (type === 'MantleParty') all.push(searchScope.privateClause())
+                    // the hide rules an indexed field can say, in the trusted filter (SEC-DAT-82)
+                    all.push(...searchScope.hideClauses(type))
                     typeClauses.push({bool: {all: all}})
                 }
                 types = types.filter(type => !leftOut.includes(type))

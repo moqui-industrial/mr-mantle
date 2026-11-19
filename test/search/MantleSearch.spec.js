@@ -439,3 +439,36 @@ feature("the general search leaves out invoices the user does not read, and coun
         maxIndex == 0
     },
 })
+
+// a confidential HR case is no hit in the trusted filter itself (SearchScope.js hideClauses; SEC-DAT-82): no total, no
+// short page and no "more than shown" says it is there, for any user
+feature("an HR case is no hit of the universal or the general search, counted or not (SEC-DAT-82)", {
+    when() {
+        ec.entity.makeDataLoader().xmlText(`<entity-facade-xml>
+    <mantle.request.Request requestId="SF_HR_CASE" requestTypeEnumId="RqtHrCase" statusId="ReqSubmitted" requestName="SFHRCASEZED"
+            requestDate="${day(2)}"/>
+    <mantle.request.RequestParty requestId="SF_HR_CASE" partyId="ORG_ZIZI_RETAIL" roleTypeId="OrgInternal" fromDate="${day(2)}"/>
+</entity-facade-xml>`).load()
+        // its text is kept out of the index (PeopleCases.js documentData): an older index's document of it, as one stood
+        const raw = () => num(call("org.moqui.search.SearchServices.search#DataDocuments",
+            { indexName: "mantle", documentType: "MantleRequest", queryString: "requestId:SF_HR_CASE", pageSize: 5 }).documentListCount)
+        ec.search.indexDocuments([{ _index: "mantle", _type: "MantleRequest", _id: "SF_HR_CASE", requestId: "SF_HR_CASE",
+            requestTypeEnumId: "RqtHrCase", requestName: "SFHRCASEZED", parties: [{ partyId: "ORG_ZIZI_RETAIL" }] }])
+        const indexed = raw()
+        const universal = call("mantle.search.UniversalSearchServices.search#Universal", { q: "requestId:SF_HR_CASE", limit: 1,
+            facets: ["entityType"] })
+        const facet = (universal.facetCounts?.entityType || []).find((row) => row.value === "MantleRequest" || row.key === "MantleRequest")
+        // the trusted filter itself, as each search passes it
+        const filtered = ec.search.search({ indexName: "mantle", documentType: "MantleRequest", queryString: "requestId:SF_HR_CASE",
+            filter: { bool: { all: ec.resource.script("component://mr-mantle/service/mantle/search/SearchScope.js").hideClauses("MantleRequest") } },
+            limit: 1 })
+        return { indexed, total: num(universal.total), facetCount: num(facet?.count), filtered: num(filtered.total) }
+    },
+    then({ indexed, total, facetCount, filtered }) {
+        indexed == 1
+        total == 0
+        // the type facet counts the whole authorized match: no hidden HR case in it
+        facetCount == 0
+        filtered == 0
+    },
+})

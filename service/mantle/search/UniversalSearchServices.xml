@@ -165,6 +165,8 @@ along with this software (see the LICENSE.md file). If not, see
                 const all = [{field: {name: '_document', op: 'eq', value: type}}]
                 if (documents[type].limit != null) all.push({bool: {any: documents[type].limit}})
                 if (type === 'MantleParty') all.push(privateClause)
+                // the hide rules an indexed field can say, in the trusted filter (SEC-DAT-82)
+                all.push(...searchScope.hideClauses(type))
                 if (type === 'MantleCommunicationEvent' && mailboxClause) all.push(mailboxClause)
                 if (type === 'MantleWikiPage') all.push(...wikiClauses)
                 return {bool: {all: all}}

@@ -170,4 +170,12 @@ function keepPage(out, keep) {
     }
 }
 
-;({scopes, scopeOf, organizationLimit, scopeClauses, privateClause, hitHidden, financeHidden, keepPage})
+// The trusted-filter clauses of the hide rules an indexed field can say, so a total and a short page count no such hit
+// (SEC-DAT-82): a confidential HR case is never a hit. The rules that depend on the user and on records the index does not
+// hold (a protected task's assignees, an applicant's recruiters, a maintenance request's reach) stay per hit (hitHidden).
+function hideClauses(type) {
+    if (type === "MantleRequest") return [{field: {name: "requestTypeEnumId", op: "eq", value: "RqtHrCase", negate: true}}]
+    return []
+}
+
+;({scopes, scopeOf, organizationLimit, scopeClauses, privateClause, hitHidden, financeHidden, keepPage, hideClauses})
