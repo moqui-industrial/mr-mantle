@@ -24,6 +24,7 @@ const method = "SPEC_GWC_METHOD"
 const users = {manage: "SPEC_GWC_MANAGE", none: "SPEC_GWC_NONE"}
 const group = "SPEC_GWC_MANAGERS"
 const secret = "spec-gwc-key-8h3w"
+const password = "Spec-gwc-manage-5!"
 
 const http = ec.factory.getTool("HttpFixtures")
 const find = (entityName, conditions = {}) => ec.entity.find(entityName).condition(conditions).disableAuthz()
@@ -35,6 +36,11 @@ const make = (entityName, fields) => {
 }
 function as(userId, action) {
     ec.user.internalLoginUser(userId.toLowerCase().replace(/_/g, "."))
+    // a repoint asks a recent sign-in of the connection manager (SEC-ADM-87)
+    if (userId === users.manage) {
+        ec.service.sync().name("org.moqui.sso.RecentAuthServices.reauthenticate#User").parameters({password}).disableAuthz().call()
+        ec.message.clearErrors()
+    }
     ec.artifactExecution.enableAuthz()
     try {
         return action()
@@ -125,11 +131,11 @@ spec({
         ec.artifactExecution.disableAuthz()
         removeSpecRows()
         for (const [key, userId] of Object.entries(users))
-            make("moqui.security.UserAccount", {
+            make("moqui.security.UserAccount", Object.assign({
                 userId,
                 username: userId.toLowerCase().replace(/_/g, "."),
                 userFullName: "Spec gateways " + key
-            })
+            }, userId === users.manage ? {currentPassword: ec.user.hashPassword(password), passwordHashType: "argon2"} : {}))
         make("moqui.security.UserGroup", {userGroupId: group, description: "Spec gateway managers"})
         for (const userPermissionId of ["ADMIN_CONNECTION_VIEW", "ADMIN_CONNECTION_MANAGE"])
             make("moqui.security.UserGroupPermission", {userGroupId: group, userPermissionId, fromDate: 0})
