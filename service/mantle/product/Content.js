@@ -96,14 +96,22 @@ function locationRefusal(row, c, location) {
           ? textLocationRefused
           : locationRefused
 }
-// Whether a staff screen may stream or show a row's file (mr-marble's Catalog downloads and views, BOSS's record files): its
-// record's own folder, or an image file in a component or the content store (the demo's images; ShopCatalog's image rule),
-// never another location (a conf file, runtime://, file: or http) a row was written with before SEC-BAP-138.
+// Whether a staff screen may stream or show a row's file (mr-marble's Catalog downloads and views, BOSS's record files and
+// product copy): its record's own folder, or an image file in a component (the demo's images) or under a content root (another
+// record's folder: a copy's or a shared image), never another location (a conf file, runtime://, file:, http, or a
+// dbresource:// path outside the content roots) a row was written with before SEC-BAP-138.
 function served(row, c) {
     if (owned(row, c)) return true
     const location = String(row.contentLocation || "")
+    const roots = [
+        "dbresource://mantle/content",
+        ec.factory.getConfValue("mantle@content-root"),
+        ec.factory.getConfValue("mantle@content-large-root")
+    ]
+        .filter(Boolean)
+        .map(root => String(root).replace(/\/+$/, "") + "/")
     return (
-        /^(?:dbresource|component):\/\//.test(location) &&
+        (location.startsWith("component://") || roots.some(root => location.startsWith(root))) &&
         !/(?:^|[\/\\])\.\.(?:[\/\\]|$)|\\|%2e|%2f|%5c/i.test(location) &&
         /\.(?:png|jpe?g|gif|webp)$/i.test(location)
     )

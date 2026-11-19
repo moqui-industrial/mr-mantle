@@ -358,11 +358,6 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Image - Large" enumId="PcntImageLarge" enumTypeId="ProductContentType"/>
             <moqui.basic.Enumeration description="Image - Detail" enumId="PcntImageDetail" enumTypeId="ProductContentType"/>
             <moqui.basic.Enumeration description="Image - Original" enumId="PcntImageOriginal" enumTypeId="ProductContentType"/>
-            <moqui.basic.Enumeration description="Image URL - Small" enumId="PcntImageUrlSmall" enumTypeId="ProductContentType"/>
-            <moqui.basic.Enumeration description="Image URL - Medium" enumId="PcntImageUrlMedium" enumTypeId="ProductContentType"/>
-            <moqui.basic.Enumeration description="Image URL - Large" enumId="PcntImageUrlLarge" enumTypeId="ProductContentType"/>
-            <moqui.basic.Enumeration description="Image URL - Detail" enumId="PcntImageUrlDetail" enumTypeId="ProductContentType"/>
-            <moqui.basic.Enumeration description="Image URL - Original" enumId="PcntImageUrlOriginal" enumTypeId="ProductContentType"/>
             <!-- NOTE: use the ProductContent.description field for image alt text -->
 
             <moqui.basic.Enumeration description="Add To Cart Label" enumId="PcntAddToCartLabel" enumTypeId="ProductContentType"/>
@@ -841,7 +836,6 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Category Name" enumId="PcctCategoryName" enumTypeId="ProductCategoryContentType"/>
             <moqui.basic.Enumeration description="Description" enumId="PcctDescription" enumTypeId="ProductCategoryContentType"/>
             <moqui.basic.Enumeration description="Description - Long" enumId="PcctDescriptionLong" enumTypeId="ProductCategoryContentType"/>
-            <moqui.basic.Enumeration description="Category Image URL" enumId="PcctImageUrl" enumTypeId="ProductCategoryContentType"/>
             <moqui.basic.Enumeration description="Category Image Alt Text" enumId="PcctImageAltText" enumTypeId="ProductCategoryContentType"/>
             <moqui.basic.Enumeration description="Footer" enumId="PcctFooter" enumTypeId="ProductCategoryContentType"/>
             <moqui.basic.Enumeration description="Meta-Keywords" enumId="PcctMetaKeywords" enumTypeId="ProductCategoryContentType"/>

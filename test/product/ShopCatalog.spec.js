@@ -577,7 +577,7 @@ feature("every product and category content type takes a location only in its re
             categoryRow: refusal(() =>
                 call(P + "create#ProductCategoryContent", {
                     productCategoryId: category,
-                    categoryContentTypeEnumId: "PcctImageUrl",
+                    categoryContentTypeEnumId: "PcctDescription",
                     contentLocation: "file:///etc/passwd"
                 })
             ),
@@ -588,7 +588,10 @@ feature("every product and category content type takes a location only in its re
             described: refusal(() => call(P + "update#ProductContent", {productContentId: prefix + "_IMG_DEMO", description: "Demo"})),
             demoServed: served("component://mr-marble/screen/ssstatic/images/Sales.png"),
             confServed: served("component://mr-mantle/MoquiConf.xml"),
-            runtimeServed: served("runtime://conf/MoquiDevConf.png")
+            runtimeServed: served("runtime://conf/MoquiDevConf.png"),
+            // an image of the content store only under a content root (SEC-BAP-138 review)
+            storeServed: served("dbresource://mantle/content/product/OTHER/content_1/photo.png"),
+            outsideServed: served("dbresource://ironstone/secrets/photo.png")
         }
     },
     then(r) {
@@ -596,5 +599,6 @@ feature("every product and category content type takes a location only in its re
         r.moved.includes("a location is not taken")
         r.described == "done"
         r.demoServed == true && r.confServed == false && r.runtimeServed == false
+        r.storeServed == true && r.outsideServed == false
     }
 })
