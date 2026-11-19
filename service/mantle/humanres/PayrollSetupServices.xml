@@ -909,10 +909,13 @@ along with this software (see the LICENSE.md file). If not, see
             Accounting's customer and supplier finance refuses employees): for an employment of an employer in the caller's
             scope (RECORD_UNAVAILABLE otherwise), a new bank account of the person with purpose PmpPayroll (bankName,
             accountNumber, routingNumber required: BANK_DETAILS_REQUIRED, ACCOUNT_NUMBER_INVALID, ROUTING_NUMBER_INVALID),
-            or with paymentMethodId one of the person's current bank accounts changed at its lastUpdatedStamp
-            (REVISION_CHANGED, PAYMENT_METHOD_UNAVAILABLE) and made a payroll account: update#BankAccount ends it and starts
-            its successor, whose id is answered. An empty number keeps the stored one. Numbers are never answered. Needs
-            PAYROLL_VIEW and PAYROLL_EDIT (PERMISSION_DENIED).</description>
+            or with paymentMethodId one of the person's current payroll accounts changed at its lastUpdatedStamp
+            (REVISION_CHANGED, PAYMENT_METHOD_UNAVAILABLE): update#BankAccount ends it and starts its successor, whose id is
+            answered. An empty number keeps the stored one. Numbers are never answered. Refuses a person who works for an
+            internal organization outside the caller's scope (EMPLOYED_ELSEWHERE) and an ended employment with no unpaid
+            payroll invoice (EMPLOYMENT_ENDED). Tells the person (PayrollBankAccountChanged, notifiedCount); the audit log
+            keeps who wrote the purpose and who ended an account. Needs PAYROLL_VIEW and PAYROLL_EDIT
+            (PERMISSION_DENIED).</description>
         <in-parameters>
             <parameter name="partyRelationshipId" required="true"/>
             <parameter name="paymentMethodId"/>
@@ -923,10 +926,14 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="typeEnumId"/>
             <parameter name="description"/>
         </in-parameters>
-        <out-parameters><parameter name="paymentMethodId"/></out-parameters>
+        <out-parameters>
+            <parameter name="paymentMethodId"/>
+            <parameter name="notifiedCount" type="Integer"/>
+        </out-parameters>
         <actions>
             <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollAssignments.js').execute('storePayrollBankAccount', context)"/>
             <set field="paymentMethodId" from="stored.paymentMethodId"/>
+            <set field="notifiedCount" from="stored.notifiedCount"/>
         </actions>
     </service>
 

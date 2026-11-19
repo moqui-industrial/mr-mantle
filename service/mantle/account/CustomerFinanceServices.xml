@@ -30,8 +30,8 @@ along with this software (see the LICENSE.md file). If not, see
             credit from it, a sales order or a current customer relationship, PrtCustomer; for a supplier a bill from it, a
             purchase order or its supplier profile), an employee's payroll invoices left out (net pay, an overpayment: those
             of an employment). Refuses otherwise, and refuses an internal organization (the intercompany workflow's) and a
-            person with a current employment (PrtEmployee) with any organization, whose identifications and payroll bank
-            accounts are People's and payroll's (SEC-BOS-82).</description>
+            person with a current employment (PrtEmployee) with any internal organization (OrgInternal), whose
+            identifications and payroll bank accounts are People's and payroll's (SEC-BOS-82).</description>
         <implements service="mantle.account.CustomerFinanceServices.define#CustomerScope"/>
         <in-parameters><parameter name="permission"/></in-parameters>
         <out-parameters><parameter name="customer" type="Map"/></out-parameters>
@@ -58,12 +58,21 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find-count>
             <if condition="internalCount">
                 <return error="true" message="INTERCOMPANY_EXCLUDED: Internal organizations use the intercompany workflow"/></if>
-            <!-- an employee of any organization: another organization's user would otherwise reach them as a supplier -->
-            <entity-find-count entity-name="mantle.party.PartyRelationship" count-field="employmentCount" disable-authz="true">
+            <!-- an employee of any internal organization: another organization's user would otherwise reach them as a supplier.
+                An employer recorded for a contact at an outside company (create#Person employerPartyId) is no employment here -->
+            <entity-find entity-name="mantle.party.PartyRelationship" list="employmentList" disable-authz="true">
                 <date-filter/>
                 <econdition field-name="relationshipTypeEnumId" value="PrtEmployee"/>
                 <econdition field-name="fromPartyId" from="customerPartyId"/>
-            </entity-find-count>
+                <select-field field-name="toPartyId"/>
+            </entity-find>
+            <set field="employmentCount" from="0"/>
+            <if condition="employmentList.length">
+                <entity-find-count entity-name="mantle.party.PartyRole" count-field="employmentCount" disable-authz="true">
+                    <econdition field-name="partyId" operator="in" from="Array.from(employmentList).map((row) => row.toPartyId)"/>
+                    <econdition field-name="roleTypeId" value="OrgInternal"/>
+                </entity-find-count>
+            </if>
             <if condition="employmentCount">
                 <return error="true" message="EMPLOYEE_EXCLUDED: An employee's finance details are kept in People"/></if>
             <entity-find-count entity-name="mantle.account.invoice.Invoice" count-field="invoiceCount" disable-authz="true">

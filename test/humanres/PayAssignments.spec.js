@@ -833,11 +833,54 @@ feature(
 )
 
 // SEC-BOS-82: payroll owns an employee's bank accounts through People (Accounting's finance details refuse employees): a payroll
-// editor of the employer adds a payroll account and changes it at its revision, read back masked; a payroll reader, another
-// employer's payroll, a method of another person and a stale or malformed change are refused
+// editor of the employer adds a payroll account and changes it at its revision, read back masked, the person told and the
+// writer audited; a payroll reader, another employer's payroll, a person who also works for another internal employer, an
+// ended employment with no pay left (allowed while a payroll invoice of it is unpaid), a method of another person, a
+// non-payroll account and a stale or malformed change are refused
 feature("a payroll editor adds and changes an employee's payroll bank account; others are refused, numbers never answered", {
     when() {
         const B = G + "store#PayrollBankAccount"
+        const bankOf = partyRelationshipId => ({
+            partyRelationshipId,
+            bankName: "Spec Bank",
+            accountNumber: "44443333",
+            routingNumber: "011000015"
+        })
+        // Dev works for A and B at once; Gus left A with nothing owed, then a payroll invoice of his employment is unpaid
+        const dev = person("DEV")
+        const devEmp = employ(dev, orgA)
+        employ(dev, orgB)
+        const gus = person("GUS")
+        const gusEmp = employ(gus, orgA)
+        call("update#mantle.party.PartyRelationship", {partyRelationshipId: gusEmp, thruDate: new Date(Date.now() - 30 * day)})
+        const gusNothingOwed = code(run(state.payroll, B, bankOf(gusEmp)))
+        call("create#mantle.account.invoice.Invoice", {
+            invoiceTypeEnumId: "InvoicePayroll",
+            fromPartyId: gus,
+            toPartyId: orgA,
+            partyRelationshipId: gusEmp,
+            statusId: "InvoiceIncoming",
+            invoiceDate: ec.user.nowTimestamp,
+            currencyUomId: "USD"
+        })
+        const gusOwed = code(run(state.payroll, B, bankOf(gusEmp)))
+        const devBoth = code(run(state.payroll, B, bankOf(devEmp)))
+        // Ana signs in, so the change is told to her
+        user("ANA_SELF", [], [], state.ana)
+        const anaOther = call("mantle.account.PaymentMethodServices.create#BankAccount", {
+            ownerPartyId: state.ana,
+            bankName: "Ana Savings",
+            accountNumber: "99990000",
+            routingNumber: "011000015"
+        }).paymentMethodId
+        const notPayroll = code(
+            run(state.payroll, B, {
+                partyRelationshipId: state.anaEmp,
+                paymentMethodId: anaOther,
+                lastUpdatedStamp: rows("mantle.account.method.PaymentMethod", {paymentMethodId: anaOther})[0].lastUpdatedStamp,
+                bankName: "Made payroll"
+            })
+        )
         const add = {
             partyRelationshipId: state.anaEmp,
             bankName: "Ana Bank",
@@ -872,6 +915,13 @@ feature("a payroll editor adds and changes an employee's payroll bank account; o
             })
         )
         const method = id => rows("mantle.account.method.PaymentMethod", {paymentMethodId: id})[0]
+        const auditedBy = (id, changedFieldName) =>
+            rows("moqui.entity.EntityAuditLog", {
+                changedEntityName: "mantle.account.method.PaymentMethod",
+                changedFieldName,
+                pkPrimaryValue: id
+            }).map(row => row.changedByUserId)
+        const notices = rows("moqui.security.user.NotificationMessage", {topic: "PayrollBankAccountChanged"})
         const bank = id => rows("mantle.account.method.BankAccount", {paymentMethodId: id})[0]
         return {
             refusals,
@@ -886,7 +936,16 @@ feature("a payroll editor adds and changes an employee's payroll bank account; o
             newPurpose: method(changed.paymentMethodId)?.purposeEnumId,
             newBank: bank(changed.paymentMethodId)?.bankName,
             newNumber: bank(changed.paymentMethodId)?.accountNumber,
-            otherPerson
+            otherPerson,
+            gusNothingOwed,
+            gusOwed,
+            devBoth,
+            notPayroll,
+            notified: [added.notifiedCount, changed.notifiedCount],
+            noticeText: JSON.stringify(notices.map(row => row.messageJson || row.titleText || "")),
+            noticeCount: notices.length,
+            purposeBy: auditedBy(changed.paymentMethodId, "purposeEnumId"),
+            endedBy: auditedBy(added.paymentMethodId, "thruDate")
         }
     },
     then(result) {
@@ -909,5 +968,14 @@ feature("a payroll editor adds and changes an employee's payroll bank account; o
         result.newBank == "Ana New Bank"
         result.newNumber == "123456789"
         result.otherPerson == "PAYMENT_METHOD_UNAVAILABLE"
+        result.gusNothingOwed == "EMPLOYMENT_ENDED"
+        result.gusOwed == ""
+        result.devBoth == "EMPLOYED_ELSEWHERE"
+        result.notPayroll == "PAYMENT_METHOD_UNAVAILABLE"
+        result.notified == [1, 1]
+        result.noticeCount >= 2
+        !result.noticeText.includes("123456789")
+        result.purposeBy.includes(state.payroll)
+        result.endedBy.includes(state.payroll)
     }
 })

@@ -1026,13 +1026,71 @@ function storePayrollProfile(p) {
 
 // ===== payroll bank accounts (SEC-BOS-82) =====
 // store#PayrollBankAccount: a payroll editor of the employer adds a payroll bank account (purpose PmpPayroll) for the employee
-// of an employment in scope, or changes one of the person's current bank accounts at its lastUpdatedStamp (update#BankAccount
+// of an employment in scope, or changes one of the person's current payroll accounts at its lastUpdatedStamp (update#BankAccount
 // ends it and starts its successor, which pays from then on; an open payment run paying it loses its approval). Numbers in,
-// never out: the answer is the method and its masked reference.
+// never out: the answer is the method and its masked reference. Every payer pays the newest payroll account first, and the
+// account is the person's, not the employment's: so the employer's payroll writes it only while the person works for no
+// internal organization outside the editor's scope, and for an ended employment only while it still has pay to settle (an
+// unpaid payroll invoice of the employment). The person is told (PayrollBankAccountChanged, direct to their own accounts, by
+// email too) and the audit log keeps who wrote the purpose and who ended an account (PaymentMethod's audited fields).
 const digits = value => text(value).replace(/[\s-]/g, "")
+const unpaidPayrollStatuses = ["InvoiceIncoming", "InvoiceReceived", "InvoiceApproved"]
+function payrollBankWriter(userScope, employment) {
+    const now = nowMs()
+    const employers = rows(RELATIONSHIP, {relationshipTypeEnumId: "PrtEmployee", fromPartyId: employment.partyId})
+        .filter(row => openAt(row, now))
+        .map(row => row.toPartyId)
+        .filter(organizationPartyId => one("mantle.party.PartyRole", {partyId: organizationPartyId, roleTypeId: "OrgInternal"}))
+    if (employers.some(organizationPartyId => !userScope.organizationPartyIds.includes(organizationPartyId)))
+        denied("EMPLOYED_ELSEWHERE", "The person works for another employer, whose payroll keeps their bank account")
+    if (openAt({fromDate: employment.fromMs, thruDate: employment.thruMs}, now)) return
+    const owed = find("mantle.account.invoice.Invoice", {
+        partyRelationshipId: employment.partyRelationshipId,
+        invoiceTypeEnumId: "InvoicePayroll",
+        fromPartyId: employment.partyId
+    })
+        .condition("statusId", "in", unpaidPayrollStatuses)
+        .count()
+    if (!owed) denied("EMPLOYMENT_ENDED", "The employment has ended and no pay is left to settle")
+}
+// PayrollBankAccountChanged to the person's own accounts alone (directOnly), by email as the topic sets: the employer, the bank
+// and last four digits, and who changed it, never the number. A failure is logged and the change stays.
+function tellPayee(employment, paymentMethodId, added) {
+    try {
+        const userIds = unique(
+            rows("moqui.security.UserAccount", {partyId: employment.partyId})
+                .filter(row => row.disabled !== "Y")
+                .map(row => row.userId)
+        ).filter(Boolean)
+        if (!userIds.length) {
+            ec.logger.warn("Payroll bank account " + paymentMethodId + " of " + employment.partyId + ": no user account to tell")
+            return 0
+        }
+        const reference = paymentMethodsOf(employment.partyId, nowMs()).find(row => row.paymentMethodId === paymentMethodId)
+        ec.makeNotificationMessage()
+            .topic("PayrollBankAccountChanged")
+            .message({
+                paymentMethodId,
+                organizationName:
+                    people.organizationNames([employment.organizationPartyId])[employment.organizationPartyId] || "",
+                accountText: reference?.referenceText || "",
+                actionText: added ? "added" : "changed",
+                changedByName: ec.user.userAccount?.userFullName || ec.user.username || "",
+                changedDateText: dateText(ec.user.nowTimestamp)
+            })
+            .userIds(userIds)
+            .directOnly()
+            .send()
+        return userIds.length
+    } catch (error) {
+        ec.logger.error("Payroll bank account notice of " + paymentMethodId + " was not sent: " + error.message)
+        return 0
+    }
+}
 function storePayrollBankAccount(p) {
     const userScope = editorScope()
     const employment = employmentIn(userScope, p.partyRelationshipId)
+    payrollBankWriter(userScope, employment)
     const fields = {purposeEnumId: "PmpPayroll"}
     for (const field of ["bankName", "typeEnumId", "description"]) if (!blank(p[field])) fields[field] = text(p[field])
     if (!blank(p.accountNumber)) {
@@ -1051,17 +1109,19 @@ function storePayrollBankAccount(p) {
             !method ||
             method.ownerPartyId !== employment.partyId ||
             method.paymentMethodTypeEnumId !== "PmtBankAccount" ||
+            method.purposeEnumId !== "PmpPayroll" ||
             !openAt(method, nowMs()) ||
             !one("mantle.account.method.BankAccount", {paymentMethodId})
         )
             denied(
                 "PAYMENT_METHOD_UNAVAILABLE",
-                "Bank account " + paymentMethodId + " is not one of the person's current accounts"
+                "Bank account " + paymentMethodId + " is not one of the person's current payroll accounts"
             )
         if (blank(p.lastUpdatedStamp) || stampOf(method) !== ms(p.lastUpdatedStamp))
             denied("REVISION_CHANGED", "The bank account changed since you read it; open it again")
         const saved = call("mantle.account.PaymentMethodServices.update#BankAccount", Object.assign({paymentMethodId}, fields))
-        return {paymentMethodId: saved.paymentMethodId || paymentMethodId}
+        const changedId = saved.paymentMethodId || paymentMethodId
+        return {paymentMethodId: changedId, notifiedCount: tellPayee(employment, changedId, false)}
     }
     if (!fields.accountNumber || !fields.routingNumber)
         denied("BANK_DETAILS_REQUIRED", "Give the account number and the routing number")
@@ -1070,7 +1130,7 @@ function storePayrollBankAccount(p) {
         "mantle.account.PaymentMethodServices.create#BankAccount",
         Object.assign({ownerPartyId: employment.partyId, typeEnumId: "BatChecking"}, fields)
     )
-    return {paymentMethodId: made.paymentMethodId}
+    return {paymentMethodId: made.paymentMethodId, notifiedCount: tellPayee(employment, made.paymentMethodId, true)}
 }
 
 // ===== get#Compensation =====

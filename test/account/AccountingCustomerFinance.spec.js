@@ -245,6 +245,23 @@ feature("an employee, an internal organization and a non-customer relationship a
         // employed by another organization, with an ordinary bill to this one
         const elsewhereEmployer = "NATIVE_CUST_EMPLOYER_B"
         helper().call("create#mantle.party.Party", {partyId: elsewhereEmployer, partyTypeEnumId: "PtyOrganization"})
+        helper().call("create#mantle.party.PartyRole", {partyId: elsewhereEmployer, roleTypeId: "OrgInternal"})
+        // a customer's contact person recorded as employed by their own, outside company (create#Person employerPartyId)
+        const outsideCompany = "NATIVE_CUST_OUTSIDE_CO"
+        helper().call("create#mantle.party.Party", {partyId: outsideCompany, partyTypeEnumId: "PtyOrganization"})
+        const outsideContact = "NATIVE_CUST_OUTSIDE_PERSON"
+        helper().call("create#mantle.party.Party", {partyId: outsideContact, partyTypeEnumId: "PtyPerson"})
+        helper().call("create#mantle.party.Person", {partyId: outsideContact, firstName: "Buys", lastName: "Outside"})
+        for (const [toPartyId, relationshipTypeEnumId] of [
+            [outsideCompany, "PrtEmployee"],
+            [f.org, "PrtCustomer"]
+        ])
+            helper().call("create#mantle.party.PartyRelationship", {
+                fromPartyId: outsideContact,
+                toPartyId,
+                relationshipTypeEnumId,
+                fromDate: 0
+            })
         const elsewhere = "NATIVE_CUST_ELSEWHERE"
         helper().call("create#mantle.party.Party", {partyId: elsewhere, partyTypeEnumId: "PtyPerson"})
         helper().call("create#mantle.party.Person", {partyId: elsewhere, firstName: "Works", lastName: "Elsewhere"})
@@ -291,7 +308,12 @@ feature("an employee, an internal organization and a non-customer relationship a
                 supplierPartyId: partyId
             })
         login(f.users.ar)
-        const customer = {employee: customerOf(employee), internal: customerOf(internal), contact: customerOf(contact)}
+        const customer = {
+            employee: customerOf(employee),
+            internal: customerOf(internal),
+            contact: customerOf(contact),
+            outsideContact: customerOf(outsideContact)
+        }
         const identification = helper().rejected("mantle.account.CustomerFinanceServices.store#CustomerIdentification", {
             organizationPartyId: f.org,
             customerPartyId: employee,
@@ -329,6 +351,7 @@ feature("an employee, an internal organization and a non-customer relationship a
         customer.employee.includes("EMPLOYEE_EXCLUDED")
         customer.internal.includes("INTERCOMPANY_EXCLUDED")
         customer.contact.includes("CUSTOMER_SCOPE_INVALID")
+        customer.outsideContact == ""
         identification.includes("EMPLOYEE_EXCLUDED")
         supplier.employee.includes("EMPLOYEE_EXCLUDED")
         supplier.former.includes("SUPPLIER_SCOPE_INVALID")
