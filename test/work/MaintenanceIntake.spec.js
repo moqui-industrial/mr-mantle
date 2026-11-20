@@ -81,9 +81,13 @@ function hidden(username, requestId) {
     }
 }
 let messageCount = 0
+// with its From field and the trusted gateway's DMARC pass for it (Channels.js senderTrust, SEC-BAP-84)
+const GATEWAY = "gw.mnt.test"
 function receive(fields) {
     messageCount++
     const id = prefix + "_MSG" + messageCount
+    const from = String(fields?.fromAddress || "dock.worker@intake.example")
+    const headersString = "From: " + from + "\r\nAuthentication-Results: " + GATEWAY + "; dmarc=pass header.from=" + from.split("@").pop()
     call(
         "store#moqui.basic.email.EmailMessage",
         Object.assign(
@@ -98,7 +102,8 @@ function receive(fields) {
                 fromAddress: "dock.worker@intake.example",
                 fromName: "Dock Worker",
                 messageId: "<mnt-in-" + messageCount + "@intake.example>",
-                rootEmailMessageId: id
+                rootEmailMessageId: id,
+                headersString
             },
             fields
         )
@@ -111,6 +116,7 @@ spec({
     setupSpec() {
         login("john.doe")
         ec.artifactExecution.disableAuthz()
+        setConf("smtp-server@authserv-id", GATEWAY)
         organization(orgA, "Intake Spec A")
         organization(orgB, "Intake Spec B")
         call("create#mantle.facility.Facility", {

@@ -677,3 +677,15 @@ feature("evidence linked or unlinked on its own moves the claim's revision; a se
         code(r.other) == "RECORD_UNAVAILABLE"
     }
 })
+
+feature("FACILITY_ALL_ORGANIZATIONS widens no warranty claim list: another organization's claims are not listed (SEC-BAP-99)", {
+    when() {
+        const wide = user("OTHER_WIDE", ["SUPPORT_CASE_EDIT", "FACILITY_ALL_ORGANIZATIONS"], otherOrg)
+        const ids = username => (run(username, W + "find#WarrantyClaims", {}).claimList || []).map(row => row.requestId)
+        return {own: ids(state.agent), wide: ids(wide)}
+    },
+    then({own, wide}) {
+        own.length > 0
+        !wide.some(id => own.includes(id))
+    }
+})

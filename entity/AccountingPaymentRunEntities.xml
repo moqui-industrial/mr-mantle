@@ -94,6 +94,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="approvedVersion" type="text-medium"><description>The fingerprint of the selection approved; execution
             refuses a selection that differs.</description></field>
         <field name="isSelfApproved" type="text-indicator" enable-audit-log="true"/>
+        <field name="changedByUserIds" type="text-long"><description>Each user who changed the run's selection, comma separated:
+            none of them approves it unless the organization allows self-approval (SEC-BOS-126)</description></field>
         <field name="approvalVoidedDate" type="date-time" enable-audit-log="true"/>
         <field name="approvalVoidReason" type="text-medium" enable-audit-log="true"/>
         <field name="executedByUserId" type="id"/>

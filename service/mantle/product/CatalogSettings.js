@@ -155,7 +155,8 @@ function storeCatalogSettings(p) {
         at = p.fromDate == null || p.fromDate === "" ? Math.max(now, (ms(old.fromDate) || 0) + 1) : ms(p.fromDate)
     if (!Number.isFinite(at) || at < now) throw new Error("Policy changes must take effect now or later")
     const data = parse(p.settingsJson, p.settings || {}),
-        saved = Object.assign({}, catalogSettings({organizationPartyId, asOfDate: at}).settings)
+        saved = Object.assign({}, catalogSettings({organizationPartyId, asOfDate: at}).settings),
+        selfApprovalBefore = flag(saved.allowCostSelfApproval)
     for (const field of catalogFields)
         if (Object.keys(data).includes(field)) saved[field] = data[field] === "" ? null : data[field]
     for (const field of policyFlags) saved[field] = flag(saved[field])
@@ -167,6 +168,15 @@ function storeCatalogSettings(p) {
         !ec.resource.script("component://mr-mantle/service/mantle/product/CostPolicy.js").capabilities().approve
     )
         throw new Error("Cost approval authority is required to enable self approval")
+    // turning self approval on is a separation-of-duty decision no catalog or cost bundle makes for itself: it takes
+    // PRODUCT_COST_SELF_APPROVAL, which no BOSS bundle holds (a system administrator has it), so a drafter cannot turn it
+    // on and approve their own estimate (SEC-BAP-106)
+    if (
+        saved.allowCostSelfApproval &&
+        !selfApprovalBefore &&
+        !ec.resource.script("component://mr-mantle/service/mantle/product/ProductAccess.js").has("PRODUCT_COST_SELF_APPROVAL")
+    )
+        throw new Error("PRODUCT_COST_SELF_APPROVAL is required to allow cost self approval")
     if (one("moqui.basic.Uom", {uomId: saved.defaultCurrencyUomId})?.uomTypeEnumId !== "UT_CURRENCY_MEASURE")
         throw new Error("Choose a valid default currency")
     if (one("moqui.basic.Enumeration", {enumId: saved.defaultProductTypeEnumId})?.enumTypeId !== "ProductType")

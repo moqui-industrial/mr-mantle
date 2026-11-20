@@ -1231,6 +1231,11 @@ along with this software (see the LICENSE.md file). If not, see
 
             If a partyId is passed, take the greater of the rates with and without the party to match on as many as
             possible of: emplPositionClassId, workTypeEnumId, payGradeId (from Employment if there is one for the partyId).
+
+            A rate of no project may be an organization's (organizationPartyId, SEC-BOS-101): it applies only to the time of
+            that organization, a current Vendor of the work effort's project (or of the work effort) or else its owner (never the
+            client, which employerPartyId names for the employment), and is preferred to a shared one (no organization) of the
+            same kind (with or without the party). A labor costing rate (RaprCost) keeps its own organization rule (get#CostingRate).
         </description>
         <in-parameters>
             <parameter name="fromDate" type="Timestamp"/>
@@ -1260,9 +1265,27 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="taskWorkEffort">
                     <field-map field-name="workEffortId"/></entity-find-one>
             </if>
+            <!-- the organization whose rates of no project apply (SEC-BOS-101): the project's owner, else the work effort's, else the employer -->
+            <if condition="taskWorkEffort?.rootWorkEffortId &amp;&amp; taskWorkEffort.rootWorkEffortId != taskWorkEffort.workEffortId">
+                <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="rootWorkEffort">
+                    <field-map field-name="workEffortId" from="taskWorkEffort.rootWorkEffortId"/></entity-find-one>
+            </if>
+            <script><![CDATA[
+                // the organizations whose rates of no project apply: the project's current Vendor parties, else its owner (SEC-BOS-101)
+                const projectWork = rootWorkEffort || taskWorkEffort
+                const vendors = projectWork ? Array.from(ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', projectWork.workEffortId)
+                        .condition('roleTypeId', 'Vendor').conditionDate('fromDate', 'thruDate', fromDate || ec.user.nowTimestamp)
+                        .selectField('partyId').list()).map((row) => row.partyId) : []
+                rateOrgIds = Array.from(new Set(vendors.length ? vendors : [projectWork?.ownerPartyId].filter(Boolean)))
+            ]]></script>
+            <set field="orgRatesApply" from="ratePurposeEnumId != 'RaprCost'"/>
 
             <!-- get all possible rates in one query, then do maximal match -->
             <entity-find entity-name="mantle.humanres.rate.RateAmount" list="rateAmountList">
+                <econditions combine="or">
+                    <econdition field-name="organizationPartyId" from="null" ignore="!orgRatesApply"/>
+                    <econdition field-name="organizationPartyId" operator="in" from="rateOrgIds" ignore="!orgRatesApply || !rateOrgIds.length"/>
+                </econditions>
                 <date-filter valid-date="fromDate || ec.user.nowTimestamp"/>
                 <econdition field-name="partyId" from="partyId" or-null="true"/>
                 <econditions combine="or">
@@ -1355,6 +1378,12 @@ along with this software (see the LICENSE.md file). If not, see
 
                 // Do a maximal match on the rates that do not have a partyId.
                 nonPartyRaList = rateAmountList.filter((ra) => ra.partyId == null)
+                // an organization's rates of no project before the shared ones of the same kind (SEC-BOS-101)
+                const ofOrganization = (ra) => !!ra.organizationPartyId && rateOrgIds.includes(ra.organizationPartyId)
+                const preferOrganization = (list) => !orgRatesApply || !rateOrgIds.length || !list.some((ra) => !ra.workEffortId && ofOrganization(ra))
+                        ? list : list.filter((ra) => ra.workEffortId || ofOrganization(ra))
+                if (partyRaList != null && partyRaList.length) partyRateAmountToUse = findMaximalMatch(preferOrganization(partyRaList), matchFields)
+                nonPartyRaList = preferOrganization(nonPartyRaList)
                 nonPartyRateAmountToUse = findMaximalMatch(nonPartyRaList, matchFields)
             ]]></script>
 
@@ -1542,8 +1571,9 @@ along with this software (see the LICENSE.md file). If not, see
             The time entries the user may see, narrowed, sorted and paged, for TimeEntries and ProjectTime (design-projects.md §8;
             no entity filter covers TimeEntry, impl-projects.md F1). A person's time is seen by the person, the managers of the
             projects it is on (ProjectManager or Manager: the entries on the project and its items), the person's line managers
-            (PrtManager), and everyone's by ADMIN and, when the user's timesheet policy has approvers any, by the holders of
-            TIMESHEET_APPROVE.
+            (PrtManager), and everyone's by ADMIN; when the user's timesheet policy has approvers any, a holder of TIMESHEET_APPROVE
+            sees too the time of the people of that policy's organization (TimesheetServices.get#AnyApproverScope workerPartyIds),
+            never another organization's (SEC-BOS-97).
 
             The find: partyId, rootWorkEffortId (the project's entries and its items'), workEffortId (one item), noWorkItem,
             clientPartyId, workTypeEnumId, billable (Y or N), clientInvoiced and workerInvoiced (Y or N), sheetStatus (open:
@@ -1616,14 +1646,20 @@ along with this software (see the LICENSE.md file). If not, see
                 const vis = ec.service.sync().name('mantle.work.ProjectServices.get#VisibleProjectInfo').call() || {}
                 // a client contact sees no time here (impl-projects.md P10: shared hours are the project's own view, without rates)
                 if (vis.isClient) { pageIndex = 0; pageSize = size; pageMaxIndex = 0; pageRangeLow = 0; pageRangeHigh = 0; return }
-                let anyApprover = false
-                if (!isAdmin && ec.user.hasPermission('TIMESHEET_APPROVE')) anyApprover = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetPolicy')
-                        .call()?.policy?.approvers === 'any'
-                seesAll = isAdmin || anyApprover
+                // the policy any: the time of the people of the user's policy organization (SEC-BOS-97), not everyone's
+                let anyWorkers = []
+                if (!isAdmin && ec.user.hasPermission('TIMESHEET_APPROVE')) {
+                    const policyOut = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetPolicy').call() || {}
+                    if (policyOut.policy?.approvers === 'any' && policyOut.organizationPartyId) anyWorkers = Array.from(ec.service.sync()
+                            .name('mantle.work.TimesheetServices.get#AnyApproverScope').parameters({organizationPartyId: policyOut.organizationPartyId})
+                            .call()?.workerPartyIds || [])
+                }
+                seesAll = isAdmin
                 const seen = []
                 if (!seesAll) {
                     if (!me) { pageIndex = 0; pageSize = size; pageMaxIndex = 0; pageRangeLow = 0; pageRangeHigh = 0; return }
                     seen.push(cf.makeCondition('partyId', 'equals', me))
+                    if (anyWorkers.length) seen.push(cf.makeCondition('partyId', 'in', anyWorkers))
                     const managed = Array.from(vis.managedProjectIds || [])
                     if (managed.length) {
                         seen.push(cf.makeCondition('rootWorkEffortId', 'in', managed))

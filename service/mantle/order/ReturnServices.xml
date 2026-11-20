@@ -349,6 +349,12 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="add" noun="OrderItemToReturn">
+        <description>Add an order line to a return, up to what was billed of it, and for a sale of a shipped product what was
+            shipped of it (QUANTITY_EXCEEDS_SHIPPED), less what is already returned. The line's order
+            part is the return's customer's and organization's (ORDER_MISMATCH, the same as for a missing line: SEC-BAP-93); a
+            cancelled, completed or manual-response return takes none, and one past Requested, whose new item is born approved,
+            takes one only from a return authorizer (RETURN_AUTHORIZE; RETURN_NOT_OPEN). The new item takes the return's status;
+            a statusId given is taken only from a return authorizer (RETURN_NOT_OPEN otherwise).</description>
         <in-parameters>
             <parameter name="returnId" required="true"/>
             <parameter name="orderId" required="true"/>
@@ -375,6 +381,21 @@ along with this software (see the LICENSE.md file). If not, see
                 is returnable; every caller (Warehouse's NewReturn, ReturnPolicyServices.save#ReturnItem) takes it -->
             <entity-find-one entity-name="mantle.order.OrderItem" value-field="orderItem" for-update="true"/>
             <if condition="orderItem == null"><return error="true" message="Could not find Order Item ${orderId}:${orderItemSeqId}"/></if>
+            <!-- SEC-BAP-93: the line is one of an order between the return's own customer and organization, the same answer for
+                another's as for a missing one; and an item joins a return past Requested (born approved) only for a return
+                authorizer -->
+            <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart">
+                <field-map field-name="orderId" from="orderItem.orderId"/>
+                <field-map field-name="orderPartSeqId" from="orderItem.orderPartSeqId"/></entity-find-one>
+            <if condition="orderPart == null || orderPart.customerPartyId != returnHeader.customerPartyId
+                    || orderPart.vendorPartyId != returnHeader.vendorPartyId">
+                <return error="true" message="ORDER_MISMATCH: Could not find Order Item ${orderId}:${orderItemSeqId} of this return's customer and organization"/></if>
+            <if condition="!['ReturnCreated', 'ReturnRequested'].includes(returnHeader.statusId) &amp;&amp; ec.user.userId
+                    &amp;&amp; !ec.user.hasPermission('RETURN_AUTHORIZE')">
+                <return error="true" message="RETURN_NOT_OPEN: Return ${returnId} is ${returnHeader.status?.description}; only a return authorizer adds an item to it"/></if>
+            <!-- the new item's status is the return's; a caller names another only as a return authorizer (SEC-BAP-93) -->
+            <if condition="statusId &amp;&amp; ec.user.userId &amp;&amp; !ec.user.hasPermission('RETURN_AUTHORIZE')">
+                <return error="true" message="RETURN_NOT_OPEN: Only a return authorizer gives a new return item its status"/></if>
 
             <service-call name="mantle.order.ReturnServices.calculate#OrderItemReturnable" in-map="context" out-map="context"/>
             <set field="returnPrice" from="returnPrice != null &amp;&amp; !toDecimal(returnPrice).isZero() ? toDecimal(returnPrice) : toDecimal(orderItem.unitAmount ?? 0)"/>
@@ -385,6 +406,21 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- make sure returnQuantity + returnedQuantity is not greater than invoiceQuantity -->
                 <if condition="toDecimal(returnedQuantity).add(returnQuantity).compare(invoiceQuantity) &gt; 0">
                     <return error="true" message="Tried to return more than is returnable; quantity billed ${invoiceQuantity}, already returned ${returnedQuantity}, tried to return ${returnQuantity}"/></if>
+                <!-- and, for a sale of a shipped product, not greater than what was shipped (issued) either: an invoiced line
+                    never shipped returns nothing (SEC-BAP-93; the ceiling Customer Service's ReturnPolicies.js lineFacts uses) -->
+                <script><![CDATA[
+                    const product = orderItem.productId ? ec.entity.find('mantle.product.Product').condition('productId', orderItem.productId).disableAuthz().one() : null
+                    const sale = !!ec.entity.find('mantle.party.PartyRole').condition({partyId: returnHeader.vendorPartyId, roleTypeId: 'OrgInternal'}).disableAuthz().one()
+                    shippedCeiling = null
+                    if (sale && product && ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId)) {
+                        shippedCeiling = toDecimal(0)
+                        for (const issuance of ec.entity.find('mantle.product.issuance.AssetIssuance').condition({orderId: orderItem.orderId,
+                                orderItemSeqId: orderItem.orderItemSeqId}).disableAuthz().list())
+                            shippedCeiling = shippedCeiling.add(toDecimal(issuance.quantity ?? 0)).subtract(toDecimal(issuance.quantityCancelled ?? 0))
+                    }
+                ]]></script>
+                <if condition="shippedCeiling != null &amp;&amp; toDecimal(returnedQuantity).add(returnQuantity).compare(shippedCeiling) &gt; 0">
+                    <return error="true" message="QUANTITY_EXCEEDS_SHIPPED: Tried to return more than was shipped; quantity shipped ${shippedCeiling}, already returned ${returnedQuantity}, tried to return ${returnQuantity}"/></if>
             </then><else>
                 <!-- make sure returnTotal + returnedTotal is not greater than invoiceTotal -->
                 <if condition="toDecimal(returnedTotal).add(returnTotal).compare(invoiceTotal) &gt; 0">
@@ -1234,10 +1270,41 @@ along with this software (see the LICENSE.md file). If not, see
                 <exclude field-name="statusId"/>
                 <exclude field-name="responseDate"/><exclude field-name="responseAmount"/>
                 <exclude field-name="replacementOrderId"/><exclude field-name="finAccountTransId"/>
-                <exclude field-name="refundPaymentId"/><exclude field-name="invoiceId"/></auto-parameters>
+                <exclude field-name="refundPaymentId"/><exclude field-name="invoiceId"/>
+                <!-- an item keeps its order line and product: another line is added through add#OrderItemToReturn (SEC-BAP-93) -->
+                <exclude field-name="orderId"/><exclude field-name="orderItemSeqId"/><exclude field-name="productId"/>
+                <exclude field-name="itemTypeEnumId"/></auto-parameters>
         </in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.order.return.ReturnItem" value-field="returnItem"/>
+            <if condition="returnItem == null"><return error="true" message="Return item ${returnId}:${returnItemSeqId} not found"/></if>
+            <!-- a raised quantity of an order line's item meets add#OrderItemToReturn's checks again (SEC-BAP-93): the return still
+                open, or a return authorizer's, and what was billed and, for a sale's shipped product, shipped -->
+            <if condition="returnQuantity != null &amp;&amp; returnItem.orderId &amp;&amp;
+                    toDecimal(returnQuantity).compare(toDecimal(returnItem.returnQuantity ?? 0)) &gt; 0">
+                <entity-find-one entity-name="mantle.order.return.ReturnHeader" value-field="returnHeader"/>
+                <if condition="!['ReturnCreated', 'ReturnRequested'].includes(returnHeader.statusId) &amp;&amp; ec.user.userId
+                        &amp;&amp; !ec.user.hasPermission('RETURN_AUTHORIZE')">
+                    <return error="true" message="RETURN_NOT_OPEN: Return ${returnId} is ${returnHeader.status?.description}; only a return authorizer raises an item's quantity"/></if>
+                <service-call name="mantle.order.ReturnServices.calculate#OrderItemReturnable" out-map="returnable"
+                        in-map="{orderId:returnItem.orderId, orderItemSeqId:returnItem.orderItemSeqId}"/>
+                <set field="otherReturned" from="toDecimal(returnable.returnedQuantity ?? 0).subtract(toDecimal(returnItem.returnQuantity ?? 0))"/>
+                <if condition="returnable.isProductItemType &amp;&amp; otherReturned.add(toDecimal(returnQuantity)).compare(toDecimal(returnable.invoiceQuantity ?? 0)) &gt; 0">
+                    <return error="true" message="Tried to return more than is returnable; quantity billed ${returnable.invoiceQuantity}, already returned ${otherReturned}, tried to return ${returnQuantity}"/></if>
+                <script><![CDATA[
+                    const product = returnItem.productId ? ec.entity.find('mantle.product.Product').condition('productId', returnItem.productId).disableAuthz().one() : null
+                    const sale = !!ec.entity.find('mantle.party.PartyRole').condition({partyId: returnHeader.vendorPartyId, roleTypeId: 'OrgInternal'}).disableAuthz().one()
+                    shippedCeiling = null
+                    if (sale && product && ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId)) {
+                        shippedCeiling = toDecimal(0)
+                        for (const issuance of ec.entity.find('mantle.product.issuance.AssetIssuance').condition({orderId: returnItem.orderId,
+                                orderItemSeqId: returnItem.orderItemSeqId}).disableAuthz().list())
+                            shippedCeiling = shippedCeiling.add(toDecimal(issuance.quantity ?? 0)).subtract(toDecimal(issuance.quantityCancelled ?? 0))
+                    }
+                ]]></script>
+                <if condition="shippedCeiling != null &amp;&amp; otherReturned.add(toDecimal(returnQuantity)).compare(shippedCeiling) &gt; 0">
+                    <return error="true" message="QUANTITY_EXCEEDS_SHIPPED: Tried to return more than was shipped; quantity shipped ${shippedCeiling}, already returned ${otherReturned}, tried to return ${returnQuantity}"/></if>
+            </if>
             <!-- TODO further restrict fields updatable based on statusId (itemChangeable), responseAmount, etc; like restrictions on EditReturnItems screen
             <set field="itemChangeable" from="['ReturnCreated', 'ReturnRequested', 'ReturnApproved'].includes(returnItem.statusId)"/>
             -->

@@ -242,7 +242,12 @@ along with this software (see the LICENSE.md file). If not, see
             screens, whose access rules this search does not have; another type finds nothing, with a message). Under the user's
             organization limit (SearchScope.js, as search#Universal has it) each type shows only its records of the user's
             organizations, by the type's own organization, user and party fields, and a type with none is left out, saying so
-            when it is the one asked for. A party that is another user's personal contact is never found.</description>
+            when it is the one asked for. A party that is another user's personal contact is never found. Each hit is then
+            kept only when its record is there for the user and not kept from them inside their organizations (SearchScope.js
+            hitHidden and financeHidden, search#Universal's per-hit rules: an HR case, a hidden applicant, a protected or
+            confidential task, a maintenance work order or request outside the user's reach, an invoice or payment of a side
+            the user does not read, a payroll-origin ledger transaction; SEC-DAT-98). The count is then the page's, unless the
+            page holds the whole match (SearchScope.js keepPage).</description>
         <implements service="org.moqui.search.SearchServices.search#DataDocuments"/>
         <actions>
             <script><![CDATA[
@@ -272,6 +277,8 @@ along with this software (see the LICENSE.md file). If not, see
                         all.push({bool: {any: any}})
                     }
                     if (type === 'MantleParty') all.push(searchScope.privateClause())
+                    // the hide rules an indexed field can say, in the trusted filter (SEC-DAT-82)
+                    all.push(...searchScope.hideClauses(type))
                     typeClauses.push({bool: {all: all}})
                 }
                 types = types.filter(type => !leftOut.includes(type))
@@ -299,6 +306,33 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="queryString" from="elasticQueryAutoWildcard(queryString, false)"/>
             <service-call name="org.moqui.search.SearchServices.search#DataDocuments" out-map="context"
                     in-map="Object.assign({}, context, {flattenDocument:false})"/>
+            <!-- each hit by its record's own rule inside the user's organizations, as search#Universal asks (SearchScope.js
+                hitHidden; SEC-DAT-98): a record gone or kept from the user is no result, and a dropped hit makes the count the page's -->
+            <script><![CDATA[
+                const hitScope = ec.resource.script('component://mr-mantle/service/mantle/search/SearchScope.js')
+                const hitPartyId = ec.user.userAccount?.partyId || null
+                const documents = {}
+                const financeMemo = {}
+                const page = hitScope.keepPage({documentList, documentListCount, documentListPageIndex, documentListPageSize}, doc => {
+                    const type = doc._type
+                    if (!(type in documents)) documents[type] = ec.entity.find('moqui.entity.document.DataDocument')
+                            .condition('dataDocumentId', type).useCache(true).disableAuthz().one()
+                    const primary = documents[type]?.primaryEntityName
+                    if (!primary) return false
+                    const keyNames = Object.keys(ec.entity.makeValue(primary).getPrimaryKeys())
+                    const idParts = String(doc._id || '').split('::')
+                    const key = {}
+                    keyNames.forEach((name, index) => { key[name] = doc[name] != null ? doc[name] : idParts[index] })
+                    const current = ec.entity.find(primary).condition(key).one()
+                    return current != null && !hitScope.hitHidden(type, current, hitPartyId)
+                        && !hitScope.financeHidden(type, current, financeMemo)
+                })
+                documentList = page.documentList
+                documentListCount = page.documentListCount
+                documentListPageMaxIndex = page.documentListPageMaxIndex
+                documentListPageRangeLow = page.documentListPageRangeLow
+                documentListPageRangeHigh = page.documentListPageRangeHigh
+            ]]></script>
         </actions>
     </service>
 </services>

@@ -101,8 +101,9 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="store" noun="Currency" allow-remote="false">
-        <description>Create a currency unit or change its name and decimals. Refuses a user without finance
-            administration, a code that is not three capital letters, a missing name, decimals outside 0 to 6, a unit
+        <description>Create a currency unit or change its name and decimals. A unit is every organization's, so this
+            needs finance administration of every organization (SEC-BOS-94: AccountingPolicy.js everyOrganizationAdmin, the
+            exchange rates' rule). Refuses a user without it, a code that is not three capital letters, a missing name, decimals outside 0 to 6, a unit
             that is not a currency, a stale revision and a change of decimals of a currency with posted
             entries.</description>
         <in-parameters>
@@ -118,7 +119,10 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <set field="policy" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/AccountingPolicy.js')"/>
-            <script>policy.organization(context, 'admin')</script>
+            <set field="scope" from="policy.organization(context, 'admin')"/>
+            <if condition="!policy.everyOrganizationAdmin(scope)">
+                <return error="true" message="PERMISSION_DENIED: Currencies are shared by every organization: finance administration of every organization is required"/>
+            </if>
             <set field="changeReason" from="policy.reason(context)"/>
             <set field="digits" from="Number(fractionDigits)"/>
             <set field="digitsValid" from="Number.isInteger(digits) &amp;&amp; digits &gt;= 0 &amp;&amp; digits &lt;= 6"/>

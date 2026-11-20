@@ -376,7 +376,9 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.product.store.ProductStorePromotion" short-alias="storePromotion"/>
         <relationship type="many" related="mantle.product.store.ProductStorePromoCodeParty" short-alias="parties">
             <key-map field-name="promoCodeId"/></relationship>
-        <index name="PSTR_PROMO_CODE" unique="true"><index-field name="promoCode"/></index>
+        <!-- a code's text is unique within its store's organization (StorePromotions.js codeTaken), not across the instance, so
+            one organization's staff never learn another's codes (SEC-BAP-108); Shop and add#OrderPromoCode match within the store -->
+        <index name="PSTR_PROMO_CODE"><index-field name="promoCode"/></index>
     </entity>
     <entity entity-name="ProductStorePromoCodeParty" package="mantle.product.store">
         <field name="promoCodeId" type="id" is-pk="true"/>

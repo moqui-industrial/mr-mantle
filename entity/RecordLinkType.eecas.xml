@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The record type registrations (mantle.party.communication.RecordLinkType, SEC-BOS-87). -->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+    <!-- A registration loaded with no rule (no visibleService, parent or organization field) that does not say why it needs none
+        (codeRule, only on a type get#RecordLinkInfo rules itself: RecordLinkTypes.js codeRuled; publicRead), or that claims
+        codeRule for another type, is seen by a system administrator alone (get#RecordLinkInfo); the error names it so its
+        component gives it a rule. The row is kept: one registration failing does not stop the rest of the data. -->
+    <eeca id="RecordLinkTypeRuleless" entity="mantle.party.communication.RecordLinkType" on-create="true" on-update="true"
+            run-on-error="false" get-entire-entity="true">
+        <actions><script>
+            const problem = ec.resource.script('component://mr-mantle/service/mantle/party/RecordLinkTypes.js').problemOf(ec.context)
+            if (problem) ec.logger.error('Record type ' + recordEntityName + ' (' + (ownerText ?? '') + ') ' + problem)
+        </script></actions>
+    </eeca>
+</eecas>

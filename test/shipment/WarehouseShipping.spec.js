@@ -263,6 +263,11 @@ spec({
         ec.message.clearErrors()
         login("john.doe")
         ec.artifactExecution.enableAuthz()
+    },
+    cleanupSpec() {
+        // the timeout feature's store binds the shared test gateway: left behind, WSH_ORG would be one more organization
+        // using TEST_SHIPPING, and a later spec's demo organization would no longer manage it (SEC-BAP-101 gatewayManaged)
+        find("mantle.product.store.ProductStoreShippingGateway", {productStoreId: "WSH_STORE"}).deleteAll()
     }
 })
 
@@ -292,6 +297,48 @@ feature("a two-package shipment is rated by the local rules and by the test carr
         rates.providerErrors.length == 0
         reader.error.includes("PERMISSION_DENIED")
         outsider.error.includes("RECORD_UNAVAILABLE")
+    }
+})
+
+feature("a gateway the shipment's lookup does not offer rates and buys nothing for it, though it serves the carrier (SEC-BAP-101)", {
+    when() {
+        const sh = packedShipment("WSH_DEST", [1], {shippingGatewayConfigId: gateway})
+        // the shipper's own preference names the gateway: no user's preference offers one (SEC-BAP-101 review)
+        call("store#moqui.security.UserPreference", {userId: "WSH_SHIPPER", preferenceKey: "DefaultShipmentGatewayConfigId",
+            preferenceValue: "WSH_NOFIND"})
+        return {
+            rates: run("wsh_shipper", T + "get#ShipmentRates", {shipmentId: sh.shipmentId, shippingGatewayConfigId: "WSH_NOFIND"}),
+            label: run("wsh_shipper", T + "request#PackageLabels", labelRequest(sh.shipmentId, {shippingGatewayConfigId: "WSH_NOFIND"})),
+            labels: carrierLabels(sh.shipmentId).length,
+            segment: rows("mantle.shipment.ShipmentRouteSegment", {shipmentId: sh.shipmentId})[0].shippingGatewayConfigId,
+            ...(() => {
+                // WSH_NOFIND is used by no organization: the system administrator's; a gateway the organization alone uses is its own
+                call("create#mantle.product.store.ProductStore", {productStoreId: "WSH_BIND_STORE", storeName: "WSH binding store", organizationPartyId: org})
+                call("create#mantle.shipment.carrier.ShippingGatewayConfig", {shippingGatewayConfigId: "WSH_OWN_GW", description: "WSH own"})
+                call("mantle.party.PartyServices.store#PartySetting", {partyId: org, partySettingTypeId: "DefaultShipmentGatewayConfigId",
+                    settingValue: "WSH_OWN_GW"})
+                const result = {
+                    otherDefault: run("wsh_admin", "mantle.party.PartyServices.store#PartySetting", {partyId: org,
+                        partySettingTypeId: "DefaultShipmentGatewayConfigId", settingValue: "WSH_NOFIND"}),
+                    otherBinding: run("wsh_admin", "mantle.shipment.carrier.CarrierSetupServices.store#StoreShippingGateway",
+                        {productStoreId: "WSH_BIND_STORE", carrierPartyId: carrier, shippingGatewayConfigId: "WSH_NOFIND"}),
+                    ownBinding: run("wsh_admin", "mantle.shipment.carrier.CarrierSetupServices.store#StoreShippingGateway",
+                        {productStoreId: "WSH_BIND_STORE", carrierPartyId: carrier, shippingGatewayConfigId: "WSH_OWN_GW"})
+                }
+                call("delete#mantle.party.PartySetting", {partyId: org, partySettingTypeId: "DefaultShipmentGatewayConfigId"})
+                return result
+            })()
+        }
+    },
+    then({rates, label, labels, segment, otherDefault, otherBinding, ownBinding}) {
+        // a default gateway or a store binding only of a gateway the user's organizations configure (review)
+        otherDefault.error.includes("GATEWAY_INVALID")
+        otherBinding.error.includes("GATEWAY_INVALID")
+        ownBinding.error == ""
+        rates.error.includes("GATEWAY_INVALID")
+        label.error.includes("GATEWAY_INVALID")
+        labels == 0
+        segment == gateway
     }
 })
 
@@ -350,9 +397,14 @@ feature("both packages' labels are bought once through the test carrier; a retry
 
 feature("a label timeout asks the carrier before retrying and buys no second label", {
     when() {
-        // the segment's committed carrier is _NA_ with no gateway; the request chooses the test carrier and its gateway,
-        // which is the gateway recorded, called and asked after the timeout (P13 review A1)
+        // the segment's committed carrier is _NA_ with no gateway; the request chooses the test carrier and the gateway its
+        // store binds to it (the only kind of gateway a request names, SEC-BAP-101), which is the gateway recorded, called and
+        // asked after the timeout (P13 review A1)
+        call("create#mantle.product.store.ProductStore", {productStoreId: "WSH_STORE", storeName: "WSH store", organizationPartyId: org})
+        call("create#mantle.product.store.ProductStoreShippingGateway", {productStoreId: "WSH_STORE", carrierPartyId: carrier,
+            shippingGatewayConfigId: gateway})
         const sh = packedShipment("WSH_TIMEOUT", [1, 1])
+        call("update#mantle.shipment.Shipment", {shipmentId: sh.shipmentId, productStoreId: "WSH_STORE"})
         state.timeout = sh
         const request = labelRequest(sh.shipmentId, {shippingGatewayConfigId: gateway})
         const first = run("wsh_shipper", T + "request#PackageLabels", request)
@@ -605,7 +657,7 @@ feature("an open inspection holds dispatch; a label refund before ship reverses 
 
 feature("a gateway that cannot be asked after a timeout is sent again only when a person says so", {
     when() {
-        const sh = packedShipment("WSH_TIMEOUT", [1])
+        const sh = packedShipment("WSH_TIMEOUT", [1], {shippingGatewayConfigId: "WSH_NOFIND"})
         const request = labelRequest(sh.shipmentId, {shippingGatewayConfigId: "WSH_NOFIND"})
         const first = run("wsh_shipper", T + "request#PackageLabels", request)
         const retry = run("wsh_shipper", T + "request#PackageLabels", request)
@@ -638,7 +690,7 @@ feature("a gateway that cannot be asked after a timeout is sent again only when 
 
 feature("a queued label is pending; the next request asks the carrier and completes it, buying no second label", {
     when() {
-        const sh = packedShipment("WSH_QUEUED", [1])
+        const sh = packedShipment("WSH_QUEUED", [1], {shippingGatewayConfigId: gateway})
         const request = labelRequest(sh.shipmentId, {shippingGatewayConfigId: gateway})
         const first = run("wsh_shipper", T + "request#PackageLabels", request)
         const afterFirst = {
@@ -648,7 +700,7 @@ feature("a queued label is pending; the next request asks the carrier and comple
         }
         const retry = run("wsh_shipper", T + "request#PackageLabels", request)
         // a label the carrier keeps queued stays pending when asked, and is not bought again
-        const stuck = packedShipment("WSH_STUCK", [1])
+        const stuck = packedShipment("WSH_STUCK", [1], {shippingGatewayConfigId: gateway})
         const stuckRequest = labelRequest(stuck.shipmentId, {shippingGatewayConfigId: gateway})
         run("wsh_shipper", T + "request#PackageLabels", stuckRequest)
         const stuckRetry = run("wsh_shipper", T + "request#PackageLabels", stuckRequest)
@@ -746,6 +798,40 @@ feature("a print failure leaves the posted result and offers a reprint; the prin
         // what was posted stays: the labels and the shipment
         status == "ShipPacked"
         segs.every(row => row.trackingCode)
+    }
+})
+
+feature("a printer serves one organization's facilities, and a reprint sends only a job printed at its facility since the binding (SEC-BAP-103)", {
+    when() {
+        const job = Array.from(
+            find("moqui.basic.print.PrintJob", {networkPrinterId: "WSH_PRINTER"}).orderBy("-createdDate").limit(1).list()
+        )[0]
+        call("create#mantle.facility.Facility", {facilityId: "WSH_FAC2", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: org})
+        call("create#mantle.facility.Facility", {facilityId: "WSH_OTHER_FAC", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: "WSH_OTHER"})
+        const binding = facilityId => ({facilityId, printerPurposeEnumId: "PtpPackageLabel", networkPrinterId: "WSH_PRINTER"})
+        // a sister organization of the same rollup (PrtOrgRollup to one parent) may share it (review)
+        organization("WSH_PARENT", "OrgInternal")
+        organization("WSH_SISTER", "OrgInternal")
+        for (const fromPartyId of [org, "WSH_SISTER"])
+            call("create#mantle.party.PartyRelationship", {relationshipTypeEnumId: "PrtOrgRollup", fromPartyId, fromRoleTypeId: "OrgInternal",
+                toPartyId: "WSH_PARENT", toRoleTypeId: "OrgInternal", fromDate: since})
+        call("create#mantle.facility.Facility", {facilityId: "WSH_SISTER_FAC", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: "WSH_SISTER"})
+        user("WSH_SISTER_ADMIN", ["FACILITY_EDIT"], "WSH_SISTER")
+        return {
+            sister: run("wsh_sister_admin", P + "store#FacilityPrinter", binding("WSH_SISTER_FAC")),
+            sameOrganization: run("wsh_admin", P + "store#FacilityPrinter", binding("WSH_FAC2")),
+            otherOrganization: run("wsh_outsider", P + "store#FacilityPrinter", binding("WSH_OTHER_FAC")),
+            // the first facility's job, asked again at the second facility that bound the printer after it
+            elsewhere: run("wsh_shipper", P + "dispatch#Document", {facilityId: "WSH_FAC2", printJobId: job.printJobId}),
+            here: run("wsh_shipper", P + "dispatch#Document", {facilityId: facility, printJobId: job.printJobId})
+        }
+    },
+    then({sister, sameOrganization, otherOrganization, elsewhere, here}) {
+        sister.error == ""
+        sameOrganization.error == ""
+        otherOrganization.error.includes("PRINTER_UNAVAILABLE")
+        elsewhere.error.includes("RECORD_UNAVAILABLE")
+        here.error == ""
     }
 })
 

@@ -149,10 +149,23 @@ function create(p) {
 }
 // The organization's approved bills open in the run's currency that are due through its date, or whose discount is open
 // on the pay date; each is selected or left out with its reason. A bill the user left out stays left out.
+// A user who changed the run's selection (changedByUserIds): none of them approves it (SEC-BOS-126).
+const changersOf = run =>
+    String(run.changedByUserIds || "")
+        .split(",")
+        .map(id => id.trim())
+        .filter(Boolean)
+function recordChange(run) {
+    const userId = ec.user.userId
+    const changers = changersOf(run)
+    if (userId && !changers.includes(userId))
+        call("update#" + R, {paymentRunId: run.paymentRunId, changedByUserIds: changers.concat([userId]).join(",")})
+}
 function select(p) {
     const run = runScope(p, "PAYABLE_EDIT", true)
     editable(run)
     voidApproval(run, "The selection changed")
+    recordChange(run)
     const org = run.organizationPartyId,
         payDay = dayText(run.payDate),
         dueThrough = dayText(run.dueThroughDate),
@@ -310,6 +323,7 @@ function storeItem(p) {
     }
     if ((item.selectedIndicator === "Y") === include) return {changed: false}
     voidApproval(run, "The selection changed")
+    recordChange(one(R, {paymentRunId: run.paymentRunId}))
     call("update#" + RI, {
         paymentRunId: item.paymentRunId,
         paymentRunItemSeqId: item.paymentRunItemSeqId,
@@ -343,7 +357,7 @@ function requestApproval(p) {
     })
 }
 // Approve the run as it is: its total and the version of its selection, which execution checks. The run's creator
-// approves it only when the organization allows self-approval.
+// approves it only when the organization allows self-approval, nor does a user who changed its selection (SEC-BOS-126).
 function approve(p) {
     const run = runScope(p, "PAYMENT_RUN_APPROVE", true)
     lib.policy.revision(run, p.lastUpdatedStamp)
@@ -351,9 +365,15 @@ function approve(p) {
     const selected = selectedItems(run.paymentRunId)
     if (!selected.length) denied("RUN_EMPTY", "Select at least one bill")
     for (const item of selected) lib.requireNotHeld(item.invoiceId)
-    const selfApproved = run.createdByUserId === ec.user.userId
+    const changed = changersOf(run).includes(ec.user.userId)
+    const selfApproved = run.createdByUserId === ec.user.userId || changed
     if (selfApproved && lib.policy.preference(run.organizationPartyId).allowAccountingSelfApproval !== "Y")
-        denied("SELF_APPROVAL_DENIED", "Another finance approver must approve this payment run")
+        denied(
+            "SELF_APPROVAL_DENIED",
+            changed && run.createdByUserId !== ec.user.userId
+                ? "You changed this payment run's bills; another finance approver must approve it"
+                : "Another finance approver must approve this payment run"
+        )
     const approvedTotal = total(selected)
     call("update#" + R, {
         paymentRunId: run.paymentRunId,
@@ -662,11 +682,24 @@ function takeDiscount(run, item, payTime) {
     })
     return credit.invoiceId
 }
+// SEC-BOS-93: a run's bank file names each payee with their account and amount, so a run with a payroll item (a payroll-origin
+// bill or payment, PayrollOrigin.js) has its file read, made and delivered only by a reader of payroll's (PAYROLL_VIEW), as
+// paying it needs; getRun folds those items for anyone else.
+function requireFileReader(run) {
+    if (payrollOrigin().canRead()) return
+    const all = items(run.paymentRunId)
+    if (
+        payrollOrigin().payrollInvoiceIds(all.map(row => row.invoiceId)).length ||
+        payrollOrigin().payrollPaymentIds(all.map(row => row.paymentId)).length
+    )
+        denied("PAYROLL_VIEW_REQUIRED", "The bank file of a run that pays payroll needs PAYROLL_VIEW")
+}
 // The run's bank file: the one written before, else a new one of the run's payments (write#RunFile, in its own
 // transaction, since delivering the payments posts them); then the ACH payments it delivered are applied, each supplier
 // on its own. Asking again gives the same file.
 function generateFile(p) {
     let run = runScope(p, "PAYMENT_EDIT")
+    requireFileReader(run)
     if (!run.executeOperationKey) denied("RUN_NOT_EXECUTED", "Execute the run first")
     const paymentIdList = [
         ...new Set(
@@ -703,6 +736,7 @@ function generateFile(p) {
 // the bank account has a format.
 function writeFile(p) {
     let run = runScope(p, "PAYMENT_EDIT", true)
+    requireFileReader(run)
     const paymentIdList = [
         ...new Set(
             selectedItems(run.paymentRunId)
@@ -752,7 +786,9 @@ function file(run) {
 }
 // The run's bank file as written, for a user who may execute runs.
 function runFile(p) {
-    return file(runScope(p, "PAYMENT_EDIT"))
+    const run = runScope(p, "PAYMENT_EDIT")
+    requireFileReader(run)
+    return file(run)
 }
 // A bank's NACHA return file for the run's bank account (import#NachaReturn, which skips a payment already returned): a
 // returned payment is declined, which reverses its posting and unapplies it (the PaymentUnDeliverCleanup SECA). Its bills,

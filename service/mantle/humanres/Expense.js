@@ -1643,7 +1643,18 @@ function claimLineFromChat(p) {
     return {invoiceId, invoiceItemSeqId: seqId, created: true}
 }
 
+// An expense claim as a record (its card and panels, RecordLinkType, SEC-BOS-87): whoever reads it (readableClaim: the claimant,
+// its approvers, an expense manager of the employer).
+function claimRecordAccess(p) {
+    try {
+        readableClaim(expenseScope(), p.recordId)
+        return {recordVisible: true}
+    } catch (error) {
+        return {recordVisible: false}
+    }
+}
 const operations = {
+    claimRecordAccess,
     createClaim,
     storeClaim,
     storeClaimItem,

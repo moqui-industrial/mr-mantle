@@ -48,10 +48,12 @@ function isOccurrence(schedule, day) {
     return false
 }
 
-// The schedule's template invoice and the side it bills: receivable when the organization issues it.
+// The schedule's template invoice and the side it bills: receivable when the organization issues it. A payroll-origin invoice
+// (a pay run's net pay or payee invoice, PayrollOrigin.js) is no template for anyone (SEC-BOS-92): its lines are a payslip's,
+// and a copy would carry no mark; it is refused as a missing one, so its existence is not told.
 function templateScope(organizationPartyId, templateInvoiceId) {
     const template = templateInvoiceId ? one(lib.invoiceEntity, {invoiceId: templateInvoiceId}) : null
-    if (!template || ![template.fromPartyId, template.toPartyId].includes(organizationPartyId))
+    if (!template || ![template.fromPartyId, template.toPartyId].includes(organizationPartyId) || template.payrollOrigin === "Y")
         denied("TEMPLATE_UNAVAILABLE", "Choose an invoice of the organization as the template")
     if (template.statusId === "InvoiceCancelled") denied("TEMPLATE_UNAVAILABLE", "A cancelled invoice is not a template")
     const receivable = template.fromPartyId === organizationPartyId

@@ -178,33 +178,45 @@ const encode = value => encodeURIComponent(String(value))
 
 // The cache entry of a connection's token: by remote, endpoint and user, never by secret.
 const tokenKey = gw => gw.remote.systemMessageRemoteId + "|" + gw.base + "|" + gw.remote.username
-// The token as the cache keeps it: XORed with a keystream of the conf's single-use hash (SHA-256 by default) of the
-// remote's password, a random nonce and a block counter, so the Tools cache screen shows only hex no one can use
-// without the password. null for a token that is not printable ASCII (it is then not kept).
-function keystream(gw, nonce, length) {
-    const bytes = []
-    for (let block = 0; bytes.length < length; block++) {
-        const hex = ec.user.singleUseCodeHash("paytrace-token|" + gw.remote.password + "|" + nonce + "|" + block)
-        for (let i = 0; i + 1 < hex.length && bytes.length < length; i += 2) bytes.push(parseInt(hex.substr(i, 2), 16))
+// The token is kept in PaymentGatewayAccessToken's encrypted field (the framework's field encryption under the instance's
+// key), by a hash of the connection: never in the cache, and never sealed with a key from the remote's password, whose
+// keystream a reader of the cache could test password guesses against (SEC-BAP-136). Written in a transaction of its own,
+// so a payment's rollback does not lose it.
+const TOKEN = "mantle.account.method.PaymentGatewayAccessToken"
+const tokenId = gw => ec.user.singleUseCodeHash("paytrace-token-key|" + tokenKey(gw)).slice(0, 40)
+function heldToken(gw) {
+    return ec.entity.find(TOKEN).condition("accessTokenKey", tokenId(gw)).disableAuthz().one()
+}
+function keepToken(gw, token, expiresAt) {
+    try {
+        ec.service
+            .sync()
+            .name("store#" + TOKEN)
+            .parameters({
+                accessTokenKey: tokenId(gw),
+                systemMessageRemoteId: gw.remote.systemMessageRemoteId,
+                accessToken: token,
+                expiresAt
+            })
+            .requireNewTransaction(true)
+            .disableAuthz()
+            .call()
+    } catch (error) {
+        ec.logger.warn("PayTrace token of remote " + gw.remote.systemMessageRemoteId + " not kept: " + error.message)
     }
-    return bytes
 }
-function seal(gw, token) {
-    if (!/^[\x21-\x7e]+$/.test(token)) return null
-    const nonce = ec.user.randomString(16)
-    const key = keystream(gw, nonce, token.length)
-    let sealed = ""
-    for (let i = 0; i < token.length; i++) sealed += (token.charCodeAt(i) ^ key[i]).toString(16).padStart(2, "0")
-    return {nonce, sealed}
-}
-function unseal(gw, held) {
-    if (!held?.sealed || !held.nonce) return null
-    const length = held.sealed.length / 2
-    const key = keystream(gw, held.nonce, length)
-    let token = ""
-    for (let i = 0; i < length; i++) token += String.fromCharCode(parseInt(held.sealed.substr(i * 2, 2), 16) ^ key[i])
-    // another password (or hash type) since: not the token, so a new one is asked for
-    return /^[\x21-\x7e]+$/.test(token) ? token : null
+function dropToken(gw) {
+    try {
+        ec.service
+            .sync()
+            .name("delete#" + TOKEN)
+            .parameters({accessTokenKey: tokenId(gw)})
+            .requireNewTransaction(true)
+            .disableAuthz()
+            .call()
+    } catch (error) {
+        ec.logger.warn("PayTrace token of remote " + gw.remote.systemMessageRemoteId + " not dropped: " + error.message)
+    }
 }
 // Credentials PayTrace refused: not sent again for a minute, so a poll over many payments does not send them once per
 // payment.
@@ -214,8 +226,8 @@ function refuseFor(gw, status) {
         .put(tokenKey(gw), {refusedUntil: Number(ec.user.nowTimestamp) + REFUSED_SECONDS * 1000, status})
 }
 
-// The OAuth access token (client credentials: the API user and password), from the cache until shortly before it
-// expires. It is kept only in this process's cache, sealed, and never recorded or logged. fresh drops the cached one first
+// The OAuth access token (client credentials: the API user and password), from its encrypted row until shortly before it
+// expires (the cache holds only a refusal's back-off). It is never logged. fresh drops the cached one first
 // (it was refused). {token} or {problem}; nothing is charged either way.
 function accessToken(gw, fresh) {
     const cache = ec.cache.getCache(TOKEN_CACHE)
@@ -224,10 +236,12 @@ function accessToken(gw, fresh) {
     const held = cache.get(key)
     if (held?.refusedUntil && Number(held.refusedUntil) > now)
         return {problem: "PayTrace refused the API credentials (HTTP " + held.status + "); not sent again for a minute"}
-    if (fresh) cache.remove(key)
-    else if (held?.sealed && Number(held.expiresAt) - TOKEN_MARGIN_SECONDS * 1000 > now) {
-        const token = unseal(gw, held)
-        if (token) return {token}
+    if (fresh) {
+        cache.remove(key)
+        dropToken(gw)
+    } else {
+        const kept = heldToken(gw)
+        if (kept?.accessToken && Number(kept.expiresAt) - TOKEN_MARGIN_SECONDS * 1000 > now) return {token: kept.accessToken}
     }
     const form =
         "grant_type=client_credentials&client_id=" + encode(gw.remote.username) + "&client_secret=" + encode(gw.remote.password)
@@ -261,8 +275,8 @@ function accessToken(gw, fresh) {
     if (!data.access_token) return {problem: "PayTrace's token answer has no access token"}
     const token = String(data.access_token)
     const seconds = Number(data.expires_in) > 0 ? Number(data.expires_in) : TOKEN_DEFAULT_SECONDS
-    const sealed = seal(gw, token)
-    if (sealed) cache.put(key, Object.assign(sealed, {expiresAt: now + seconds * 1000}))
+    cache.remove(key)
+    keepToken(gw, token, now + seconds * 1000)
     return {token}
 }
 

@@ -332,3 +332,143 @@ feature("the general search takes only its index's types, each under the user's 
         ordersOwned
     },
 })
+
+// the general search keeps each hit by its record's own rule inside the user's organizations, as the universal search does
+// (SearchScope.js hitHidden; SEC-DAT-98): a reported maintenance problem of the user's organization is no hit for a user
+// who is not its reporter, on it or in Maintenance; an administrator finds it
+feature("the general search leaves out a maintenance request the user's Maintenance reach does not admit (SEC-DAT-98)", {
+    when() {
+        ec.entity.makeDataLoader().xmlText(`<entity-facade-xml>
+    <mantle.request.Request requestId="SF_MAINT_REQ" requestTypeEnumId="RqtMaintenance" statusId="ReqSubmitted"
+            requestName="SFMAINTLEAK pump leak" requestDate="${day(2)}"/>
+    <mantle.request.RequestParty requestId="SF_MAINT_REQ" partyId="ORG_ZIZI_RETAIL" roleTypeId="OrgInternal" fromDate="${day(2)}"/>
+</entity-facade-xml>`).load()
+        const found = () => (call("mantle.GeneralServices.search#MantleFiltered",
+            { indexName: "mantle", documentType: "MantleRequest", queryString: "SFMAINTLEAK", pageSize: 20 }).documentList || [])
+            .map((document) => document._id)
+        const started = Date.now()
+        let admin = []
+        while (Date.now() - started < 10000 && !admin.length) {
+            call("org.moqui.EntityServices.process#DataFeedPending", {})
+            admin = found()
+        }
+        ec.user.internalLoginUser("sf.org.user")
+        ec.artifactExecution.enableAuthz()
+        try {
+            call("mantle.party.PartyServices.setup#UserOrganizationInfo", {})
+            return { admin, limited: found() }
+        } finally {
+            ec.message.clearAll()
+            ec.artifactExecution.disableAuthz()
+            for (const name of ["userOrgIds", "filterOrgIds", "activeOrgId"]) delete ec.user.context[name]
+            login("john.doe")
+        }
+    },
+    then({ admin, limited }) {
+        admin.includes("SF_MAINT_REQ")
+        !limited.includes("SF_MAINT_REQ")
+    },
+})
+
+// party search leaves out a person who is only an applicant the user does not recruit, as the universal search does
+// (Recruiting.js hiddenApplicants; SEC-DAT-98 review): Marble's FindParty, FindCustomer and FindSupplier search through it
+feature("party search leaves out a person who is only an applicant the user does not recruit (SEC-DAT-98)", {
+    when() {
+        ec.entity.makeDataLoader().xmlText(`<entity-facade-xml>
+    <mantle.party.Party partyId="SF_APPLICANT" partyTypeEnumId="PtyPerson" ownerPartyId="ORG_ZIZI_RETAIL">
+        <mantle.party.Person firstName="Zed" lastName="Sfapplicant"/>
+    </mantle.party.Party>
+    <mantle.humanres.employment.EmploymentApplication employmentApplicationId="SF_APPLICATION" applyingPartyId="SF_APPLICANT"
+            organizationPartyId="ORG_ZIZI_RETAIL" applicationDate="${day(1)}"/>
+</entity-facade-xml>`).load()
+        const indexed = () => num(call("org.moqui.search.SearchServices.search#DataDocuments",
+            { indexName: "mantle_party", documentType: "MantleParty", queryString: "Sfapplicant", pageSize: 20 }).documentListCount)
+        const started = Date.now()
+        let count = 0
+        while (Date.now() - started < 10000 && !count) {
+            call("org.moqui.EntityServices.process#DataFeedPending", {})
+            count = indexed()
+        }
+        ec.user.internalLoginUser("sf.org.user")
+        ec.artifactExecution.enableAuthz()
+        try {
+            call("mantle.party.PartyServices.setup#UserOrganizationInfo", {})
+            // the service as a screen calls it (artifact authorization off: the rule is the service's own)
+            ec.artifactExecution.disableAuthz()
+            const found = call("mantle.party.PartyServices.search#Party", { anyField: "Sfapplicant" })
+            return { count, found: (found.documentList || []).map((document) => document.partyId), total: num(found.documentListCount) }
+        } finally {
+            ec.message.clearAll()
+            ec.artifactExecution.disableAuthz()
+            for (const name of ["userOrgIds", "filterOrgIds", "activeOrgId"]) delete ec.user.context[name]
+            login("john.doe")
+        }
+    },
+    then({ count, found, total }) {
+        count > 0
+        !found.includes("SF_APPLICANT")
+        total == 0
+    },
+})
+
+// the general search reads an invoice by its own side's read, as the universal search does (SearchScope.js financeHidden;
+// SEC-DAT-98 review), and its count is the page's, never a total that counts a hidden hit
+feature("the general search leaves out invoices the user does not read, and counts only what it shows (SEC-DAT-98)", {
+    when() {
+        const typed = () => call("mantle.GeneralServices.search#MantleFiltered",
+            { indexName: "mantle", documentType: "MantleInvoice", queryString: "*:*", pageSize: 100 })
+        const admin = typed()
+        ec.user.internalLoginUser("sf.org.user")
+        ec.artifactExecution.enableAuthz()
+        try {
+            call("mantle.party.PartyServices.setup#UserOrganizationInfo", {})
+            const limited = typed()
+            return { admin: num(admin.documentListCount), limitedIds: (limited.documentList || []).map((document) => document._id),
+                limitedCount: num(limited.documentListCount), maxIndex: num(limited.documentListPageMaxIndex) }
+        } finally {
+            ec.message.clearAll()
+            ec.artifactExecution.disableAuthz()
+            for (const name of ["userOrgIds", "filterOrgIds", "activeOrgId"]) delete ec.user.context[name]
+            login("john.doe")
+        }
+    },
+    then({ admin, limitedIds, limitedCount, maxIndex }) {
+        admin > 0
+        limitedIds.length == 0
+        limitedCount == 0
+        maxIndex == 0
+    },
+})
+
+// a confidential HR case is no hit in the trusted filter itself (SearchScope.js hideClauses; SEC-DAT-82): no total, no
+// short page and no "more than shown" says it is there, for any user
+feature("an HR case is no hit of the universal or the general search, counted or not (SEC-DAT-82)", {
+    when() {
+        ec.entity.makeDataLoader().xmlText(`<entity-facade-xml>
+    <mantle.request.Request requestId="SF_HR_CASE" requestTypeEnumId="RqtHrCase" statusId="ReqSubmitted" requestName="SFHRCASEZED"
+            requestDate="${day(2)}"/>
+    <mantle.request.RequestParty requestId="SF_HR_CASE" partyId="ORG_ZIZI_RETAIL" roleTypeId="OrgInternal" fromDate="${day(2)}"/>
+</entity-facade-xml>`).load()
+        // its text is kept out of the index (PeopleCases.js documentData): an older index's document of it, as one stood
+        const raw = () => num(call("org.moqui.search.SearchServices.search#DataDocuments",
+            { indexName: "mantle", documentType: "MantleRequest", queryString: "requestId:SF_HR_CASE", pageSize: 5 }).documentListCount)
+        ec.search.indexDocuments([{ _index: "mantle", _type: "MantleRequest", _id: "SF_HR_CASE", requestId: "SF_HR_CASE",
+            requestTypeEnumId: "RqtHrCase", requestName: "SFHRCASEZED", parties: [{ partyId: "ORG_ZIZI_RETAIL" }] }])
+        const indexed = raw()
+        const universal = call("mantle.search.UniversalSearchServices.search#Universal", { q: "requestId:SF_HR_CASE", limit: 1,
+            facets: ["entityType"] })
+        const facet = (universal.facetCounts?.entityType || []).find((row) => row.value === "MantleRequest" || row.key === "MantleRequest")
+        // the trusted filter itself, as each search passes it
+        const filtered = ec.search.search({ indexName: "mantle", documentType: "MantleRequest", queryString: "requestId:SF_HR_CASE",
+            filter: { bool: { all: ec.resource.script("component://mr-mantle/service/mantle/search/SearchScope.js").hideClauses("MantleRequest") } },
+            limit: 1 })
+        return { indexed, total: num(universal.total), facetCount: num(facet?.count), filtered: num(filtered.total) }
+    },
+    then({ indexed, total, facetCount, filtered }) {
+        indexed == 1
+        total == 0
+        // the type facet counts the whole authorized match: no hidden HR case in it
+        facetCount == 0
+        filtered == 0
+    },
+})

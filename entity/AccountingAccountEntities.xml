@@ -982,7 +982,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="postalContactMechId" type="id"/>
         <field name="telecomContactMechId" type="id"/>
         <field name="emailContactMechId" type="id"/>
-        <field name="gatewayCimId" type="text-short" enable-audit-log="update"/>
+        <field name="gatewayCimId" type="text-short" ai-opt-out="true" enable-audit-log="update"/>
         <field name="paymentGatewayConfigId" type="id"/>
         <field name="imageUrl" type="text-medium"><description>Usually specific to a type or sub-type of PaymentMethod, for display to users</description></field>
 

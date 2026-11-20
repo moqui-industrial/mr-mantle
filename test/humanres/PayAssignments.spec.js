@@ -979,3 +979,91 @@ feature("a payroll editor adds and changes an employee's payroll bank account; o
         result.endedBy.includes(state.payroll)
     }
 })
+
+// SEC-BOS-114: a payroll editor who is an employee changes no pay input of their own employment (structure, profile, benefits,
+// pay rate): SELF_APPROVAL, the same calls answered for another employee. SEC-BOS-116: a tax profile's values are stored encrypted.
+feature("a payroll editor changes no pay input of their own employment; a tax profile's values are stored encrypted", {
+    when() {
+        const self = person("SELFPAY")
+        const selfEmp = employ(self, orgA)
+        const editor = user("SELFPAY", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT"], [orgA], self)
+        const profile = partyRelationshipId =>
+            code(
+                run(editor, G + "store#PayrollProfile", {
+                    partyRelationshipId,
+                    payrollLocalizationId: "PlzDemonstration",
+                    profileValues: "levyRegion = NORTH",
+                    expectedRevision: "0",
+                    fromDate: dayText(-30)
+                })
+            )
+        const assign = partyRelationshipId =>
+            Array.from(
+                run(editor, G + "assign#PayStructure", {
+                    partyRelationshipIds: [partyRelationshipId],
+                    payrollStructureId: state.extra,
+                    payrollGroupId: state.group,
+                    isPrimary: "N",
+                    fromDate: dayText(-30),
+                    preview: true
+                }).rows || []
+            ).map(row => row.reasonCode || row.outcome)
+        const rate = partyId =>
+            code(
+                run(editor, "mantle.humanres.RateServices.create#RateAmount", {
+                    partyId,
+                    ratePurposeEnumId: "RaprVendor",
+                    rateAmount: "99",
+                    rateCurrencyUomId: "USD",
+                    fromDate: since
+                })
+            )
+        // round 2: the editor's own assignment and pay rate another editor set, ended or changed by the editor; the benefit
+        // branch; a first salary by a repairer who is the employee; and the same profile store answered for another employee
+        const ownAssigned = run(state.payroll, G + "assign#PayStructure", {partyRelationshipIds: [selfEmp], payrollStructureId: state.extra,
+            payrollGroupId: state.group, isPrimary: "N", fromDate: dayText(-30)}).rows?.[0]?.payrollAssignmentId
+        const ownAssignment = rows("mantle.humanres.payroll.PayrollAssignment", {payrollAssignmentId: ownAssigned})[0]
+        const endOwn = code(run(editor, G + "assign#PayStructure", {end: true, payrollAssignmentId: ownAssigned,
+            expectedRevision: String(ms(ownAssignment.lastUpdatedStamp)), reason: "Spec"}))
+        const ownRateId = run(state.payroll, "mantle.humanres.RateServices.create#RateAmount", {partyId: self, ratePurposeEnumId: "RaprVendor",
+            rateAmount: "50", rateCurrencyUomId: "USD", fromDate: since}).rateAmountId
+        const updateOwnRate = code(run(editor, "mantle.humanres.RateServices.update#RateAmount", {rateAmountId: ownRateId, rateAmount: "90"}))
+        const ownBenefit = code(run(editor, G + "store#PayrollProfile", {partyRelationshipId: selfEmp, benefitTypeId: "Health",
+            fromDate: dayText(-30), expectedRevision: "0", cost: "10"}))
+        const repairParty = person("SELFREPAIR")
+        const repairEmp = employ(repairParty, orgA)
+        const repairer = user("SELFREPAIR", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_REPAIR"], [orgA], repairParty)
+        const ownSalary = code(run(repairer, SALARY, {partyRelationshipId: repairEmp, amount: "9000", currencyUomId: "USD",
+            timePeriodTypeId: "PayrollMonth", fromDate: dayText(-10)}))
+        const otherProfile = profile(state.cyEmp)
+        const stored = String(
+            ec.entity.runSqlStatement(
+                "transactional",
+                `SELECT PROFILE_VALUES FROM PAYROLL_TAX_PROFILE WHERE PARTY_RELATIONSHIP_ID = '${state.anaEmp}'`,
+                1
+            ).records[0][0]
+        )
+        return {
+            own: {profile: profile(selfEmp), assign: assign(selfEmp), rate: rate(self), end: endOwn, rateUpdate: updateOwnRate,
+                benefit: ownBenefit, salary: ownSalary},
+            other: {assign: assign(state.cyEmp), rate: rate(state.cy), profile: otherProfile},
+            stored,
+            read: rows("mantle.humanres.payroll.PayrollTaxProfile", {partyRelationshipId: state.anaEmp})[0].profileValues
+        }
+    },
+    then({own, other, stored, read}) {
+        own ==
+            {
+                profile: "SELF_APPROVAL",
+                assign: ["SELF_APPROVAL"],
+                rate: "SELF_APPROVAL",
+                end: "SELF_APPROVAL",
+                rateUpdate: "SELF_APPROVAL",
+                benefit: "SELF_APPROVAL",
+                salary: "SELF_APPROVAL"
+            }
+        other == {assign: ["ready"], rate: "", profile: ""}
+        stored.startsWith(":")
+        read.includes("NORTH")
+    }
+})

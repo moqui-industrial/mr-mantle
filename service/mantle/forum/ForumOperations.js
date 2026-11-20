@@ -290,6 +290,15 @@
         const jobType = OPERATIONS[p.operation]
         if (!jobType) invalid('Unknown operation')
         if (!p.reason) invalid('A reason is required')
+        // one pending run of an operation per site: the queue every site shares holds no burst of one site's
+        if (
+            find(F + 'ForumJobRun', {
+                siteId: p.siteId,
+                jobType,
+                state: 'pending',
+            }).count()
+        )
+            fail('Conflict', 'That operation is already running on this site')
         const config = { contactListId: p.contactListId || null, after: null }
         if (p.operation === 'retention') {
             const policy = retentionPolicy(p.siteId)
@@ -893,22 +902,26 @@
         if (!member(p.siteId, partyId)) missing()
         if (!['export', 'erasure'].includes(p.kind))
             invalid('Request an export or an erasure')
-        if (p.kind === 'erasure') {
-            if (p.confirm !== true)
-                invalid(
-                    'Confirm that your profile will be anonymized and your memberships ended',
-                )
-            if (
-                find(F + 'ForumDataRequest', {
-                    siteId: p.siteId,
-                    partyId,
-                    kind: 'erasure',
-                })
-                    .condition('state', 'in', ['requested', 'running'])
-                    .count()
+        if (p.kind === 'erasure' && p.confirm !== true)
+            invalid(
+                'Confirm that your profile will be anonymized and your memberships ended',
             )
-                fail('Conflict', 'An erasure request is already open')
-        }
+        // one open request of each kind per member and site: an export waits for the one before it to finish
+        if (
+            find(F + 'ForumDataRequest', {
+                siteId: p.siteId,
+                partyId,
+                kind: p.kind,
+            })
+                .condition('state', 'in', ['requested', 'running'])
+                .count()
+        )
+            fail(
+                'Conflict',
+                p.kind === 'erasure'
+                    ? 'An erasure request is already open'
+                    : 'An export request is already open',
+            )
         const requestId = id()
         const fields = {
             requestId,
@@ -1147,17 +1160,62 @@
         }
         return done
     }
+    /* Up to most pending operation runs taken in turn across sites: each site with a pending run gives its oldest, the site
+       waiting longest first, then each one's next, so one site's burst does not hold back every other site's erasures,
+       retention and imports (SEC-PFS-93). */
+    function fairRuns(most) {
+        const pending = (fields) =>
+            find(F + 'ForumJobRun', { state: 'pending', ...fields }).condition(
+                'jobType',
+                'like',
+                'op-%',
+            )
+        const sites = Array.from(
+            pending({}).selectField('siteId').distinct(true).limit(1000).list(),
+        ).map((row) => row.siteId)
+        // each site's runs are read a chunk at a time, oldest first, as its turns come
+        const chunk = Math.max(1, Math.ceil(most / Math.max(1, sites.length)))
+        const queues = sites.map((siteId) => ({ siteId, runs: [], read: 0, done: false }))
+        const next = (queue) => {
+            if (!queue.runs.length && !queue.done) {
+                queue.runs = Array.from(
+                    pending({ siteId: queue.siteId })
+                        .orderBy('createdAt,runId')
+                        .offset(queue.read)
+                        .limit(chunk)
+                        .list(),
+                )
+                queue.read += queue.runs.length
+                queue.done = queue.runs.length < chunk
+            }
+            return queue.runs.shift() || null
+        }
+        // the first turn of each site, the site waiting longest first
+        const first = queues
+            .map((queue) => ({ queue, run: next(queue) }))
+            .filter((entry) => entry.run)
+            .sort((left, right) => millis(left.run.createdAt) - millis(right.run.createdAt))
+        const out = first.slice(0, most).map((entry) => entry.run)
+        const turns = first.map((entry) => entry.queue)
+        while (out.length < most) {
+            let any = false
+            for (const queue of turns) {
+                if (out.length >= most) break
+                const run = next(queue)
+                if (run) {
+                    out.push(run)
+                    any = true
+                }
+            }
+            if (!any) break
+        }
+        return out
+    }
     function dispatchJobs(p) {
         const was = ec.artifactExecution.disableAuthz()
         try {
             let processed = 0
-            for (const run of Array.from(
-                find(F + 'ForumJobRun', { state: 'pending' })
-                    .condition('jobType', 'like', 'op-%')
-                    .orderBy('createdAt,runId')
-                    .limit(50)
-                    .list(),
-            )) {
+            for (const run of fairRuns(50)) {
                 try {
                     // Small transactions, so a cancel waits for at most one chunk of items.
                     const budget = Number(p?.budget || 50)
@@ -1477,6 +1535,17 @@
         site(p.siteId)
         const { siteStaff } = reportScope(p)
         const { from, thru } = period(p)
+        // a staff member makes at most mantle@forum-report-exports-per-day report files a day on a site
+        const most = ec.resource.script('component://mr-mantle/service/mantle/other/Limits.js').limit(
+            'forum-report-exports-per-day',
+        )
+        if (
+            find(F + 'ForumExport', { siteId: p.siteId, partyId: requireUser() })
+                .condition('kind', 'like', 'report-%')
+                .condition('createdAt', 'greater', stamp(millis(now()) - DAY))
+                .count() >= most
+        )
+            fail('Tarpit', 'At most ' + most + ' report exports a day')
         let header, lines
         if (p.report === 'activity') {
             const a = methods.getActivity(p)
@@ -1596,6 +1665,7 @@
     }
     return {
         dispatchJobs,
+        fairRuns,
         advanceRun,
         runItem,
         cleanupExports,

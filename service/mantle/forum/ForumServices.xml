@@ -441,6 +441,28 @@
       <script>result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').execute('comparePostRevisions',input || {})</script>
     </actions>
   </service>
+  <service verb="set" noun="PostHistory" authenticate="anonymous-all" allow-remote="false">
+    <in-parameters>
+      <parameter name="input" type="Map"/>
+    </in-parameters>
+    <out-parameters>
+      <parameter name="result" type="Map"/>
+    </out-parameters>
+    <actions>
+      <script>result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').execute('setPostHistory',input || {})</script>
+    </actions>
+  </service>
+  <service verb="release" noun="HeldMessage" authenticate="anonymous-all" allow-remote="false">
+    <in-parameters>
+      <parameter name="input" type="Map"/>
+    </in-parameters>
+    <out-parameters>
+      <parameter name="result" type="Map"/>
+    </out-parameters>
+    <actions>
+      <script>result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').execute('releaseHeldMessage',input || {})</script>
+    </actions>
+  </service>
   <service verb="restore" noun="PostRevision" authenticate="anonymous-all" allow-remote="false">
     <in-parameters>
       <parameter name="input" type="Map"/>

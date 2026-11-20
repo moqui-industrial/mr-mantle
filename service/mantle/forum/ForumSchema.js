@@ -50,8 +50,6 @@
             'targetPartyId',
             'role',
             'expectedRevision',
-            'password',
-            'code',
             'reason',
         ],
     },
@@ -184,6 +182,7 @@
             'before',
             'after',
             'around',
+            'showHeld',
         ],
     },
     searchForum: {
@@ -258,6 +257,7 @@
             'draftId',
             'attachmentIds',
             'sourceFormat',
+            'hideHistory',
         ],
     },
     markRead: {
@@ -461,8 +461,6 @@
             'roleTypeId',
             'expectedRevision',
             'reason',
-            'password',
-            'code',
         ],
     },
     bindMailbox: {
@@ -607,7 +605,22 @@
     },
     restorePostRevision: {
         service: 'mantle.forum.ForumServices.restore#PostRevision',
-        fields: ['siteId', 'postId', 'revision', 'expectedRevision', 'reason'],
+        fields: [
+            'siteId',
+            'postId',
+            'revision',
+            'expectedRevision',
+            'reason',
+            'hideHistory',
+        ],
+    },
+    setPostHistory: {
+        service: 'mantle.forum.ForumServices.set#PostHistory',
+        fields: ['siteId', 'postId', 'history', 'reason'],
+    },
+    releaseHeldMessage: {
+        service: 'mantle.forum.ForumServices.release#HeldMessage',
+        fields: ['siteId', 'postId', 'expectedRevision'],
     },
     deletePost: {
         service: 'mantle.forum.ForumServices.delete#Post',
@@ -1852,6 +1865,7 @@
             'key',
             'returned',
             'showTicket',
+            'confirm',
             'operationId',
         ],
     },

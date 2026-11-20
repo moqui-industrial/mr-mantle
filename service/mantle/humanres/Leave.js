@@ -714,13 +714,23 @@ function inOwnTransaction(row, what, fn) {
     }
 }
 
+// SEC-BOS-117: an HR editor never grants their own leave (an allocation, an adjustment or an opening balance), as HR never
+// cancels their own leave at once (cancelRequest) nor decides their own request; another HR editor does. The system (the
+// accrual job, no user) is not refused.
+function notOwnLeave(employment) {
+    const mine = ec.user.userAccount?.partyId || null
+    if (mine && employment?.fromPartyId === mine)
+        denied("SELF_APPROVAL", "Your own leave balance is granted by another HR editor")
+}
+
 // ===== assign#Policy =====
 // Whether an employment may be put under the policy from a date: the employer's (EMPLOYMENT_OUTSIDE), employed then
 // (DATE_OUTSIDE), under no other policy of the type then (ASSIGNMENT_OVERLAP), and with no entries of the type in another unit
-// (UNIT_MISMATCH).
+// (UNIT_MISMATCH), and not the caller's own (SELF_APPROVAL: a policy assigned is leave its accrual grants, from whatever date).
 function checkAssignable(policy, employment, fromMs, thruMs, partyRelationshipId) {
     if (!employment || employment.toPartyId !== policy.organizationPartyId)
         denied("EMPLOYMENT_OUTSIDE", "Employment " + partyRelationshipId + " is not one of the policy's employer")
+    notOwnLeave(employment)
     if (!openAt(employment, fromMs)) denied("DATE_OUTSIDE", "The person is not employed on that date")
     const clash = rows(ASSIGNMENT, {partyRelationshipId, leaveTypeEnumId: policy.leaveTypeEnumId}).find(
         row => !voided(row) && (ms(row.fromDate) ?? -Infinity) < (thruMs ?? Infinity) && (ms(row.thruDate) ?? Infinity) > fromMs
@@ -944,10 +954,11 @@ function allocationTerms(policy, p) {
 }
 // Whether an employment may be granted under the policy for the period: the employer's (EMPLOYMENT_OUTSIDE), under the policy in
 // the period (NOT_ASSIGNED), not granted for an overlapping period already (DUPLICATE_PERIOD, a grant only), and within the
-// negative limit after a deduction (NEGATIVE_LIMIT). Its balance now.
+// negative limit after a deduction (NEGATIVE_LIMIT), and not the caller's own (SELF_APPROVAL). Its balance now.
 function checkAllocatable(policy, employment, terms, partyRelationshipId) {
     if (!employment || employment.toPartyId !== policy.organizationPartyId)
         denied("EMPLOYMENT_OUTSIDE", "Employment " + partyRelationshipId + " is not one of the policy's employer")
+    notOwnLeave(employment)
     const fromMs = startOfDay(terms.periodFromDay)
     const thruMs = startOfDay(addDays(terms.periodThruDay, 1))
     const under = rows(ASSIGNMENT, {partyRelationshipId, leavePolicyId: policy.leavePolicyId}).some(
@@ -1576,7 +1587,7 @@ function accrueAll(assignments, asOf) {
     return {posted, assignmentCount: assignments.length, failed: failedList.length, failedList}
 }
 // run#Accrual: an HR editor's run of the accrual by a date (now, never later) for a policy of theirs, or every policy of their
-// employers.
+// employers; never the editor's own employments, which the daily job accrues (SEC-BOS-117).
 function runAccrual(p) {
     const userScope = editorScope("Running the leave accrual")
     const asOf = Math.min(nowMs(), p.asOfDate ? people.asOfMillis(p.asOfDate) : nowMs())
@@ -1590,7 +1601,11 @@ function runAccrual(p) {
                     .list()
             ).map(row => row.leavePolicyId)
           : []
-    return accrueAll(accrualAssignments(policyIds, asOf, null), asOf)
+    const mine = ec.user.userAccount?.partyId || null
+    return accrueAll(
+        accrualAssignments(policyIds, asOf, null).filter(row => !mine || row.partyId !== mine),
+        asOf
+    )
 }
 // run#AccrualJob: the daily job, every assignment of every policy (or the employments given), by now.
 function runAccrualJob(p) {

@@ -242,6 +242,39 @@ feature(
     "The comparison in the demand's unit: the pack per each first, the tier price, a currency without a rate Not comparable",
     {
         when() {
+            // SEC-BAP-90: a supplier price row of another supplier naming A's quote line is refused, and one of A's naming D's
+            // line, written past the rule (here as the system), does not price D's line
+            const lineA = lineOf(state.quoteA)
+            const planted = {
+                productId: lineA.productId,
+                vendorPartyId: supplierD,
+                customerPartyId: org,
+                priceTypeEnumId: "PptCurrent",
+                pricePurposeEnumId: "PppPurchase",
+                priceUomId: "USD",
+                price: 1,
+                minQuantity: 0,
+                sourceOrderId: state.quoteA,
+                sourceOrderItemSeqId: lineA.orderItemSeqId
+            }
+            const foreignSource = run(state.buyer, "mantle.product.PriceServices.store#ProductPrice", planted)
+            // the editor's own organization's quote line, its own supplier and product: the row is stored with no source, as
+            // only publish#SupplierQuotePrice names one (SEC-BAP-90 review)
+            const ownSource = run(
+                state.buyer,
+                "mantle.product.PriceServices.store#ProductPrice",
+                Object.assign({}, planted, {vendorPartyId: supplierA, minQuantity: 2})
+            )
+            const lineD = lineOf(state.quoteD)
+            call(
+                "create#mantle.product.ProductPrice",
+                Object.assign({}, planted, {
+                    vendorPartyId: supplierA,
+                    sourceOrderId: state.quoteD,
+                    sourceOrderItemSeqId: lineD.orderItemSeqId,
+                    fromDate: ec.user.nowTimestamp
+                })
+            )
             const compared = run(state.buyer, S + "compare#SupplierQuotes", {
                 requestId: state.requestId,
                 displayCurrencyUomId: "USD"
@@ -256,12 +289,24 @@ feature(
                 a: offer(state.quoteA),
                 pack: offer(state.quoteB, state.packLine),
                 c: offer(state.quoteC),
+                d: offer(state.quoteD),
                 csv,
                 reader,
-                marks
+                marks,
+                foreignSource,
+                ownSourceRow: ownSource.productPriceId
+                    ? one("mantle.product.ProductPrice", {productPriceId: ownSource.productPriceId})
+                    : null,
+                foreignRow: foreignSource.productPriceId
+                    ? one("mantle.product.ProductPrice", {productPriceId: foreignSource.productPriceId})
+                    : null
             }
         },
-        then({compared, a, pack, c, csv, reader, marks}) {
+        then({compared, a, pack, c, d, csv, reader, marks, foreignSource, ownSourceRow, foreignRow}) {
+            // a price editor's source fields are not taken (refused by a check before, now left out)
+            foreignRow == null || foreignRow.sourceOrderId == null
+            ownSourceRow != null && ownSourceRow.sourceOrderId == null
+            d.normalizedPrice == "4.8"
             compared.error == ""
             compared.demandRows.length == 1
             compared.demandRows[0].comparedQuantity == "10"

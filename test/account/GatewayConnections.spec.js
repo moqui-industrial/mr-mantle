@@ -24,6 +24,7 @@ const method = "SPEC_GWC_METHOD"
 const users = {manage: "SPEC_GWC_MANAGE", none: "SPEC_GWC_NONE"}
 const group = "SPEC_GWC_MANAGERS"
 const secret = "spec-gwc-key-8h3w"
+const password = "Spec-gwc-manage-5!"
 
 const http = ec.factory.getTool("HttpFixtures")
 const find = (entityName, conditions = {}) => ec.entity.find(entityName).condition(conditions).disableAuthz()
@@ -35,6 +36,11 @@ const make = (entityName, fields) => {
 }
 function as(userId, action) {
     ec.user.internalLoginUser(userId.toLowerCase().replace(/_/g, "."))
+    // a repoint asks a recent sign-in of the connection manager (SEC-ADM-87)
+    if (userId === users.manage) {
+        ec.service.sync().name("org.moqui.sso.RecentAuthServices.reauthenticate#User").parameters({password}).disableAuthz().call()
+        ec.message.clearErrors()
+    }
     ec.artifactExecution.enableAuthz()
     try {
         return action()
@@ -86,17 +92,50 @@ const bind = (paymentGatewayConfigId, parameters = {}) =>
         )
     )
 
+// the spec's rows, removed after it and before it (a run stopped part way leaves them)
+function removeSpecRows() {
+    const keys = Object.values(ids)
+    ec.entity.find(METHOD_ENTITY).condition("paymentMethodId", method).deleteAll()
+    ec.entity.find(BINDING).condition("organizationPartyId", org).deleteAll()
+    ec.entity.find("moqui.server.ConnectionCheck").condition("connectionKey", "in", keys).deleteAll()
+    for (const entityName of [
+        "mantle.account.method.PaymentGatewayAuthorizeNet",
+        "mantle.account.method.PaymentGatewayPayTrace",
+        CONFIG
+    ])
+        ec.entity.find(entityName).condition("paymentGatewayConfigId", "in", keys).deleteAll()
+    ec.entity
+        .find("mantle.shipment.carrier.ShippingGatewayConfig")
+        .condition("shippingGatewayConfigId", "in", keys)
+        .deleteAll()
+    ec.entity.find(REMOTE).condition("systemMessageRemoteId", "in", keys).deleteAll()
+    // the payments a test gateway feature made (SEC-BOS-129), with their gateway answers
+    const paymentIds = Array.from(ec.entity.find("mantle.account.payment.Payment").condition("fromPartyId", org).list()).map(row => row.paymentId)
+    if (paymentIds.length) {
+        ec.entity.find("mantle.account.method.PaymentGatewayResponse").condition("paymentId", "in", paymentIds).deleteAll()
+        ec.entity.find("mantle.account.payment.Payment").condition("paymentId", "in", paymentIds).deleteAll()
+    }
+    ec.entity.find("mantle.party.PartyRole").condition("partyId", org).deleteAll()
+    ec.entity.find("mantle.party.Organization").condition("partyId", org).deleteAll()
+    ec.entity.find("mantle.party.Party").condition("partyId", org).deleteAll()
+    ec.entity.find("moqui.security.UserGroupPermission").condition("userGroupId", group).deleteAll()
+    ec.entity.find("moqui.security.UserGroupMember").condition("userId", "in", Object.values(users)).deleteAll()
+    ec.entity.find("moqui.security.UserGroup").condition("userGroupId", group).deleteAll()
+    ec.entity.find("moqui.security.UserAccount").condition("userId", "in", Object.values(users)).deleteAll()
+}
+
 spec({
     setupSpec() {
         http.enable()
         ec.user.internalLoginUser("john.doe")
         ec.artifactExecution.disableAuthz()
+        removeSpecRows()
         for (const [key, userId] of Object.entries(users))
-            make("moqui.security.UserAccount", {
+            make("moqui.security.UserAccount", Object.assign({
                 userId,
                 username: userId.toLowerCase().replace(/_/g, "."),
                 userFullName: "Spec gateways " + key
-            })
+            }, userId === users.manage ? {currentPassword: ec.user.hashPassword(password), passwordHashType: "argon2"} : {}))
         make("moqui.security.UserGroup", {userGroupId: group, description: "Spec gateway managers"})
         for (const userPermissionId of ["ADMIN_CONNECTION_VIEW", "ADMIN_CONNECTION_MANAGE"])
             make("moqui.security.UserGroupPermission", {userGroupId: group, userPermissionId, fromDate: 0})
@@ -118,28 +157,7 @@ spec({
         http.reset()
         ec.message.clearErrors()
         ec.artifactExecution.disableAuthz()
-        const keys = Object.values(ids)
-        ec.entity.find(METHOD_ENTITY).condition("paymentMethodId", method).deleteAll()
-        ec.entity.find(BINDING).condition("organizationPartyId", org).deleteAll()
-        ec.entity.find("moqui.server.ConnectionCheck").condition("connectionKey", "in", keys).deleteAll()
-        for (const entityName of [
-            "mantle.account.method.PaymentGatewayAuthorizeNet",
-            "mantle.account.method.PaymentGatewayPayTrace",
-            CONFIG
-        ])
-            ec.entity.find(entityName).condition("paymentGatewayConfigId", "in", keys).deleteAll()
-        ec.entity
-            .find("mantle.shipment.carrier.ShippingGatewayConfig")
-            .condition("shippingGatewayConfigId", "in", keys)
-            .deleteAll()
-        ec.entity.find(REMOTE).condition("systemMessageRemoteId", "in", keys).deleteAll()
-        ec.entity.find("mantle.party.PartyRole").condition("partyId", org).deleteAll()
-        ec.entity.find("mantle.party.Organization").condition("partyId", org).deleteAll()
-        ec.entity.find("mantle.party.Party").condition("partyId", org).deleteAll()
-        ec.entity.find("moqui.security.UserGroupPermission").condition("userGroupId", group).deleteAll()
-        ec.entity.find("moqui.security.UserGroupMember").condition("userId", "in", Object.values(users)).deleteAll()
-        ec.entity.find("moqui.security.UserGroup").condition("userGroupId", group).deleteAll()
-        ec.entity.find("moqui.security.UserAccount").condition("userId", "in", Object.values(users)).deleteAll()
+        removeSpecRows()
         ec.artifactExecution.enableAuthz()
     }
 })
@@ -215,6 +233,8 @@ feature("a gateway is a registered provider type with that type's services, and 
         out.modeByManager = as(users.manage, () => store("shippingGateway", ids.shippo, {testMode: "N"}))
         out.config = one(CONFIG, {paymentGatewayConfigId: ids.anet}).getMap()
         out.remote = one(REMOTE, {systemMessageRemoteId: ids.anet}).getMap()
+        out.shippoRemote = one(REMOTE, {systemMessageRemoteId: ids.shippo})?.getMap()
+        out.traceRemote = one(REMOTE, {systemMessageRemoteId: ids.trace})?.getMap()
         out.anetOptions = one("mantle.account.method.PaymentGatewayAuthorizeNet", {paymentGatewayConfigId: ids.anet})?.getMap()
         out.traceOptions = one("mantle.account.method.PaymentGatewayPayTrace", {paymentGatewayConfigId: ids.trace}).getMap()
         out.shipping = one("mantle.shipment.carrier.ShippingGatewayConfig", {shippingGatewayConfigId: ids.shippo}).getMap()
@@ -233,6 +253,10 @@ feature("a gateway is a registered provider type with that type's services, and 
         out.anet.applied === true
         out.config.authorizeServiceName === "mantle.ext.account.gateway.AuthorizeNetServices.authorize#Payment"
         out.config.systemMessageRemoteId === ids.anet
+        // each connection is for its provider's webhook type only, PayTrace's for none (SEC-RTE-86)
+        out.remote.systemMessageTypeId === "AuthorizeNetWebhook"
+        out.shippoRemote.systemMessageTypeId === "ShippoWebhook"
+        out.traceRemote.systemMessageTypeId == null
         out.anetOptions.validationMode === "none"
         out.credentials.applied === true
         out.read.secretList.find(row => row.name === "password").secretSet === true
@@ -387,5 +411,78 @@ feature("a payment gateway another organization uses is read, changed and tested
         out.description === "Spec local gateway"
         out.adminRead.connectionKey === ids.local
         out.adminListed.includes(ids.local)
+    }
+})
+
+// SEC-BOS-129: on a production instance the always-approve test gateway is permitted for no organization and Mantle's gateway
+// dispatch sends it no operation, whatever binds it, unless mantle@allow-test-gateways is true; on this test instance both are
+// answered
+feature("a test payment gateway is bound to no organization and takes no payment on a production instance unless allowed", {
+    when() {
+        let paymentCount = 0
+        const payment = () => {
+            const paymentId = "SPEC_GWC_TEST_PAY_" + ++paymentCount
+            make("mantle.account.payment.Payment", {
+                paymentId,
+                fromPartyId: "SPEC_GWC_ORG",
+                toPartyId: "SPEC_GWC_ORG",
+                paymentTypeEnumId: "PtInvoicePayment",
+                paymentInstrumentEnumId: "PiCreditCard",
+                paymentGatewayConfigId: "TEST_APPROVE",
+                statusId: "PmntPromised",
+                amount: "5",
+                amountUomId: "USD"
+            })
+            return paymentId
+        }
+        const authorize = () => {
+            const paymentId = payment()
+            const out = invoke("mantle.account.PaymentServices.authorize#SinglePayment", {paymentId})
+            return {error: out.error, statusId: one("mantle.account.payment.Payment", {paymentId}).statusId}
+        }
+        // the setting named false here, as Mantle's default: a component's test conf may allow test gateways for its walks
+        const production = withConf("mantle@allow-test-gateways", "false", () =>
+            withConf("instance@purpose", "production", () => ({
+                bound: admin(() => bind("TEST_APPROVE", {reason: "Spec"})).error,
+                authorize: authorize(),
+                allowed: withConf("mantle@allow-test-gateways", "true", () => authorize())
+            }))
+        )
+        const test = admin(() => bind("TEST_APPROVE", {reason: "Spec"}))
+        return {production, test}
+    },
+    then({production, test}) {
+        production.bound.includes("TEST_GATEWAY_PRODUCTION")
+        production.authorize.error.includes("TEST_GATEWAY_PRODUCTION") && production.authorize.statusId == "PmntPromised"
+        production.allowed.error == "" && production.allowed.statusId == "PmntAuthorized"
+        test.error == "" && test.applied === true
+    }
+})
+
+// SEC-BOS-129: Shop's hosted form, profile and setup services of a test gateway are offered on a production instance only
+// when test gateways are allowed (StoreCheckout.js gatewayCapabilities asks TestGateways.js refusal)
+feature("a test gateway's hosted form and profile services are offered to no checkout on a production instance unless allowed", {
+    when() {
+        const checkout = ec.resource.script("component://mr-mantle/service/mantle/product/StoreCheckout.js")
+        const config = {paymentGatewayConfigId: "SPEC_GWC_HOSTED", paymentGatewayTypeEnumId: "PgtTest",
+            authorizeServiceName: "mantle.account.PaymentTestServices.hostedPending#Payment"}
+        const formConfig = Object.assign({}, config, {authorizeServiceName: "mantle.account.PaymentTestServices.hostedForm#Payment"})
+        const offered = () => {
+            const hosted = checkout.gatewayCapabilities.PgtTest(config)
+            const form = checkout.gatewayCapabilities.PgtTest(formConfig)
+            return {profile: hosted.hostedProfileService || null, setup: hosted.hostedSetupService || null,
+                checkout: hosted.hostedCheckout, form: form.hostedFormService || null}
+        }
+        const production = withConf("mantle@allow-test-gateways", "false", () => withConf("instance@purpose", "production", () => ({
+            refused: offered(),
+            allowed: withConf("mantle@allow-test-gateways", "true", () => offered())
+        })))
+        return {production, test: offered()}
+    },
+    then({production, test}) {
+        production.refused.profile == null && production.refused.setup == null && production.refused.form == null
+        production.refused.checkout == false
+        production.allowed.profile != null && production.allowed.form != null
+        test.profile != null && test.setup != null && test.form != null && test.checkout == true
     }
 })

@@ -20,12 +20,12 @@ merchant id or integrator id. Enter them in the System Message Remote screen or 
 seed data. The API user's password expires every 90 days at PayTrace (error 979): change it on the remote too.
 
 **Authentication.** OAuth client credentials (`POST /v3/token`, form encoded, the API user as `client_id` and its
-password as `client_secret`). The access token is kept in the process cache `mantle.ext.account.gateway.PayTrace.accessToken` until
-a minute before `expires_in`, by remote, endpoint and user, sealed: XORed with a keystream of the conf's single-use hash
-(SHA-256 by default) of the remote's password, a random nonce and a block counter, so the Tools cache screen shows only
-hex. A request answered 401 (expired or revoked) gets a new token and is sent once more; a second 401 is an error, not
-sent again. Credentials or a fresh token PayTrace refuses are not sent again for a minute. The token is never recorded
-or logged.
+password as `client_secret`). The access token is kept until a minute before `expires_in` in
+`PaymentGatewayAccessToken`'s encrypted field (the framework's field encryption, under the instance's key), by a hash
+of the remote, endpoint and user; never in a cache entry. A request answered 401 (expired or revoked) gets a new token
+and is sent once more; a second 401 is an error, not sent again. Credentials or a fresh token PayTrace refuses are not
+sent again for a minute (the cache `mantle.ext.account.gateway.PayTrace.accessToken` holds only that back-off). The
+token is never logged.
 
 ## Payments
 

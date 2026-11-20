@@ -101,6 +101,11 @@ const unowned = partyId => !partyId || partyId === "_NA_"
 // Whether a party is an internal organization.
 const internalOrganization = partyId =>
     !unowned(partyId) && find("mantle.party.PartyRole", {partyId, roleTypeId: "OrgInternal"}).count() > 0
+// Whether an organization's audience may name a party (SEC-BAP-88, as BOSS Marketing.js directoryParty): one shared (no owner
+// or _NA_) or owned by that organization, and not an internal organization; another organization's party (its Sales accounts and
+// their contacts, its shop customers) is not.
+const organizationParty = (party, organizationPartyId) =>
+    !!party && (unowned(party.ownerPartyId) || party.ownerPartyId === organizationPartyId) && !internalOrganization(party.partyId)
 // Whether the scope covers an organization; never an unowned one.
 function covers(userScope, partyId) {
     if (unowned(partyId)) return false
@@ -176,6 +181,7 @@ function requireConsentChange(partyId, ownerPartyId) {
     scope,
     unowned,
     internalOrganization,
+    organizationParty,
     covers,
     requireCapability,
     requireOrganization,

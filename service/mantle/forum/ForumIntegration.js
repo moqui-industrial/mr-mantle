@@ -384,6 +384,35 @@
             .resolve(store, [productId], millis(now()), siteId)[0]
         return !!found && found.isPublic
     }
+    /* Whether a product is the site's: its Shop mount's store carries it (published or not). A link's card shows a
+       moderator only such a product, and a reader only one the Shop sells now (productPublic). */
+    function siteProduct(siteId, productId) {
+        const mount = rows(S + 'PublicSiteApp', { siteId, app: 'shop' }).find(
+            (row) => row.enabled === 'Y' && !!row.targetId,
+        )
+        return (
+            !!mount &&
+            !!one('mantle.product.store.ProductStoreProduct', {
+                productStoreId: mount.targetId,
+                productId,
+            })
+        )
+    }
+    /* Whether a wiki page is the site's: of its publishing space, or of a space the caller administers. */
+    function siteArticle(siteId, page) {
+        if (!page) return false
+        if (
+            page.wikiSpaceId ===
+            one(S + 'PublicSite', { siteId })?.publishingWikiSpaceId
+        )
+            return true
+        return !!ec.service
+            .sync()
+            .throwOnError(true)
+            .name('org.moqui.resource.WikiServices.get#WikiPageAccess')
+            .parameters({ wikiSpaceId: page.wikiSpaceId })
+            .call()?.canAdmin
+    }
     /* Internal staff who moderate the topic: the only people who see or make case links. */
     const caseStaff = (a) => a.canModerate && internalParty(me())
     methods.getTopicLinks = (p) => {
@@ -406,8 +435,13 @@
             rootCommEventId: p.rootCommEventId,
         })) {
             if (link.sourceType === 'product') {
+                // what is linked is shown only while it is the site's (SEC-PFS-91), to readers only while sold
                 const published = productPublic(p.siteId, link.sourceId)
-                if (!published && !a.canModerate) continue
+                if (
+                    !published &&
+                    !(a.canModerate && siteProduct(p.siteId, link.sourceId))
+                )
+                    continue
                 cards.push({
                     linkId: link.linkId,
                     sourceType: 'product',
@@ -426,7 +460,11 @@
                     wikiPageId: link.sourceId,
                 })
                 const published = articleReadable(p.siteId, link.sourceId, me())
-                if (!page || (!published && !a.canModerate)) continue
+                if (
+                    !page ||
+                    (!published && !(a.canModerate && siteArticle(p.siteId, page)))
+                )
+                    continue
                 cards.push({
                     linkId: link.linkId,
                     sourceType: 'article',
@@ -503,7 +541,7 @@
                           ' · post ' +
                           st.ordinal +
                           '</p>' +
-                          StringUtilities.cleanHtml(event.body || '') +
+                          core.memberHtml(event.body || '', t.siteId) +
                           '</blockquote>'
                     : author +
                           ' · post ' +
@@ -633,7 +671,7 @@
         const ruled = core.applyRules(
             p.siteId,
             event.contactListId,
-            StringUtilities.cleanHtml(p.body || ''),
+            core.memberHtml(p.body || '', p.siteId),
         )
         if (ruled.block)
             invalid('This reply contains content the community does not allow')
@@ -691,14 +729,20 @@
             if (t.kind !== 'category') invalid('Link a category topic')
             if (!['product', 'article'].includes(p.sourceType))
                 invalid('Link a product or an article')
+            // only what is the site's own: a product its Shop sells, an article of its publishing space (or of a space
+            // the caller administers); anything else answers as a missing one, so another organization's ids are not
+            // probed
             if (
                 p.sourceType === 'product' &&
-                !one('mantle.product.Product', { productId: p.sourceId })
+                !productPublic(p.siteId, p.sourceId)
             )
                 missing()
             if (
                 p.sourceType === 'article' &&
-                !one('moqui.resource.wiki.WikiPage', { wikiPageId: p.sourceId })
+                !siteArticle(
+                    p.siteId,
+                    one('moqui.resource.wiki.WikiPage', { wikiPageId: p.sourceId }),
+                )
             )
                 missing()
             // An article's comments follow the article unless the owner links it without a gate.

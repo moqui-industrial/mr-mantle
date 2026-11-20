@@ -98,6 +98,7 @@ const changeTexts = {
     quoteExpired: () => "Your delivery choice is no longer offered. Choose a delivery option again.",
     tax: change => "The tax changed from " + change.before + " to " + change.after + ".",
     promotionLimit: change => "The promotion " + change.name + " has reached its limit. Remove its code to check out.",
+    promotionEmail: change => "This code was already used with this email address (" + change.name + "). Remove it to check out.",
     terms: () => "The terms of sale changed. Review them and accept them again."
 }
 
@@ -223,6 +224,15 @@ function reach(p, needCheckout = true) {
         const placed = placedCheckoutOfToken(shop, p.token)
         if (placed && placed.checkoutId === checkout.checkoutId) via = "placedCart"
     }
+    // the signed-in buyer's own account checkout, named by its reference and key, is the account's (SEC-PSS-84)
+    if (
+        checkout &&
+        via === "reference" &&
+        shop.customerPartyId &&
+        checkout.customerPartyId === shop.customerPartyId &&
+        checkout.accountCheckout === "Y"
+    )
+        via = "account"
     if (!checkout && cart) {
         checkout = checkoutOfCart(cart)
         via = "cart"
@@ -567,16 +577,18 @@ function referenceView(checkout) {
             missing: [],
             review: [],
             totals: {dueNow: money(checkout.dueAmount ?? 0, checkout.currencyUomId)},
-            attempt: payment ? attemptView(checkout, payment) : null,
+            // the reference and key read the payment's state, never where to pay it (SEC-PSF-82, SEC-PSS-84)
+            attempt: payment ? attemptView(checkout, payment, false) : null,
             failure: checkout.failureCode ? {code: checkout.failureCode} : null
         }
     }
 }
 // The payment's progress for a page: its state (pending at the provider, unknown, approved, declined, cancelled or failed)
-// with a safe message, and where the payer completes a pending hosted payment (a provider page, or the relay's form).
-function attemptView(checkout, payment) {
+// with a safe message, and where the payer completes a pending hosted payment (a provider page, or the relay's form), unless
+// payable is false (the reference and key alone).
+function attemptView(checkout, payment, payable = true) {
     const state = attempts().stateOf(payment)
-    const action = state === "pending" ? attempts().providerAction(payment.paymentId) : null
+    const action = state === "pending" && payable ? attempts().providerAction(payment.paymentId) : null
     return {
         state,
         amount: money(payment.amount, payment.amountUomId),
@@ -674,8 +686,10 @@ function getCheckout(p) {
 }
 // resume#Checkout: a submitted checkout whose attempt resolved without a payment (declined, cancelled, failed) is open to
 // change again. A pending or unknown attempt is answered as it is. Only the cart's own session goes on with it (Shop P6,
-// F85): the reference and key read its state and hand over no cart capability.
+// F85): the reference and key read its state and hand over no cart capability. It may ask the provider, so it is counted
+// with the payment's result and form calls (SEC-PSS-84).
 function resumeCheckout(p) {
+    paymentCalls()
     const reached = reach(p)
     const result = refreshAttempt(reached.shop, reached.checkout.checkoutId, "page")
     const checkout = checkoutRow(reached.checkout.checkoutId)
@@ -1107,7 +1121,7 @@ function freeze(p) {
     const limited = call("mantle.product.StorePromotionServices.check#OrderPromotionLimits", {orderId: order.orderId, lock: true})
     if (!limited.withinLimits)
         for (const limit of Array.from(limited.exceeded || []))
-            changes.push({kind: "promotionLimit", name: limit.label || "in your cart"})
+            changes.push({kind: limit.byEmail ? "promotionEmail" : "promotionLimit", name: limit.label || "in your cart"})
     // delivery: the fresh quote of the chosen method, applied when it differs; gone, the choice is cleared
     if (p.quoteNeeded) {
         const before = shippingTotal(order.orderId)
@@ -1430,6 +1444,16 @@ function holdPayment(orderId, paymentId, comment) {
     })
 }
 
+// A count limit of Mantle's conf (MoquiConf.xml, other/Limits.js): Infinity for 0, no limit.
+const confLimit = name => ec.resource.script("component://mr-mantle/service/mantle/other/Limits.js").limit(name)
+// The payment's result, form and resume calls, which ask the provider, counted against the requester (SEC-PSS-84):
+// mantle@shop-payment-calls in ten minutes.
+function paymentCalls() {
+    const most = confLimit("shop-payment-calls")
+    if (most === Infinity) return
+    externalAccess().throttle("shop-payment", most, "Wait a few minutes before checking your payment again")
+}
+
 // ===== the attempt's refresh =====
 // The attempt asked of its provider (mode page: at most every few seconds for a page's polling; job: when it is due; none:
 // not at all, right after the submit sent the payer to the provider), its outcome applied, and placement once it is
@@ -1489,6 +1513,7 @@ function saveMethod(checkout) {
 // seconds), and the placement once approved. Reached by the cart, the reference and key, or a placed cart's capability;
 // what the browser brings back from the provider is never read.
 function getCheckoutPaymentResult(p) {
+    paymentCalls()
     const reached = reach(p)
     // the provider's return (returned: the payer came back from its page) looks the payment up at once the first time
     refreshAttempt(reached.shop, reached.checkout.checkoutId, p.returned === true || p.returned === "true" ? "return" : "page")
@@ -1496,10 +1521,14 @@ function getCheckoutPaymentResult(p) {
 }
 // get#CheckoutPaymentForm: a fresh hosted payment form for a pending attempt whose provider page takes a posted token
 // (Authorize.Net Accept Hosted, F37): the provider's form address and token, asked of the gateway on each call; the token
-// is never stored. The relay posts it at once.
+// is never stored. The relay posts it at once. Only the cart's holder, the placed cart's session or the signed-in buyer
+// continue the payment; the reference and key alone, which the provider and a link also carry, read its state (SEC-PSS-84).
+// Counted against the requester, and a bounded number for each attempt.
 function getCheckoutPaymentForm(p) {
+    paymentCalls()
     const reached = reach(p)
     const checkout = reached.checkout
+    if (!["cart", "placedCart", "account"].includes(reached.via)) notAvailable()
     if (checkout.statusId !== "ScoPaymentPending" || !checkout.paymentId) notAvailable()
     const payment = one(P, {paymentId: checkout.paymentId})
     if (attempts().stateOf(payment) !== "pending" || !attempts().providerAction(payment.paymentId)?.form) notAvailable()
@@ -1513,6 +1542,18 @@ function getCheckoutPaymentForm(p) {
     if (!service) notAvailable()
     const key = text(p.key)
     if (!key) notAvailable()
+    // each form first searches the provider's transaction lists: mantle@shop-payment-forms for one attempt in ten minutes
+    const forms = confLimit("shop-payment-forms")
+    const allowed =
+        forms === Infinity ||
+        ec.service
+            .sync()
+            .throwOnError(true)
+            .name("org.moqui.public.AccountServices.record#Attempt")
+            .parameters({input: {key: "shop-payment-form:" + payment.paymentId, limit: forms, windowMillis: 600000}})
+            .requireNewTransaction(true)
+            .call().result.allowed
+    if (!allowed) refuse("Tarpit", "RATE_LIMITED", "Wait a few minutes before opening the payment page again")
     let out
     try {
         out = lib.probe(service, {

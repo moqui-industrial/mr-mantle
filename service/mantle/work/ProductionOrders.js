@@ -1162,12 +1162,13 @@ function storeParty(p) {
     requireRevision(run, p.expectedRevision)
     const roleTypeId = str(p.roleTypeId)
     if (!roleTypeId || !partyRoles[roleTypeId]) denied("ROLE_INVALID", "Assign a supervisor or an operator")
-    // a person of the run's organization (an employee or agent), checked without telling whether another party exists
+    // a person of the run's organization (a current PrtEmployee or PrtAgent relationship, as Maintenance's requireMember asks;
+    // never a customer, contact or supplier's agent: SEC-BAP-105), checked without telling whether another party exists
     const person = blank(p.partyId) ? null : one("mantle.party.Person", {partyId: p.partyId})
     const member =
         person &&
-        rows("mantle.party.PartyRelationship", {fromPartyId: person.partyId, toPartyId: run.ownerPartyId}).some(row =>
-            lib.active(row)
+        rows("mantle.party.PartyRelationship", {fromPartyId: person.partyId, toPartyId: run.ownerPartyId}).some(
+            row => ["PrtEmployee", "PrtAgent"].includes(row.relationshipTypeEnumId) && lib.active(row)
         )
     if (!member) denied("PARTY_UNAVAILABLE", "Person " + (p.partyId || "") + " is not available for this work order")
     let warnings = []

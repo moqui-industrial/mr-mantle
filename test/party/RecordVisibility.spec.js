@@ -267,7 +267,124 @@ feature("checkOnly answers recordVisible with no error, for a record not seen, a
     },
 })
 
+feature("an entity that is no registered record type is no record, a mail message and a job offer among them, for every caller (SEC-BOS-87)", {
+    when() {
+        const raw = (params) => {
+            const out = ec.service.sync().name(`${COMM}.get#RecordLinkInfo`).parameters(Object.assign({ checkOnly: true }, params)).call()
+            const errors = ec.message.hasError() ? ec.message.getErrorsString() : null
+            ec.message.clearErrors()
+            return { visible: out?.recordVisible ?? null, reason: out?.notVisibleReason ?? null, errors }
+        }
+        const mail = ec.entity.find("moqui.basic.email.EmailMessage").selectField("emailMessageId").limit(1).list()[0]?.emailMessageId || "RV-NO-MAIL"
+        const asUser = as("rv.oz", () => raw({ recordEntityName: "moqui.basic.email.EmailMessage", recordId: mail }))
+        // authorization disabled (an internal caller) too, and with checkRecord false
+        const internal = raw({ recordEntityName: "mantle.humanres.recruitment.EmploymentOffer", recordId: "RV-OFFER" })
+        const unchecked = errorOf(`${COMM}.get#RecordLinkInfo`, { recordEntityName: "moqui.basic.email.EmailMessage", recordId: mail, checkRecord: false })
+        const request = raw({ recordEntityName: REQUEST, recordId: "RV-R1" })
+        return { asUser, internal, unchecked, request }
+    },
+    then({ asUser, internal, unchecked, request }) {
+        asUser.visible == false
+        asUser.errors == null
+        asUser.reason.includes("is not a record type")
+        internal.visible == false
+        internal.reason.includes("is not a record type")
+        unchecked != null
+        unchecked.includes("is not a record type")
+        request.visible == true
+    },
+})
+
+feature("a registered type's own rule: a production stop is its organization's, a store's record follows the store (SEC-BOS-87)", {
+    when() {
+        // the registrations a component declares (RecordLinkType): Mantle's production stop by its organization; one of this spec's, a
+        // store's feed, by its parent store
+        if (!ec.entity.find("mantle.party.communication.RecordLinkType").condition("recordEntityName", "mantle.product.store.ProductStoreFeed").one())
+            call("create#mantle.party.communication.RecordLinkType", { recordEntityName: "mantle.product.store.ProductStoreFeed", ownerText: "Spec: a feed",
+                parentEntityName: "mantle.product.store.ProductStore", parentField: "productStoreId" })
+        // the store by its organization, for this feature (an app's registration, BOSS's by Commerce's own check, is put back after)
+        const storeType = ec.entity.find("mantle.party.communication.RecordLinkType").condition("recordEntityName", "mantle.product.store.ProductStore").one()
+        const before = storeType ? storeType.getMap() : null
+        call("store#mantle.party.communication.RecordLinkType", { recordEntityName: "mantle.product.store.ProductStore", ownerText: "Spec: a store",
+            organizationField: "organizationPartyId", visibleService: null, parentEntityName: null, parentField: null })
+        try {
+            call("create#mantle.work.production.ProductionDowntime", { productionDowntimeId: "RV-STOP", organizationPartyId: "RV_ORG" })
+            call("create#mantle.product.store.ProductStoreFeed", { productStoreFeedId: "RV-FEED", productStoreId: "RV_STORE" })
+            const seen = (username, entityName, recordId) => as(username, () => ec.service.sync().name(`${COMM}.get#RecordLinkInfo`)
+                    .parameters({ recordEntityName: entityName, recordId, checkOnly: true }).call()?.recordVisible)
+            return { moStop: seen("rv.mo", "mantle.work.production.ProductionDowntime", "RV-STOP"),
+                ozStop: seen("rv.oz", "mantle.work.production.ProductionDowntime", "RV-STOP"),
+                moFeed: seen("rv.mo", "mantle.product.store.ProductStoreFeed", "RV-FEED"),
+                ozFeed: seen("rv.oz", "mantle.product.store.ProductStoreFeed", "RV-FEED") }
+        } finally {
+            if (before) call("store#mantle.party.communication.RecordLinkType", before)
+            else call("delete#mantle.party.communication.RecordLinkType", { recordEntityName: "mantle.product.store.ProductStore" })
+        }
+    },
+    then({ moStop, ozStop, moFeed, ozFeed }) {
+        moStop == true
+        ozStop == false
+        moFeed == true
+        ozFeed == false
+    },
+})
+
 // five entries at one minute (a note, a file, two messages, a status change) between the created status and a later message
+// Ace's grant names MANTLE_ACTIVE_ORG and Ace has no active organization, so the entity filters apply nothing: the record
+// rules hold Ace to RV_ORG's shipments, facilities, returns, maintenance and owned parties (SEC-BAP-89)
+feature("with no active organization, another organization's shipment, facility, return, maintenance and party are not seen (SEC-BAP-89)", {
+    when() {
+        const make = (entity, fields) => call(`create#${entity}`, fields)
+        make("mantle.party.Party", { partyId: "RV_OWNED_OWN", partyTypeEnumId: "PtyPerson", ownerPartyId: "RV_ORG" })
+        make("mantle.party.Party", { partyId: "RV_OWNED_OTHER", partyTypeEnumId: "PtyPerson", ownerPartyId: "RV_ORG2" })
+        make("mantle.shipment.Shipment", { shipmentId: "RV-SH-OWN", shipmentTypeEnumId: "ShpTpSales", statusId: "ShipInput", fromPartyId: "RV_ORG" })
+        make("mantle.shipment.Shipment", { shipmentId: "RV-SH-OTHER", shipmentTypeEnumId: "ShpTpSales", statusId: "ShipInput", fromPartyId: "RV_ORG2" })
+        make("mantle.facility.Facility", { facilityId: "RV-FAC-OWN", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: "RV_ORG" })
+        make("mantle.facility.Facility", { facilityId: "RV-FAC-OTHER", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: "RV_ORG2" })
+        make("mantle.order.return.ReturnHeader", { returnId: "RV-RET-OTHER", statusId: "ReturnCreated", vendorPartyId: "RV_ORG2", customerPartyId: "RV_OWNED_OTHER" })
+        make("mantle.product.asset.Asset", { assetId: "RV-ASSET-OTHER", assetTypeEnumId: "AstTpEquipment", ownerPartyId: "RV_ORG2" })
+        make("mantle.product.maintenance.AssetMaintenance", { assetMaintenanceId: "RV-AM-OTHER", assetId: "RV-ASSET-OTHER" })
+        const seen = (entity, id) => as("rv.ace", () => ec.service.sync().name(`${COMM}.get#RecordLinkInfo`)
+                .parameters({ recordEntityName: entity, recordId: id, checkOnly: true }).call()?.recordVisible)
+        return {
+            own: [seen("mantle.shipment.Shipment", "RV-SH-OWN"), seen("mantle.facility.Facility", "RV-FAC-OWN"), seen("mantle.party.Party", "RV_OWNED_OWN")],
+            other: [seen("mantle.shipment.Shipment", "RV-SH-OTHER"), seen("mantle.facility.Facility", "RV-FAC-OTHER"),
+                seen("mantle.order.return.ReturnHeader", "RV-RET-OTHER"), seen("mantle.product.maintenance.AssetMaintenance", "RV-AM-OTHER"),
+                seen("mantle.party.Party", "RV_OWNED_OTHER")]
+        }
+    },
+    then({ own, other }) {
+        own.every((visible) => visible === true)
+        other.every((visible) => visible === false)
+    },
+})
+
+feature("a registration with no rule is a system administrator's, unless it says it is public content (SEC-BOS-87)", {
+    when() {
+        const TYPE = "mantle.facility.FacilityGroup"
+        call("create#mantle.facility.FacilityGroup", { facilityGroupId: "RV-GROUP", description: "Rule-less spec group" })
+        const seen = (username) => as(username, () => ec.service.sync().name(`${COMM}.get#RecordLinkInfo`)
+                .parameters({ recordEntityName: TYPE, recordId: "RV-GROUP", checkOnly: true }).call()?.recordVisible)
+        try {
+            call("store#mantle.party.communication.RecordLinkType", { recordEntityName: TYPE, ownerText: "Spec: no rule" })
+            const ruleless = { mo: seen("rv.mo"), admin: seen("john.doe") }
+            // codeRule holds only for the types get#RecordLinkInfo rules itself, not this one
+            call("store#mantle.party.communication.RecordLinkType", { recordEntityName: TYPE, codeRule: "Y" })
+            const claimed = seen("rv.mo")
+            call("store#mantle.party.communication.RecordLinkType", { recordEntityName: TYPE, codeRule: null, publicRead: "Y" })
+            return { ruleless, claimed, open: seen("rv.mo") }
+        } finally {
+            call("delete#mantle.party.communication.RecordLinkType", { recordEntityName: TYPE })
+        }
+    },
+    then({ ruleless, claimed, open }) {
+        claimed == false
+        ruleless.mo == false
+        ruleless.admin == true
+        open == true
+    },
+})
+
 feature("the timeline cursor pages through entries of one date with no entry skipped or repeated; beforeDate alone skips them", {
     when() {
         at(20)
@@ -390,6 +507,29 @@ feature("an order is seen by its organizations' members, its parties and its ent
         admin == { O1: true, O2: true, ceOrder: true, WP1: true, WP2: true, WP3: true, ceWiki: true }
         // authorization disabled: all
         internal == { O1: true, O2: true, ceOrder: true, WP1: true, WP2: true, WP3: true, ceWiki: true }
+    },
+})
+
+// a component's row for a type Mantle rules itself does not replace Mantle's rule (SEC-BOS-87 review): an order keeps its own
+feature("a registration naming a rule for a type get#RecordLinkInfo rules itself is ignored, and Mantle's rule applies (SEC-BOS-87)", {
+    when() {
+        const ORDER = "mantle.order.OrderHeader"
+        const row = ec.entity.find("mantle.party.communication.RecordLinkType").condition("recordEntityName", ORDER).one()
+        const before = row ? row.getMap() : null
+        const seen = () => as("rv.pat", () => ec.service.sync().name(`${COMM}.get#RecordLinkInfo`)
+                .parameters({ recordEntityName: ORDER, recordId: "RV-O1", checkOnly: true }).call()?.recordVisible)
+        const plain = seen()
+        try {
+            // an organization field no order's value is an organization of: it would refuse every user
+            call("store#mantle.party.communication.RecordLinkType", { recordEntityName: ORDER, organizationField: "orderId" })
+            return { plain, overridden: seen() }
+        } finally {
+            if (before) call("store#mantle.party.communication.RecordLinkType", Object.assign({}, before, { organizationField: null }))
+        }
+    },
+    then({ plain, overridden }) {
+        plain == true
+        overridden == true
     },
 })
 

@@ -246,8 +246,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="shippingGatewayConfigId" from="ptySettingOut?.settingValue"/>
                 </if>
             </if>
-            <if condition="!shippingGatewayConfigId">
-                <set field="shippingGatewayConfigId" from="ec.user.getPreference('ValidateAddressGatewayConfigId')"/></if>
+            <!-- never the user's own preference, which any user sets (/apps/setPreference): a shipment's gateway is its
+                store's, its segment's or its organization's DefaultShipmentGatewayConfigId setting (SEC-BAP-101) -->
             <if condition="!shippingGatewayConfigId"><return/></if>
             <entity-find-one entity-name="mantle.shipment.carrier.ShippingGatewayConfig" value-field="shippingGatewayConfig"/>
             <if condition="shippingGatewayConfig == null">
@@ -828,8 +828,8 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
             </if>
             <!-- next look at general default preference -->
-            <if condition="!shippingGatewayConfigId">
-                <set field="shippingGatewayConfigId" from="ec.user.getPreference('DefaultShipmentGatewayConfigId')"/></if>
+            <!-- never the user's own preference, which any user sets (/apps/setPreference): a shipment's gateway is its
+                store's, its segment's or its organization's DefaultShipmentGatewayConfigId setting (SEC-BAP-101) -->
             <!-- no luck? return error -->
             <if condition="!shippingGatewayConfigId">
                 <return error="true" message="No shipping gateway set on shipment and no default preference set"/></if>

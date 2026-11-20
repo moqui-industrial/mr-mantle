@@ -300,8 +300,9 @@
                           return st && event
                               ? {
                                     title: event.subject,
-                                    body: StringUtilities.cleanHtml(
+                                    body: core.memberHtml(
                                         event.body || '',
+                                        p.siteId,
                                     ),
                                     revision: st.revision,
                                 }
@@ -494,6 +495,9 @@
                 p.decision === 'approved' &&
                 st.visibility === 'pending'
             ) {
+                // a private conversation's held message is its participants' to release (Forum.js releaseHeldMessage)
+                if (t.kind === 'private')
+                    fail('Conflict', "A held private message is released by its conversation's participants")
                 update(st, {
                     visibility: 'approved',
                     approvedRevision: st.revision,
@@ -974,6 +978,8 @@
         )
         if (!sanction) missing()
         staff(p.siteId, sanction.contactListId)
+        // ending a sanction asks what setting one asks: never one's own, and only above the member's rank
+        requireHigherRank(p.siteId, sanction.contactListId, sanction.partyId)
         revision(
             { revision: Number(sanction.revision || 1) },
             p.expectedRevision,
@@ -996,9 +1002,10 @@
     }
     methods.getMember = (p) => {
         const a = staff(p.siteId, p.contactListId)
-        // An Owner of a group or repository moderates its category and nothing of the site: they see the member's
-        // sanctions and actions in that scope and their posts there, never the member's activity across the site.
-        if (a?.scopeOwnerOnly) {
+        // An Owner of a group or repository, or a category's own owner or moderator, moderates the category and nothing
+        // of the site: they see the member's sanctions and actions in that scope and their posts there, never the
+        // member's membership or activity across the site, which are the site's staff's.
+        if (a && !a.siteStaff) {
             const scope = [...core.categorySubtree(p.siteId, p.contactListId)]
             return {
                 membership: null,
@@ -2174,7 +2181,7 @@
         return context.map((v) => ({
             postId: v.communicationEventId,
             ordinal: Number(v.ordinal),
-            body: StringUtilities.cleanHtml(v.body || ''),
+            body: core.memberHtml(v.body || '', r.siteId),
         }))
     }
     methods.escalateReview = (p) => {

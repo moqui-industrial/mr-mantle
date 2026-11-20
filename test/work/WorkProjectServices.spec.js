@@ -203,3 +203,48 @@ feature("event creation and business-day calculations", {
         taskCalendar != null
     },
 })
+
+// SEC-BOS-110 (review): a user, with authorization on, moves a task only into a project they see (get#VisibleProjectInfo): joe
+// moves his task into a General project of his organization, not into a Work group project he is not on
+feature("a user moves a task only into a project they see, and a root that is no project is not checked (SEC-BOS-110)", {
+    when() {
+        call("create#mantle.work.effort.WorkEffort", { workEffortId: "WPS-OPEN", workEffortTypeEnumId: "WetProject", workEffortName: "WPS Open project",
+                statusId: "WeInProgress", visibilityEnumId: "WevGeneral", ownerPartyId: "ORG_ZIZI_SERVICES" })
+        call("create#mantle.work.effort.WorkEffort", { workEffortId: "WPS-CLOSED", workEffortTypeEnumId: "WetProject", workEffortName: "WPS Work group project",
+                statusId: "WeInProgress", visibilityEnumId: "WevWorkGroup", ownerPartyId: "ORG_ZIZI_SERVICES" })
+        call("create#mantle.work.effort.WorkEffort", { workEffortId: "WPS-JOE", workEffortTypeEnumId: "WetTask", workEffortName: "Joe's loose task",
+                statusId: "WeInPlanning", ownerPartyId: "ORG_ZIZI_JD" })
+        // a task tree rooted in a task, no project: no project rule applies to a move into it
+        for (const [workEffortId, workEffortName] of [["WPS-JOE-TOP", "Joe's tree"], ["WPS-JOE-2", "Joe's second task"]])
+            call("create#mantle.work.effort.WorkEffort", { workEffortId, workEffortTypeEnumId: "WetTask", workEffortName, statusId: "WeInPlanning", ownerPartyId: "ORG_ZIZI_JD" })
+        call("create#moqui.security.UserGroup", { userGroupId: "WPS_TASK_CALLER", description: "Spec task callers" })
+        call("create#moqui.security.UserGroupMember", { userGroupId: "WPS_TASK_CALLER", userId: "ORG_ZIZI_JD", fromDate: 0 })
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "WPS_TASK_SERVICES", description: "Spec task services" })
+        call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "WPS_TASK_SERVICES", artifactName: "mantle\\.work\\..*",
+            artifactTypeEnumId: "AT_SERVICE", nameIsPattern: "Y", inheritAuthz: "Y" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "WPS_TASK_AUTHZ", userGroupId: "WPS_TASK_CALLER", artifactGroupId: "WPS_TASK_SERVICES",
+            authzTypeEnumId: "AUTHZT_ALWAYS", authzActionEnumId: "AUTHZA_ALL" })
+        login("joe.developer")
+        ec.artifactExecution.enableAuthz()
+        try {
+            const hidden = errorOf("mantle.work.TaskServices.update#Task", { workEffortId: "WPS-JOE", rootWorkEffortId: "WPS-CLOSED" })
+            const open = errorOf("mantle.work.TaskServices.update#Task", { workEffortId: "WPS-JOE", rootWorkEffortId: "WPS-OPEN" })
+            const tree = errorOf("mantle.work.TaskServices.update#Task", { workEffortId: "WPS-JOE-2", rootWorkEffortId: "WPS-JOE-TOP" })
+            return { hidden, open, tree }
+        } finally {
+            ec.artifactExecution.disableAuthz()
+            login("john.doe")
+            ec.entity.find("moqui.security.ArtifactAuthz").condition("artifactAuthzId", "WPS_TASK_AUTHZ").deleteAll()
+            ec.entity.find("moqui.security.ArtifactGroupMember").condition("artifactGroupId", "WPS_TASK_SERVICES").deleteAll()
+            ec.entity.find("moqui.security.ArtifactGroup").condition("artifactGroupId", "WPS_TASK_SERVICES").deleteAll()
+            ec.entity.find("moqui.security.UserGroupMember").condition("userGroupId", "WPS_TASK_CALLER").deleteAll()
+            ec.entity.find("moqui.security.UserGroup").condition("userGroupId", "WPS_TASK_CALLER").deleteAll()
+        }
+    },
+    then({ hidden, open, tree }) {
+        hidden.includes("PROJECT_UNAVAILABLE")
+        open == null
+        tree == null
+        we("WPS-JOE").rootWorkEffortId == "WPS-OPEN"
+    },
+})

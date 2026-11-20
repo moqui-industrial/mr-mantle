@@ -1164,7 +1164,18 @@ function evidencePolicy(p) {
     const node = id ? one(WORK, {workEffortId: id}) : null
     if (!node || !workProcesses.managedReason([id])) return {managed: false, canChange: true, protectedContentIds: []}
     const root = node.rootWorkEffortId ? one(WORK, {workEffortId: node.rootWorkEffortId}) : node
-    if (root?.isTemplate === "Y") return {managed: true, canChange: true, protectedContentIds: []}
+    // who may change or remove another person's file on it (SEC-BAP-95): a party on the work or its root (its assignee, its
+    // owner), or a maintenance planner or supervisor of the root's organization; any other viewer only their own files
+    const partyId = ec.user.userAccount?.partyId || null
+    const onWork = workEffortId =>
+        !!partyId &&
+        !!workEffortId &&
+        find("mantle.work.effort.WorkEffortParty", {workEffortId, partyId}).conditionDate("fromDate", "thruDate", ec.user.nowTimestamp).count() > 0
+    const userScope = maintenanceAccess.scope()
+    const manager =
+        !!(userScope.capabilities.plan || userScope.capabilities.supervise) &&
+        maintenanceAccess.covers(userScope, root?.ownerPartyId || node.ownerPartyId)
+    if (root?.isTemplate === "Y") return {managed: true, canChange: true, canChangeOthers: manager || onWork(root.workEffortId), protectedContentIds: []}
     const contentIds = rows(CONTENT, {workEffortId: id}).map(row => row.workEffortContentId)
     const protectedIds = contentIds.length
         ? unique(Array.from(find(EVIDENCE).condition("workEffortContentId", "in", contentIds).list()).map(row => row.workEffortContentId))
@@ -1172,6 +1183,7 @@ function evidencePolicy(p) {
     return {
         managed: true,
         canChange: !["WeClosed", "WeCancelled"].includes(root?.statusId),
+        canChangeOthers: onWork(id) || onWork(root?.workEffortId) || manager,
         protectedContentIds: protectedIds.concat(
             rows(CONTENT, {workEffortId: id, contentTypeEnumId: "WectCompletedChecklist"}).map(row => row.workEffortContentId)
         )

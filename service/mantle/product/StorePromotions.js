@@ -204,6 +204,35 @@ function placedUses(conditions, exceptOrderId) {
     const row = Array.from(query.list())[0]
     return num(row?.promoTimesUsed)
 }
+// A Shop order's checkout contact email, lower case and trimmed ("" when it has none yet).
+function checkoutEmail(orderId) {
+    const checkout = Array.from(
+        find("mantle.order.StoreCheckout", {orderId}).selectField("contactEmail").orderBy("-checkoutId").limit(1).list()
+    )[0]
+    return String(checkout?.contactEmail || "").trim().toLowerCase()
+}
+// The placed uses (a promotion's or a code's, by conditions) of the other orders whose Shop checkout has this contact email.
+function emailUses(conditions, email, exceptOrderId) {
+    const orderIds = unique(
+        Array.from(
+            find("mantle.order.StoreCheckout")
+                .condition(ec.entity.conditionFactory.makeCondition("contactEmail", "equals", email).ignoreCase())
+                .condition("orderId", "not-equals", exceptOrderId)
+                .selectField("orderId")
+                .limit(1000)
+                .list()
+        ).map(row => row.orderId)
+    )
+    if (!orderIds.length) return 0
+    const row = Array.from(
+        find(USES, conditions)
+            .condition("orderId", "in", orderIds)
+            .condition("statusId", "in", placedStatuses)
+            .selectField("promoTimesUsed")
+            .list()
+    )[0]
+    return num(row?.promoTimesUsed)
+}
 // The placed uses of each promotion (or code) of a list, by id, in one grouped query.
 function usesBy(field, ids) {
     if (!ids.length) return {}
@@ -546,19 +575,53 @@ function codeRow(code, promotion, names, uses) {
         stores.rowDates(code)
     )
 }
-// The code text, refused when it is not one word of letters, digits, - and _ (2 to 40), or another code has it, ignoring
-// case (add#OrderPromoCode finds a code ignoring case).
-function codeTextOf(value, exceptPromoCodeId) {
+// The code text, refused when it is not one word of letters, digits, - and _ (2 to 40), or another code of the store's
+// organization has it, ignoring case (add#OrderPromoCode and Shop find a code ignoring case, within the order's store).
+function codeTextOf(value, exceptPromoCodeId, organizationPartyId) {
     const code = text(value)
     if (!codePattern.test(code)) denied("VALUE_INVALID", "A code is 2 to 40 letters, digits, - or _")
-    if (codeTaken(code, exceptPromoCodeId)) denied("CODE_TAKEN", "The code " + code + " is taken")
+    if (codeTaken(code, exceptPromoCodeId, organizationPartyId))
+        denied("CODE_TAKEN", "The code " + code + " is taken")
     return code
 }
-function codeTaken(code, exceptPromoCodeId) {
+// A code's uniqueness scope (SEC-BAP-108): its store's organization, or for a store of no organization the store itself.
+// Answered as the key codeTaken and the counts take (a string), from a promotion or a store row.
+const scopeOfStore = store =>
+    store?.organizationPartyId ? store.organizationPartyId : "store:" + (store?.productStoreId || "_NONE_")
+// The promotions of a uniqueness scope's stores: a code's text is unique among their codes only, so whether a text is taken,
+// and how many codes a prefix has, say nothing of another organization's stores (SEC-BAP-108).
+function organizationPromotionIds(organizationPartyId) {
+    const storeIds = !organizationPartyId
+        ? []
+        : String(organizationPartyId).startsWith("store:")
+          ? [String(organizationPartyId).slice(6)]
+          : rows(STORE, {organizationPartyId}).map(row => row.productStoreId)
+    if (!storeIds.length) return ["_NONE_"]
+    const ids = Array.from(
+        find(PROMOTION).condition("productStoreId", "in", storeIds).selectField("storePromotionId").list()
+    ).map(row => row.storePromotionId)
+    return ids.length ? ids : ["_NONE_"]
+}
+const organizationCodes = organizationPartyId =>
+    find(CODE).condition("storePromotionId", "in", organizationPromotionIds(organizationPartyId))
+const organizationOf = promotion => (promotion ? scopeOfStore(one(STORE, {productStoreId: promotion.productStoreId})) : null)
+// Two saves of codes in one scope at once wait for each other, so a text is checked and made as one (SEC-BAP-108 review): the
+// organization's Party row, or the store's, locked in the caller's transaction.
+function lockScope(organizationPartyId) {
+    if (String(organizationPartyId).startsWith("store:"))
+        find(STORE, {productStoreId: String(organizationPartyId).slice(6)}).forNoKeyUpdate(true).one()
+    else find("mantle.party.Party", {partyId: organizationPartyId}).forNoKeyUpdate(true).one()
+}
+function codeTaken(code, exceptPromoCodeId, organizationPartyId) {
     const factory = ec.entity.conditionFactory
-    let query = find(CODE).condition(factory.makeCondition("promoCode", "equals", code).ignoreCase())
+    let query = organizationCodes(organizationPartyId).condition(
+        factory.makeCondition("promoCode", "equals", code).ignoreCase()
+    )
     if (exceptPromoCodeId) query = query.condition("promoCodeId", "not-equals", exceptPromoCodeId)
-    return query.count() > 0 || (!!one(CODE, {promoCodeId: code}) && code !== exceptPromoCodeId)
+    if (query.count() > 0) return true
+    // a record id equal to the text (add#OrderPromoCode's fallback by id), within the organization too
+    const byId = code !== exceptPromoCodeId ? one(CODE, {promoCodeId: code}) : null
+    return !!byId && organizationOf(one(PROMOTION, {storePromotionId: byId.storePromotionId})) === organizationPartyId
 }
 
 // find#PromoCodes: the codes of the user's stores' promotions (or one promotion, or one store), by code ignoring case,
@@ -652,7 +715,13 @@ function storePromoCode(p) {
             // unchanged
         } else if (code && usesBy("promoCodeId", [code.promoCodeId])[code.promoCodeId])
             denied("CODE_REDEEMED", "The code has been used; it keeps its text (expire it and make a new one)")
-        else values.promoCode = wanted ? codeTextOf(wanted, code?.promoCodeId) : drawCodes("", 1, 8, new Set())[0]
+        else {
+            const organizationPartyId = organizationOf(promotion)
+            lockScope(organizationPartyId)
+            values.promoCode = wanted
+                ? codeTextOf(wanted, code?.promoCodeId, organizationPartyId)
+                : drawCodes("", 1, 8, new Set(), undefined, organizationPartyId)[0]
+        }
     }
     const changeReason = text(p.changeReason) || null
     if (code) {
@@ -676,7 +745,7 @@ function storePromoCode(p) {
 
 // Codes drawn at random: the prefix and a suffix from codeAlphabet, none taken (ignoring case) nor repeated in the batch;
 // a draw that collides is drawn again, and the number of collisions is counted on the set's `collisions`.
-function drawCodes(prefix, count, suffixLength, taken, counter = {collisions: 0}) {
+function drawCodes(prefix, count, suffixLength, taken, counter = {collisions: 0}, organizationPartyId = null) {
     const codes = []
     let tries = 0
     while (codes.length < count) {
@@ -688,7 +757,7 @@ function drawCodes(prefix, count, suffixLength, taken, counter = {collisions: 0}
             suffix += codeAlphabet[random.charCodeAt(index % random.length) % codeAlphabet.length]
         const code = prefix + suffix
         const key = code.toUpperCase()
-        if (taken.has(key) || codeTaken(code)) {
+        if (taken.has(key) || codeTaken(code, null, organizationPartyId)) {
             counter.collisions++
             continue
         }
@@ -698,7 +767,7 @@ function drawCodes(prefix, count, suffixLength, taken, counter = {collisions: 0}
     return codes
 }
 // Numbered codes: the prefix and numbers from startNumber, zero padded to the widest; those taken are named.
-function numberedCodes(prefix, count, startNumber) {
+function numberedCodes(prefix, count, startNumber, organizationPartyId) {
     const width = String(startNumber + count - 1).length
     const codes = []
     for (let number = startNumber; number < startNumber + count; number++)
@@ -706,13 +775,18 @@ function numberedCodes(prefix, count, startNumber) {
     const factory = ec.entity.conditionFactory
     const existing = new Set(
         Array.from(
-            find(CODE)
+            organizationCodes(organizationPartyId)
                 .condition(factory.makeCondition("promoCode", "like", likeText(prefix).slice(1)).ignoreCase())
                 .selectField("promoCode")
                 .list()
         ).map(row => String(row.promoCode).toUpperCase())
     )
-    return {codes, taken: codes.filter(code => existing.has(code.toUpperCase()) || !!one(CODE, {promoCodeId: code}))}
+    return {
+        codes,
+        taken: codes.filter(
+            code => existing.has(code.toUpperCase()) || codeTaken(code, null, organizationPartyId)
+        )
+    }
 }
 
 // generate#PromoCodes: a bounded batch of codes of a promotion (count up to 500, a prefix, random suffixes of a length, or
@@ -736,8 +810,9 @@ function generatePromoCodes(p) {
     if (numbered && (!Number.isInteger(startNumber) || startNumber < 0)) denied("VALUE_INVALID", "Numbers start at 0 or more")
     const values = codeValues(p, null)
     const factory = ec.entity.conditionFactory
+    const organizationPartyId = scopeOfStore(store)
     const existingWithPrefix = prefix
-        ? find(CODE)
+        ? organizationCodes(organizationPartyId)
               .condition(factory.makeCondition("promoCode", "like", likeText(prefix).slice(1)).ignoreCase())
               .count()
         : null
@@ -752,7 +827,7 @@ function generatePromoCodes(p) {
     }
     if (isTrue(p.preview)) {
         if (numbered) {
-            const planned = numberedCodes(prefix, count, startNumber)
+            const planned = numberedCodes(prefix, count, startNumber, organizationPartyId)
             const taken = new Set(planned.taken)
             return {
                 preview: true,
@@ -765,7 +840,7 @@ function generatePromoCodes(p) {
             }
         }
         const counter = {collisions: 0}
-        const codes = drawCodes(prefix, count, suffixLength, new Set(), counter)
+        const codes = drawCodes(prefix, count, suffixLength, new Set(), counter, organizationPartyId)
         return {
             preview: true,
             count,
@@ -779,35 +854,26 @@ function generatePromoCodes(p) {
     const op = lib.operation(p, "PromoCodeBatch", store.organizationPartyId, request)
     const again = lib.previous(op)
     if (again) return again
+    // the codes are made in the operation's own transaction, under the scope's lock taken there, so two batches at once make
+    // no text twice and a rollback takes the codes with the operation: a retry makes one batch, never a second (review)
+    lockScope(organizationPartyId)
     const counter = {collisions: 0}
     const planned = numbered
-        ? numberedCodes(prefix, count, startNumber).codes
-        : drawCodes(prefix, count, suffixLength, new Set(), counter)
+        ? numberedCodes(prefix, count, startNumber, organizationPartyId).codes
+        : drawCodes(prefix, count, suffixLength, new Set(), counter, organizationPartyId)
     const results = []
     for (const promoCode of planned) {
-        try {
-            if (codeTaken(promoCode)) denied("CODE_TAKEN", "The code " + promoCode + " is taken")
-            const out = lib.probe(
-                "create#" + CODE,
-                Object.assign({userEntered: "Y", requireParty: "N"}, values, {
-                    storePromotionId: promotion.storePromotionId,
-                    promoCode
-                })
-            )
-            results.push({promoCode, promoCodeId: out.promoCodeId, ok: true, code: null, message: "Made"})
-        } catch (error) {
-            const reason = lib.reasonCode(error) || "ERROR"
-            if (reason !== "CODE_TAKEN")
-                ec.logger.error(
-                    "Promotion code " + promoCode + " of " + promotion.storePromotionId + " not made: " + error.message
-                )
-            results.push({
-                promoCode,
-                ok: false,
-                code: reason,
-                message: String(error.message || error).replace(/^(Error: )?[A-Z][A-Z0-9_]+: /, "")
-            })
+        // a text taken since it was drawn (or numbered) is that code's result; a failed write fails the batch, its
+        // operation with it, so nothing half made stays behind
+        if (codeTaken(promoCode, null, organizationPartyId)) {
+            results.push({promoCode, ok: false, code: "CODE_TAKEN", message: "The code " + promoCode + " is taken"})
+            continue
         }
+        const out = call(
+            "create#" + CODE,
+            Object.assign({userEntered: "Y", requireParty: "N"}, values, {storePromotionId: promotion.storePromotionId, promoCode})
+        )
+        results.push({promoCode, promoCodeId: out.promoCodeId, ok: true, code: null, message: "Made"})
     }
     const answer = {
         results,
@@ -987,6 +1053,12 @@ function checkOrderPromotionLimits(p) {
     const asked = items.filter(item => placingIds.has(item.orderPartSeqId) && num(item.promoTimesUsed) > 0)
     if (!asked.length) return none
     const customerPartyId = (parts.find(part => part.customerPartyId) || {}).customerPartyId || null
+    // a Shop guest's cart (access rows, none with a verified customer) gets a new guest party on each checkout, so its
+    // per-customer uses are counted by its checkout's contact email, lower case and trimmed: the placed orders whose
+    // checkouts have that email (SEC-PSS-85); before the guest gives one, only this order's own uses count
+    const accessRows = rows("mantle.order.StoreCartAccess", {orderId: order.orderId})
+    const shopGuest = accessRows.length > 0 && !accessRows.some(row => row.customerPartyId)
+    const guestEmail = shopGuest ? checkoutEmail(order.orderId) : ""
 
     // the rows read first, unlocked: only those with a limit the order uses are locked and counted
     const promotionIds = unique(asked.map(item => item.storePromotionId)).sort()
@@ -1038,7 +1110,9 @@ function checkOrderPromotionLimits(p) {
             const requested = sum(mine)
             if (!requested) continue
             let used
-            if (limit.per === "customer")
+            const byEmail = limit.per === "customer" && shopGuest
+            if (byEmail) used = (guestEmail ? emailUses({[field]: id}, guestEmail, order.orderId) : 0) + ownPlaced
+            else if (limit.per === "customer")
                 used = customerPartyId ? placedUses({[field]: id, customerPartyId}, order.orderId) + ownPlaced : ownPlaced
             else used = placedUses({[field]: id}, order.orderId) + ownPlaced
             if (used + requested > allowed)
@@ -1050,7 +1124,8 @@ function checkOrderPromotionLimits(p) {
                     limitText: limit.label,
                     limit: allowed,
                     used,
-                    requested
+                    requested,
+                    ...(byEmail ? {byEmail: true} : {})
                 })
         }
     }

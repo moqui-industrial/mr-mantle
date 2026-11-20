@@ -59,10 +59,22 @@
     // Expired export downloads and their files, each isolated.
     try{ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').cleanupExports()}
     catch(error){ec.message.clearErrors();ec.logger.error('Forum export cleanup failed: '+String(error?.message || error).split('\n')[0])}
+    // Drafts untouched for mantle@forum-draft-days; one bulk delete, isolated from the rest.
+    try{ec.service.sync().throwOnError(true).name('mantle.forum.OperationServices.cleanup#Drafts').requireNewTransaction(true).call()}
+    catch(error){ec.message.clearErrors();ec.logger.error('Forum draft cleanup failed: '+String(error?.message || error).split('\n')[0])}
     // Expired email opt-out tokens can no longer be redeemed; one bulk delete, isolated from the cursors above.
     try{ec.service.sync().throwOnError(true).name('mantle.forum.OperationServices.cleanup#OptOutTokens').requireNewTransaction(true).call()}
     catch(error){ec.message.clearErrors();ec.logger.error('Forum opt-out token cleanup failed: '+String(error?.message || error).split('\n')[0])}
     }finally{if(!old)ec.artifactExecution.enableAuthz()}
+  ]]></script>
+    </actions>
+  </service>
+  <service verb="cleanup" noun="Drafts" authenticate="false" allow-remote="false">
+    <description>Removes the forum drafts no one has changed for mantle@forum-draft-days days (0 keeps them).</description>
+    <actions>
+      <script><![CDATA[
+    const days=ec.resource.script('component://mr-mantle/service/mantle/other/Limits.js').limit('forum-draft-days')
+    if(days!==Infinity)ec.entity.find('mantle.forum.ForumDraft').condition('updatedAt','less',new Date(ec.user.timestampMillis(ec.user.nowTimestamp)-days*86400000)).disableAuthz().deleteAll()
   ]]></script>
     </actions>
   </service>

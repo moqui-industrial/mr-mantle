@@ -892,7 +892,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <service name="mantle.order.ReturnServices.find#ReturnableOrderItems"/></method></resource>
             <resource name="items">
                 <method type="get"><entity name="returnItems" operation="list"/></method>
-                <method type="post"><entity name="returnItems" operation="create"/></method>
+                <!-- an order line's item with its checks (the line the return's parties', the return open, billed and shipped
+                    ceilings), never a plain row (SEC-BAP-93) -->
+                <method type="post"><service name="mantle.order.ReturnServices.add#OrderItemToReturn"/></method>
 
                 <id name="returnItemSeqId">
                     <method type="get"><entity name="returnItems" operation="one"/></method>

@@ -81,6 +81,8 @@ spec({
         login(lib.OPERATOR)
         setConf("pass@import-dir", "runtime://tmp/mantle-mbox-import")
         setConf("smtp-server@authserv-id", "gw.example.test")
+        // the forum's own inbound account, named by the operator (SEC-PFS-85)
+        setConf("mantle@forum-inbound-accounts", "MLS_FORUM_ACCOUNT")
         lib.site(SITE)
         lib.make("mantle.public.PublicSiteHost", {siteId: SITE, hostname: "mls.example.test", canonical: "Y"})
         ids.list = category("Dev", "list", "dev@" + LISTS)
@@ -133,7 +135,7 @@ feature("a list category's mail carries the list's own List-Id, List-Post and Li
 
 feature("an mbox archive is imported once: threaded, its text read, a duplicate and a second run adding nothing", {
     when() {
-        const location = "runtime://tmp/mantle-mbox-import/mls-list.mbox"
+        const location = "runtime://tmp/mantle-mbox-import/" + SITE + "/mls-list.mbox"
         ec.resource
             .getLocationReference(location)
             .putText(ec.resource.getLocationText("component://mr-mantle/test/forum/fixtures/list.mbox", false))
@@ -626,7 +628,7 @@ feature("only the trusted gateway's Authentication-Results authenticate a sender
 
 feature("an archive goes only into a list, and a message over the byte cap is passed and counted; an author's handle is no reserved word", {
     when() {
-        const location = "runtime://tmp/mantle-mbox-import/mls-cap.mbox"
+        const location = "runtime://tmp/mantle-mbox-import/" + SITE + "/mls-cap.mbox"
         const message = (from, id, subject, body) =>
             "From " + from + " Mon Jan  1 10:00:00 2024\nFrom: Git <" + from + ">\nMessage-ID: <" + id + "@cap.test>\nSubject: " +
             subject + "\nDate: Mon, 1 Jan 2024 10:00:00 +0000\n\n" + body + "\n\n"
@@ -666,7 +668,7 @@ feature("an archive goes only into a list, and a message over the byte cap is pa
 
 feature("an archived From that names a member's address in its name, or two addresses, is no one's: the member never claims it (SEC-PFS-81)", {
     when() {
-        const location = "runtime://tmp/mantle-mbox-import/mls-spoof.mbox"
+        const location = "runtime://tmp/mantle-mbox-import/" + SITE + "/mls-spoof.mbox"
         const message = (from, id, subject) =>
             "From x@spoof.test Mon Jan  1 10:00:00 2024\nFrom: " + from + "\nMessage-ID: <" + id + "@spoof.test>\nSubject: " +
             subject + "\nDate: Mon, 1 Jan 2024 10:00:00 +0000\n\nMLS-MBOX-" + id + "\n\n"
@@ -949,5 +951,84 @@ feature("an invitation does not bring back a member staff suspended or removed; 
         left.state == "active"
         states == ["suspended", "ended", "active"]
         unredeemed == null
+    }
+})
+
+feature("a route address is never a person's or an organization's own mail address: a user's, an owned mailbox's or its identity's (SEC-PFS-85)", {
+    when() {
+        const core = ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js")
+        sys(() => {
+            lib.make("moqui.basic.email.EmailAccount", {
+                emailAccountId: "MLS_ALICE_MAILBOX",
+                accountKindEnumId: "EakHosted",
+                ownerUserId: "MLS_MEMBER",
+                emailAddress: "alice@" + LISTS
+            })
+            lib.make("moqui.basic.email.EmailIdentity", {
+                emailIdentityId: "MLS_ALICE_ALIAS",
+                emailAccountId: "MLS_ALICE_MAILBOX",
+                emailAddress: "a.smith@" + LISTS
+            })
+            lib.set("moqui.security.UserAccount", {userId: "MLS_OTHER"}, {emailAddress: "Other@" + LISTS})
+        })
+        const refusal = address =>
+            withConf("pass@route-domains", LISTS, () =>
+                sys(() => {
+                    try {
+                        return "taken " + core.routeAddress(address)
+                    } catch (error) {
+                        return String(error.message || error)
+                    }
+                })
+            )
+        return {
+            mailbox: refusal("alice@" + LISTS),
+            identity: refusal("a.smith@" + LISTS),
+            user: refusal("other@" + LISTS),
+            forumOwn: refusal("dev@" + LISTS)
+        }
+    },
+    then({mailbox, identity, user, forumOwn}) {
+        mailbox.includes("not a route") && identity.includes("not a route") && user.includes("not a route")
+        forumOwn == "taken dev@" + LISTS
+    }
+})
+
+feature("a route's mail is read only from an account the operator names as the forum's, whoever owns it (SEC-PFS-85)", {
+    when() {
+        sys(() => {
+            // as Mail settings makes one: its maker the owner
+            lib.make("moqui.basic.email.EmailAccount", {
+                emailAccountId: "MLS_OWNED_FORUM",
+                accountKindEnumId: "EakShared",
+                ownerUserId: "MLS_MEMBER",
+                emailAddress: "dev@" + LISTS
+            })
+            lib.make("moqui.basic.email.EmailAccount", {
+                emailAccountId: "MLS_UNLISTED",
+                accountKindEnumId: "EakHosted",
+                emailAddress: "dev@" + LISTS
+            })
+        })
+        const inbound = (emailAccountId, n) =>
+            lib.run("mantle.forum.DeliveryServices.process#Inbound", {
+                emailAccountId,
+                emailMessageId: null,
+                headers: {
+                    "delivered-to": "dev@" + LISTS,
+                    "message-id": "<mls-bound-" + n + "@mls.test>",
+                    "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test"
+                },
+                fields: {from: "mls_member@smithy.test", subject: "Bound " + n, toList: ["dev@" + LISTS]},
+                bodyPartList: [{contentType: "text/plain", contentText: "MLS-BOUND " + n}]
+            }).result
+        return withConf("mantle@forum-inbound-accounts", "MLS_FORUM_ACCOUNT,MLS_OWNED_FORUM", () => ({
+            owned: inbound("MLS_OWNED_FORUM", 1),
+            unlisted: inbound("MLS_UNLISTED", 2)
+        }))
+    },
+    then({owned, unlisted}) {
+        owned.handled == true
+        unlisted.handled == false
     }
 })

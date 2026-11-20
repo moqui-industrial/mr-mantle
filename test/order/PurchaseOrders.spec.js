@@ -19,6 +19,8 @@ const org = prefix + "_ORG",
     template = prefix + "_EMAIL"
 const P = "mantle.order.PurchaseServices.",
     O = "mantle.order.OrderServices."
+const ORDER = "mantle.order.OrderHeader",
+    DECISION = "mantle.order.purchase.PurchaseApprovalDecision"
 const capture = ec.factory.getTool("MailCapture")
 const find = (entity, conditions = {}) => ec.entity.find(entity).condition(conditions).disableAuthz()
 const one = (entity, conditions) => find(entity, conditions).one()
@@ -288,7 +290,7 @@ feature(
                 orderRevision: revisionOf(orderId),
                 operationKey: key()
             })
-            const decision = rows("mantle.order.purchase.PurchaseApprovalDecision", {sourceId: orderId})[0]
+            const decision = rows(DECISION, {sourceEntityName: ORDER, sourceId: orderId})[0]
             state.approvedId = orderId
             return {placed, orderApprove, undecided, self, stale, decided, decision, status: statusOf(orderId)}
         },

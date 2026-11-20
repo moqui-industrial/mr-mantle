@@ -161,14 +161,14 @@ feature("linking again changes nothing, unlinking removes the link", {
     },
 })
 
-feature("a record type that is not an entity or has no single key is refused", {
+feature("a record type that is not an entity, or no registered record type (one of two keys among them, SEC-BOS-87), is refused", {
     expect() {
         const notEntity = errorOf("mantle.party.CommunicationServices.link#CommunicationEventRecord",
                 { communicationEventId: messageIds[ORDER], recordEntityName: "mantle.NoSuchRecord", recordId: "X" })
         const twoKeys = errorOf("mantle.party.CommunicationServices.link#CommunicationEventRecord",
                 { communicationEventId: messageIds[ORDER], recordEntityName: "mantle.order.OrderItem", recordId: "RL-O1" })
         notEntity.includes("is not an entity")
-        twoKeys.includes("primary key fields")
+        twoKeys.includes("is not a record type")
     },
 })
 
@@ -547,4 +547,36 @@ feature("deleting a wiki page takes its comment, activity and follower joins fir
         page == 0
         events == eventIds.length
     },
+})
+
+feature("a record's changes leave out a field its entity keeps from readers: ai-opt-out, and one it no longer has (SEC-BAP-94)", {
+    when() {
+        // the user's own qualification, which they see (its number is ai-opt-out)
+        const partyId = ec.user.userAccount.partyId
+        call("create#mantle.humanres.ability.PartyQualification", { partyQualificationId: "RL-PQ1", partyId, title: "Licence" })
+        const audit = (changedFieldName, newValueText) =>
+            call("create#moqui.entity.EntityAuditLog", { changedEntityName: "mantle.humanres.ability.PartyQualification",
+                changedFieldName, pkPrimaryValue: "RL-PQ1", oldValueText: "before", newValueText, changedDate: ec.user.nowTimestamp,
+                changedByUserId: "EX_JOHN_DOE" })
+        audit("verificationStatusId", "RL-SHOWN")
+        audit("referenceNumber", "RL-SECRET-NUMBER")
+        audit("noSuchField", "RL-GONE")
+        const out = timeline("mantle.humanres.ability.PartyQualification", "RL-PQ1", { kinds: "changes" })
+        // a party's payment gateway customer id is ai-opt-out too (SEC-BAP-94 review)
+        call("create#moqui.entity.EntityAuditLog", { changedEntityName: "mantle.party.Party", changedFieldName: "gatewayCimId", pkPrimaryValue: partyId,
+            oldValueText: "before", newValueText: "RL-CIM-ID", changedDate: ec.user.nowTimestamp, changedByUserId: "EX_JOHN_DOE" })
+        // nor a party's former private owner or owning organization (SEC-BAP-141)
+        for (const [changedFieldName, oldValueText] of [["privateOwnerUserId", "RL-FORMER-OWNER"], ["ownerPartyId", "RL-FORMER-ORG"]])
+            call("create#moqui.entity.EntityAuditLog", { changedEntityName: "mantle.party.Party", changedFieldName, pkPrimaryValue: partyId,
+                oldValueText, newValueText: null, changedDate: ec.user.nowTimestamp, changedByUserId: "EX_JOHN_DOE" })
+        const party = timeline("mantle.party.Party", partyId, { kinds: "changes" })
+        const changes = Array.from(out.entryList || []).concat(Array.from(party.entryList || [])).filter(entry => entry.kind === "change")
+        return { values: changes.map(entry => entry.newValue), oldValues: changes.map(entry => entry.oldValue) }
+    },
+    then({ values, oldValues }) {
+        !oldValues.includes("RL-FORMER-OWNER") && !oldValues.includes("RL-FORMER-ORG")
+        !values.includes("RL-CIM-ID")
+        values.includes("RL-SHOWN")
+        !values.includes("RL-SECRET-NUMBER") && !values.includes("RL-GONE")
+    }
 })

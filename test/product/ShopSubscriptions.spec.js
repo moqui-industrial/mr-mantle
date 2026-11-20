@@ -144,9 +144,26 @@ function asStaff(username, service, parameters = {}) {
 // contract 2 (the review feature's second subscription) is the one the P12 features renew
 const second = () => one(SUB + "StoreRecurringContract", {contractId: state.second})
 
+// The cart-making specs of one run share the requester's cart-creation throttle (30 in ten minutes, Shop P4): this window's
+// bucket goes before this spec's carts, as ShopOperations and mr-pass ShopCheckout do; the throttle is unchanged.
+function resetCartCreations() {
+    const requester = ec.resource.script("component://framework/service/org/moqui/public/Account.js").requesterKey()
+    const window = Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 600000)
+    const wasDisabled = ec.artifactExecution.disableAuthz()
+    try {
+        ec.entity
+            .find("moqui.security.public.AccountAttempt")
+            .condition({bucketId: ec.user.singleUseCodeHash("cart-create:" + requester + ":" + window)})
+            .deleteAll()
+    } finally {
+        if (!wasDisabled) ec.artifactExecution.enableAuthz()
+    }
+}
+
 spec({
     stepwise: true,
     setupSpec() {
+        resetCartCreations()
         system(() => {
             make("mantle.party.Party", {partyId: ids.org, partyTypeEnumId: "PtyOrganization"})
             make("mantle.party.Organization", {partyId: ids.org, organizationName: "Subscriptions organization"})
@@ -883,6 +900,89 @@ feature("review: retries run out, then a changed card's consent charges the rene
         r.subs.length == 2
         Number(r.after.paidThroughDate) == Math.max(...r.subs.map(sub => Number(sub.thruDate)))
         code(r.forged) == "NOT_AVAILABLE"
+    }
+})
+
+feature("SEC-PSS-86: a customer has a renewal charged again a bounded number of times a day; past it a card change waits for the job", {
+    when() {
+        // a subscription of the buyer whose card declines, its retries run out
+        op(ids.buyer, R + "begin#SubscriptionPurchase", {offerId: state.offerId})
+        op(ids.buyer, CHECKOUT + "select#Payment", {paymentOptionId: "PiCreditCard"})
+        const revision = op(ids.buyer, CHECKOUT + "get#Checkout", {}).result.checkout.revision
+        const submitted = op(ids.buyer, CHECKOUT + "submit#Checkout", {expectedRevision: revision, recurringConsent: true}).result
+        const row = one("mantle.order.StoreCheckout", {returnReference: submitted.checkout.reference})
+        system(() => call("update#mantle.account.payment.PortalPaymentAttempt", {paymentId: row.paymentId, lastCheckDate: null}))
+        op(ids.buyer, CHECKOUT + "get#CheckoutPaymentResult", {reference: submitted.checkout.reference, key: submitted.returnKey})
+        assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
+        const contract = one(SUB + "StoreRecurringContract", {originOrderId: row.orderId})
+        const contractId = contract.contractId
+        system(() =>
+            call("update#mantle.account.method.PaymentMethod", {
+                paymentMethodId: contract.paymentMethodId,
+                paymentGatewayConfigId: ids.decline
+            })
+        )
+        dueNow(contractId)
+        system(() => call(R + "dispatch#Renewal", {baseOrderId: contract.baseOrderId}))
+        const failing = occurrences(contractId)[0]
+        system(() => {
+            call("update#" + SUB + "StoreRenewalOccurrence", {
+                occurrenceId: failing.occurrenceId,
+                attemptCount: 3,
+                nextRetryDate: new Date(Number(ec.user.nowTimestamp) - 1000)
+            })
+            call(R + "run#Renewals", {})
+        })
+        const charges = () => list("mantle.account.payment.Payment", {orderId: failing.orderId}).length
+        const exhausted = charges()
+        // the customer resumes it with the card still declining: one charge a day here, then refused
+        return withConf("mantle@shop-renewal-resumes", "1", () => {
+            const first = op(ids.buyer, R + "resume#Renewal", {contractId})
+            assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
+            const afterFirst = charges()
+            const second = op(ids.buyer, R + "resume#Renewal", {contractId})
+            assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
+            const afterSecond = charges()
+            // a card change past the day's bound: the card is kept, nothing is charged now, the customer is told, and the
+            // job tries the renewal a day later (the card at a gateway that works again)
+            system(() =>
+                call("update#mantle.account.method.PaymentMethod", {
+                    paymentMethodId: contract.paymentMethodId,
+                    paymentGatewayConfigId: ids.hosted
+                })
+            )
+            const current = one(SUB + "StoreRecurringContract", {contractId})
+            const changed = op(ids.buyer, R + "change#SubscriptionMethod", {
+                contractId,
+                paymentMethodId: current.paymentMethodId,
+                consent: true,
+                expectedRevision: current.revision
+            })
+            assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
+            const afterChange = charges()
+            const waiting = one(SUB + "StoreRenewalOccurrence", {occurrenceId: failing.occurrenceId})
+            system(() => {
+                call("update#" + SUB + "StoreRenewalOccurrence", {
+                    occurrenceId: failing.occurrenceId,
+                    nextRetryDate: new Date(Number(ec.user.nowTimestamp) - 1000)
+                })
+                call(R + "run#Renewals", {})
+            })
+            assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
+            return {exhausted, first, afterFirst, second, afterSecond, changed, afterChange, waiting, afterJob: charges()}
+        })
+    },
+    then(r) {
+        r.first.error == null
+        r.afterFirst == r.exhausted + 1
+        code(r.second) == "RATE_LIMITED"
+        r.afterSecond == r.afterFirst
+        r.changed.error == null
+        r.changed.result.notice.reasonCode == "RENEWAL_LATER"
+        r.afterChange == r.afterSecond
+        r.waiting.stateEnumId == "SrsRetry"
+        Number(r.waiting.nextRetryDate) > Date.now() + 23 * 3600000
+        r.afterJob == r.afterChange + 1
     }
 })
 

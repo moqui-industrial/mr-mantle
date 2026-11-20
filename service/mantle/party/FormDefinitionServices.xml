@@ -21,6 +21,16 @@ along with this software (see the LICENSE.md file). If not, see
     builder's Shared/SurveyForms and SurveyFormDetail) call these after the app's access check. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="check" noun="FormRecordVisible" allow-remote="false">
+        <description>Whether the user sees a form (moqui.screen.form.DbForm) as a record, its card, notes and panels (the
+            RecordLinkType visibility service, SEC-BOS-87): a form of a registered purpose whose forms the user reads, of one of
+            their organizations for it, as get#Form admits it; anything else is false.</description>
+        <implements service="mantle.party.CommunicationServices.check#RecordTypeVisible"/>
+        <actions>
+            <set field="recordVisible" from="ec.resource.script('component://mr-mantle/service/mantle/party/FormDefinitions.js')
+                    .execute('formRecordVisible', context).recordVisible"/>
+        </actions>
+    </service>
     <service verb="create" noun="Form" allow-remote="false">
         <description>A new dated form of a registered purpose for one of the user's organizations for it (PURPOSE_UNAVAILABLE
             for a purpose with no registration, PERMISSION_DENIED without its edit permission, RECORD_UNAVAILABLE for another

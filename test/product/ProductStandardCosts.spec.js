@@ -921,6 +921,16 @@ feature("closed periods and changed stock block revaluation before ledger or boo
 
 feature("dated self-approval is explicit and historical cost readers cannot open financial book events", {
     when() {
+        // a catalog administrator who drafts and approves estimates cannot turn self approval on (SEC-BAP-106)
+        const turnedOn = as("cst_admin", () => {
+            const current = call("mantle.product.ProductServices.get#CatalogSettings", {organizationPartyId: "CST_ORG"})
+            return invoke("mantle.product.ProductServices.store#CatalogSettings", {
+                organizationPartyId: "CST_ORG",
+                expectedVersion: current.versionSeqId,
+                changeReason: "Let me approve my own",
+                settings: {allowCostSelfApproval: true}
+            })
+        })
         as("john.doe", () =>
             call("create#mantle.product.ProductCatalogSetting", {
                 organizationPartyId: "CST_ORG",
@@ -960,9 +970,10 @@ feature("dated self-approval is explicit and historical cost readers cannot open
             history = as("cst_reader", () =>
                 call(S + "get#ProductCostHistory", {productId: "CST_FIN", organizationPartyId: "CST_ORG"})
             )
-        return {approved, hidden: probe("cst_reader"), visible: probe("cst_approver"), history}
+        return {turnedOn, approved, hidden: probe("cst_reader"), visible: probe("cst_approver"), history}
     },
-    then({approved, hidden, visible, history}) {
+    then({turnedOn, approved, hidden, visible, history}) {
+        turnedOn.error.includes("PRODUCT_COST_SELF_APPROVAL")
         approved.standardCost.approvedByUserId == "CST_ADMIN"
         hidden.recordVisible == false
         visible.recordVisible == true

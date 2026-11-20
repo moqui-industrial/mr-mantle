@@ -70,7 +70,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="evaluate" noun="OrderCredit" allow-remote="false">
         <description>The credit check of an order's sales parts (an internal organization selling to an outside customer),
             or the part given, each against its customer's policy in effect, else the organization's default. A part released
-            by a credit decision that has not expired passes. An organization with no policy at all is answered by one count.
+            by a credit decision that has not expired passes, except for an order change once the customer's exposure is above
+            the one the decision was made on (SEC-BAP-91). An organization with no policy at all is answered by one count.
             The check: the exposure (unpaid invoices and open
             orders not yet invoiced, less unapplied payments and the payments authorized on the open orders) against the
             limit, and the oldest overdue invoice against the overdue days. Answers pass, warn or hold with each reason and
@@ -78,12 +79,18 @@ along with this software (see the LICENSE.md file). If not, see
             hold#Order; reservations
             stay; heldPartSeqIds names the parts held)
             and notifies the organization's users who may release it (CreditHoldRelease). No policy, a purchase order or an
-            order between internal organizations always passes. approve#Order and the OrderPreApproveCredit SECA on
-            check#OrderPreApprove call it; it checks no permission.</description>
+            order between internal organizations always passes. Only a part awaiting approval is checked, and for an order
+            change (changeHoldReasonId, forChange) an approved one and one held by that change alone. approve#Order, the
+            OrderPreApproveCredit SECA on check#OrderPreApprove and the order changes call it; it checks no permission.</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
             <parameter name="orderPartSeqId"/>
             <parameter name="placeHold" type="Boolean" default="false"/>
+            <parameter name="changeHoldReasonId"><description>An order change's own Change hold (apply#OrderChange): a part
+                held by it alone is checked as the status it returns to, so a change that raises an approved order's total is
+                checked before the hold is released (SEC-BAP-91)</description></parameter>
+            <parameter name="forChange" type="Boolean" default="false"><description>An order change's preview: an approved
+                part is checked too</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="resultEnumId"><description>pass, warn or hold</description></parameter>

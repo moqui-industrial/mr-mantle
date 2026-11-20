@@ -78,6 +78,8 @@ const paymentTypes = {
         },
         hosts: {"apitest.authorize.net": "T", "api.authorize.net": "P"},
         address: "https://apitest.authorize.net/xml/v1/request.api",
+        // the one message type its remote takes at /rest/sm (SEC-RTE-86)
+        webhookType: "AuthorizeNetWebhook",
         optionsPart: "authorizeNet",
         options: {validationMode: "none", lookupGraceSeconds: 300},
         needs: "its API endpoint, API login id (the user) and transaction key (the password)",
@@ -120,6 +122,8 @@ const shippingTypes = {
         // where its label files are (an answer's label_url, a presigned storage link; SEC-BAP-06)
         labelHosts: ["shippo-delivery.s3.amazonaws.com", "shippo-delivery-east.s3.amazonaws.com", "deliver.goshippo.com"],
         address: "https://api.goshippo.com",
+        // the one message type its remote takes at /rest/sm (SEC-RTE-86)
+        webhookType: "ShippoWebhook",
         needs: "its API base and API token (the password)",
         complete: remote => !!text(remote.sendUrl) && !!text(remote.password)
     }
@@ -173,16 +177,18 @@ const newId = (values, what) => {
     return id
 }
 
-// The connection of a gateway started here: its provider's test address, and what it receives only from a signed-in user
-// authorized to receive system messages. /rest/sm takes a message of any type from whoever proves a remote's secret, so the
-// provider's webhooks wait for an instance administrator to set how they are verified (Tools), and the webhook key of a
-// gateway that has one is not entered here.
+// The connection of a gateway started here: its provider's test address, and a login remote with no receiving account
+// (receiveUserId), so /rest/sm takes no post on it (SEC-BAP-96). /rest/sm takes a message of any type from whoever proves a
+// remote's secret, so the provider's webhooks wait for an instance administrator to set how they are verified (Tools), and
+// the webhook key of a gateway that has one is not entered here.
 const newRemote = (id, values, type) => ({
     systemMessageRemoteId: id,
     description: text(values.description),
     sendUrl: type.address,
     usageCode: "T",
-    messageAuthEnumId: "SmatLogin"
+    messageAuthEnumId: "SmatLogin",
+    // the remote is for its provider's webhook type only (SEC-RTE-86); a provider with none (PayTrace) receives nothing here
+    systemMessageTypeId: type.webhookType || null
 })
 
 // ===== payment gateways =====
@@ -672,8 +678,12 @@ function storePaymentGatewayOrganization(p) {
         !one("mantle.party.PartyRole", {partyId: organizationPartyId, roleTypeId: "OrgInternal"})
     )
         throw new Error("Organization " + organizationPartyId + " is not available")
-    if (!paymentGatewayConfigId || !one(CONFIG, {paymentGatewayConfigId}))
-        throw new Error("Payment gateway " + paymentGatewayConfigId + " is not available")
+    const config = paymentGatewayConfigId ? one(CONFIG, {paymentGatewayConfigId}) : null
+    if (!config) throw new Error("Payment gateway " + paymentGatewayConfigId + " is not available")
+    // SEC-BOS-129: a test gateway (PgtTest, which approves without a charge) is permitted for no organization on a production
+    // instance unless the operator allows them (TestGateways.js); its operations are refused there too, whatever binds it
+    const testRefusal = ec.resource.script("component://mr-mantle/service/mantle/account/TestGateways.js").refusal(config)
+    if (testRefusal && !(p.remove === true || p.remove === "true" || p.remove === "Y")) throw new Error(testRefusal)
     const key = {organizationPartyId, paymentGatewayConfigId}
     const storedRow = find(BINDING, key).forUpdate(true).one()
     const stored = storedRow ? map(storedRow) : null

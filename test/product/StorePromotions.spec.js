@@ -379,6 +379,28 @@ feature(
             const ended = run(users.reader, P + "find#PromoCodes", {storePromotionId, state: "ended"})
             const all = run(users.reader, P + "find#PromoCodes", {storePromotionId, pageSize: 50})
             const otherRead = run(users.other, P + "get#PromoCode", {promoCodeId: one.promoCodeId})
+            // a batch whose caller's transaction rolls back leaves no code; its retry makes the one batch (review)
+            const rolledKey = key()
+            const rolled = {storePromotionId, count: 2, prefix: prefix + "B-", operationKey: rolledKey}
+            login(users.manager)
+            const was = ec.artifactExecution.disableAuthz()
+            try {
+                ec.transaction.runRequireNew(null, "Spec batch rolled back", () => {
+                    ec.service.sync().name(P + "generate#PromoCodes").parameters(rolled).call()
+                    throw new Error("SPEC_ROLLBACK: the caller's transaction rolls back")
+                })
+            } catch (error) {
+                // rolled back on purpose
+            } finally {
+                ec.message.clearErrors()
+                if (!was) ec.artifactExecution.enableAuthz()
+                login("john.doe")
+            }
+            const batchCodes = () => ec.entity.find(S + "ProductStorePromoCode")
+                .condition(ec.entity.conditionFactory.makeCondition("promoCode", "like", prefix + "B-%")).disableAuthz().count()
+            const afterRollback = batchCodes()
+            const rolledRetry = run(users.manager, P + "generate#PromoCodes", rolled)
+            const afterRetry = batchCodes()
             const audit = list("moqui.entity.EntityAuditLog", {
                 changedEntityName: S + "ProductStorePromoCode",
                 pkPrimaryValue: one.promoCodeId,
@@ -401,6 +423,9 @@ feature(
                 ended,
                 all,
                 otherRead,
+                afterRollback,
+                rolledRetry,
+                afterRetry,
                 audit
             }
         },
@@ -430,10 +455,54 @@ feature(
             r.ended.codes.map(row => row.promoCodeId) == [r.one.promoCodeId]
             r.all.codesCount == 9
             code(r.otherRead) == "RECORD_UNAVAILABLE"
+            r.afterRollback == 0
+            r.rolledRetry.doneCount == 2
+            r.afterRetry == 2
             r.audit.map(row => row.changeReason).includes("Spec")
         }
     }
 )
+
+feature("a code's text is unique within its store's organization: another organization's taken texts and prefix counts are not answered, and an order takes its own store's code (SEC-BAP-108)", {
+    when() {
+        const theirs = run(users.other, P + "store#Promotion", {
+            productStoreId: ids.other,
+            serviceRegisterId: "FlatDiscount",
+            itemDescription: "Other organization's codes",
+            requireCode: "Y"
+        })
+        const storePromotionId = theirs.storePromotionId
+        // texts organization A has (the codes feature's)
+        const same = run(users.other, P + "store#PromoCode", {storePromotionId, promoCode: prefix + "SPRING"})
+        const sameNumbered = run(users.other, P + "store#PromoCode", {storePromotionId, promoCode: prefix + "N4", userEntered: "Y"})
+        const preview = run(users.other, P + "generate#PromoCodes", {
+            storePromotionId,
+            count: 5,
+            prefix: prefix + "N",
+            numbered: true,
+            preview: true
+        })
+        // an order of organization A's store takes A's code of that text, not B's
+        const order = cart(customer("Own store"))
+        addCode(order, prefix + "N4")
+        const applied = list("mantle.order.OrderPromoCode", {orderId: order}).map(row => row.promoCodeId)
+        const ownCode = list(S + "ProductStorePromoCode", {promoCode: prefix + "N4"}).filter(row =>
+            list(S + "ProductStorePromotion", {storePromotionId: row.storePromotionId})[0]?.productStoreId === ids.store
+        )
+        return {theirs, same, sameNumbered, preview, applied, ownCode: ownCode.map(row => row.promoCodeId)}
+    },
+    then({theirs, same, sameNumbered, preview, applied, ownCode}) {
+        theirs.error == ""
+        code(same) == ""
+        code(sameNumbered) == ""
+        ownCode.length == 1
+        // B's own N4 is the one taken; A's N1 to N5 are not counted
+        preview.taken == [prefix + "N4"]
+        preview.existingWithPrefix == 1
+        preview.makeCount == 4
+        applied == ownCode
+    }
+})
 
 feature("a store order whose promotions set no limit is placed as before and locks nothing", {
     when() {
@@ -634,5 +703,40 @@ feature("two concurrent placements past a code's use limit: the second waits for
         refused >= 0
         results[1 - refused].error == ""
         code(results[refused]) == "PROMOTION_LIMIT_REACHED"
+    }
+})
+
+feature("an order of no store does not guess between stores' codes of one text (SEC-BAP-108 review)", {
+    when() {
+        // two stores of no organization (a store Commerce cannot reach, as loaded data), each with a code of the same text
+        system(() => {
+            for (const id of ["_LONE1", "_LONE2"]) {
+                make(S + "ProductStore", {productStoreId: prefix + id, storeName: "Lone store" + id, defaultCurrencyUomId: "USD"})
+                make(S + "ProductStorePromotion", {storePromotionId: prefix + id + "_P", productStoreId: prefix + id,
+                    itemDescription: "Lone" + id, serviceRegisterId: "FlatDiscount", requireCode: "Y"})
+                make(S + "ProductStorePromoCode", {promoCodeId: prefix + id + "_C", storePromotionId: prefix + id + "_P",
+                    promoCode: prefix + "LONEX", userEntered: "Y"})
+            }
+        })
+        const orderId = system(() => call("mantle.order.OrderServices.create#Order", {vendorPartyId: vendorId,
+            customerPartyId: customer("Lone"), currencyUomId: "USD"}).orderId)
+        const ambiguous = system(() => {
+            ec.message.pushErrors()
+            try {
+                ec.service.sync().name("mantle.product.PromotionServices.add#OrderPromoCode").parameters({orderId, promoCode: prefix + "LONEX"})
+                    .requireNewTransaction(true).call()
+                return ec.message.hasError() ? ec.message.getErrorsString() : ""
+            } catch (error) {
+                return String(error.message)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        })
+        return {ambiguous, applied: list("mantle.order.OrderPromoCode", {orderId}).length}
+    },
+    then({ambiguous, applied}) {
+        ambiguous.includes("PROMO_CODE_AMBIGUOUS")
+        applied == 0
     }
 })

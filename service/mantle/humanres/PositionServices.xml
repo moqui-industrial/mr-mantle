@@ -149,7 +149,8 @@ along with this software (see the LICENSE.md file). If not, see
             set given replaces the class's), or its end (thruDate): an ended class keeps its positions and history and is offered
             for no new position. Refuses a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), no title
             (TITLE_REQUIRED), a work type that is not one (WORK_TYPE_INVALID), a missing class (RECORD_UNAVAILABLE), the end of an
-            ended class (CLASS_ENDED) and a revision other than the one read (REVISION_CHANGED).</description>
+            ended class (CLASS_ENDED), a revision other than the one read (REVISION_CHANGED), and a change of a class a current
+            position of an employer outside the caller's scope holds, without PEOPLE_ALL_ORGANIZATIONS (CLASS_SHARED, SEC-BOS-120).</description>
         <in-parameters>
             <parameter name="emplPositionClassId"/>
             <parameter name="title"/>
@@ -182,7 +183,7 @@ along with this software (see the LICENSE.md file). If not, see
             P5), to change or remove one not required (RECORD_UNAVAILABLE), a level that is not one (LEVEL_INVALID), a
             qualification type that is not one or ended (TYPE_INVALID, VALUE_ENDED), a change before the period's own start or a
             new period before the last one ended (DATES_INVALID) and a revision other than the one read
-            (REVISION_CHANGED).</description>
+            (REVISION_CHANGED); a class another employer's current position holds, without PEOPLE_ALL_ORGANIZATIONS (CLASS_SHARED).</description>
         <in-parameters>
             <parameter name="emplPositionClassId" required="true"/>
             <parameter name="skillTypeEnumId"/>

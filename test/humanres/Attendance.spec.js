@@ -328,10 +328,15 @@ feature("clocking follows the employer's default unless HR sets the employment a
     }
 })
 
-feature("an import needs PEOPLE_IMPORT and the employer: HR without it and another employer's HR are refused", {
+feature("an import needs PEOPLE_IMPORT and the employer: HR without it and another employer's HR are refused; the importer's own time too", {
     when() {
-        // B's HR officer, whom A never employed, is unknown to A's file as one who does not exist
-        const text = file([state.ana + ",2026-03-09 08:00,in,P1,door", state.hrBParty + ",2026-03-09 08:00,in,P2,door"])
+        // B's HR officer, whom A never employed, is unknown to A's file as one who does not exist; the importer's own punch is
+        // refused as their own (SEC-BOS-117)
+        const text = file([
+            state.ana + ",2026-03-09 08:00,in,P1,door",
+            state.hrBParty + ",2026-03-09 08:00,in,P2,door",
+            state.hrParty + ",2026-03-09 08:00,in,P3,door"
+        ])
         const allowed = importOf(text)
         return {
             allowed,
@@ -343,10 +348,32 @@ feature("an import needs PEOPLE_IMPORT and the employer: HR without it and anoth
         }
     },
     then({allowed, allowedRows, noImport, otherEmployer, otherRuns}) {
-        allowed.error == "" && allowed.readyCount == 1 && allowed.errorCount == 1
-        allowedRows.map(row => row.reasonCode).join(",") == "WORKER_UNKNOWN"
+        allowed.error == "" && allowed.readyCount == 1 && allowed.errorCount == 2
+        allowedRows
+            .map(row => row.reasonCode)
+            .sort()
+            .join(",") == "SELF_APPROVAL,WORKER_UNKNOWN"
         code(noImport) == "PERMISSION_DENIED"
         code(otherEmployer) == "ORGANIZATION_DENIED"
         otherRuns.length == 0
+    }
+})
+
+// SEC-BOS-117: a preview another importer made is imported without the importer's own time, which is refused at import
+feature("an importer who imports another's preview is refused the rows of their own time", {
+    when() {
+        const party = person("HR2")
+        employ(party, orgA)
+        const other = user("HR2", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_IMPORT"], party)
+        const preview = importOf(file([state.hrParty + ",2026-03-10 08:00,in,Q1,door", state.ana + ",2026-03-10 08:00,in,Q2,door"]), other)
+        const imported = run(state.hr, A + "import#Records", {attendanceImportId: preview.attendanceImportId})
+        const failedRows = run(state.hr, A + "get#Import", {attendanceImportId: preview.attendanceImportId, outcome: "problems"}).rows
+        return {preview, imported, failedRows}
+    },
+    then({preview, imported, failedRows}) {
+        preview.readyCount == 2
+        imported.importedCount == 1 && imported.errorCount == 1
+        failedRows.map(row => row.reasonCode).join(",") == "SELF_APPROVAL"
+        punchCount({partyId: state.hrParty}) == 0
     }
 })

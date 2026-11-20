@@ -488,10 +488,12 @@ function complete(reservation, p) {
         completedDate: ec.user.nowTimestamp,
         termsRevision
     })
-    // a reservation with nothing to pay confirms at once, its places still held under the lock
+    // a reservation with nothing to pay confirms at once, its places still held under the lock, when its buyer's address is
+    // known to be the buyer's (buyerKnown: a verified account's own party); else it stays held until the receipt's link,
+    // mailed to that address, confirms it (confirmFree, SEC-PSS-88)
     const held = places.filter(row => row.statusId === "EvrHeld")
     const due = held.some(row => paidOf(row, policy))
-    if (held.length && !due)
+    if (held.length && !due && buyerKnown(current))
         confirmPlaces(
             held.map(row => row.registrationId),
             "Free registration"
@@ -500,6 +502,33 @@ function complete(reservation, p) {
     return Object.assign(
         {replay: false},
         stateOfReservation(one(RESERVATION, {reservationId: reservation.reservationId}), policy)
+    )
+}
+// Whether a reservation's buyer address is known to be the buyer's: one staff entered (ErsStaff, staff vouch for it), or a
+// verified account's own party with the reservation's address (a signed-in buyer's own).
+function buyerKnown(reservation) {
+    if (reservation.sourceEnumId === "ErsStaff") return true
+    const address = reservation.emailContactMechId
+        ? text(one("mantle.party.contact.ContactMech", {contactMechId: reservation.emailContactMechId})?.infoString)?.toLowerCase()
+        : null
+    if (!address || !reservation.buyerPartyId) return false
+    return rows("moqui.security.UserAccount", {partyId: reservation.buyerPartyId}).some(account =>
+        rows("moqui.security.public.VerifiedAddress", {userId: account.userId}).some(
+            row => !!row.verifiedAt && text(row.emailAddress)?.toLowerCase() === address
+        )
+    )
+}
+// A completed free reservation's held places confirmed once its buyer's address confirmed it (the receipt's link, mailed there;
+// SEC-PSS-88), under the offer's lock; one with a place to pay, or whose holds ended, is left as it is. The places confirmed.
+function confirmFree(reservationId) {
+    const reservation = one(RESERVATION, {reservationId})
+    if (!reservation?.completedDate) return []
+    const {policy} = lockOffer(reservation.registrationPolicyId)
+    const held = placesOf(reservationId).filter(row => row.statusId === "EvrHeld" && holdLive(row))
+    if (!held.length || held.some(row => paidOf(row, policy))) return []
+    return confirmPlaces(
+        held.map(row => row.registrationId),
+        "Free registration: the buyer's address confirmed"
     )
 }
 // Places confirmed (from held, pending or review), each once; its ticket notice queued. The capacity is the caller's: a held or
@@ -538,6 +567,8 @@ function stateOfReservation(reservation, policy) {
         state,
         completed: !!reservation.completedDate,
         paymentDue: state === "held" && !!reservation.completedDate && held.some(row => paidOf(row, policy)),
+        // completed and free, held until the receipt's link confirms the buyer's address (confirmFree)
+        addressToConfirm: state === "held" && !!reservation.completedDate && !held.some(row => paidOf(row, policy)),
         holdEndsMs: held.length ? Math.min(...held.map(row => ms(row.holdExpireDate) ?? Infinity)) : null
     }
 }
@@ -643,8 +674,11 @@ function offerWaitlist(registrationPolicyId) {
         for (const row of group) move(row, "EvrHeld", "EraOffered", {holdExpireDate})
         const reservation = group[0].reservationId ? one(RESERVATION, {reservationId: group[0].reservationId}) : null
         const ids = group.map(row => row.registrationId)
-        if (reservation?.completedDate && !group.some(row => paidOf(row, policy)))
-            confirmed += confirmPlaces(ids, "A place from the waitlist").length
+        const free = !!reservation?.completedDate && !group.some(row => paidOf(row, policy))
+        // a completed free one confirms at once when its buyer is a verified account's own party; another's waits, held, for the
+        // receipt's link mailed to its buyer's address (SEC-PSS-88)
+        if (free && buyerKnown(reservation)) confirmed += confirmPlaces(ids, "A place from the waitlist").length
+        else if (free) notices().afterCommit("receipt", reservation.reservationId, "offered-" + nowMs())
         else offered.push(...ids)
     }
     for (const registrationId of offered) notices().afterCommit("offered", registrationId)
@@ -1253,6 +1287,7 @@ const operations = {
     move,
     reserve,
     complete,
+    confirmFree,
     confirmPlaces,
     cancelPlaces,
     placesOf,

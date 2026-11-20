@@ -566,7 +566,7 @@ function deliver(p) {
                   : event.subject,
             // Mailing-list mode carries the sanitized post; other notices link to it.
             body: allowed.everyPost
-                ? StringUtilities.cleanHtml(event.body || '')
+                ? core().memberHtml(event.body || '', v.siteId, true)
                 : null,
             reason: allowed.reason,
             siteId: v.siteId,
@@ -579,7 +579,8 @@ function deliver(p) {
    token for scope. build(urls) supplies the template parameters and thread references. The provider outcome is kept:
    sent, retry with backoff, failed, or uncertain when acceptance is unknown. */
 function mail(v, scope, build, needsForum = true) {
-    const settings = one(F + 'ForumMailSettings', { siteId: v.siteId }),
+    // checked again against the operator's registration at send time (SEC-PFS-99)
+    const settings = core().mailSettings(v.siteId),
         ua = Array.from(
             find('moqui.security.UserAccount', { partyId: v.partyId })
                 .orderBy('userId')

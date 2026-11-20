@@ -287,9 +287,10 @@ function caseFor(p, organizationPartyId) {
     const request = one(REQUEST, {requestId: checked.recordId})
     const profile = request ? one(PROFILE, {requestId: checked.recordId}) : null
     if (!profile) unavailable()
-    // its filer signed in confirms a public form's typed address (SEC-PSS-28); a link's holder does not
-    if (!p.token && request.senderVerified === "N")
-        cases.confirmSender(request.requestId, {partyId: ec.user.userAccount?.partyId}, true)
+    // a public form's case (its typed address not confirmed, SEC-PSS-28) is the matched address's owner's only once a reply
+    // from the address confirms it: whoever typed the form is not known to be them, and opening it signed in is not filing it
+    // (SEC-PSS-87). Its link, sent to the address, reads it.
+    if (!p.token && request.senderVerified === "N") unavailable()
     return {checked, request, profile, requestId: request.requestId, customerPartyId: checked.partyId, organizationPartyId}
 }
 const statusLabel = (profile, statusId) =>
@@ -656,6 +657,8 @@ function findCustomerCases(p) {
             if (!profile) continue
             const parties = cases.partiesOf(request.requestId)
             if (cases.roleParty(parties, "OrgInternal") !== organizationPartyId) continue
+            // a public form's case waits for its address to confirm it (SEC-PSS-87, caseFor)
+            if (request.senderVerified === "N") continue
             const customer = customerOf.get(request.requestId)
             // a contact sees a colleague's case only as a customer administrator (the self account is the customer)
             const own =
@@ -808,12 +811,12 @@ function getCaseIntake(p) {
         capabilities: {canSubmit: queues.length > 0, takesFiles: true, needsSender: false}
     }
 }
-// A staged file kept as a case's file of the customer-shared type.
-function keepCaseFile(requestId, staged, description) {
+// A staged file kept as a case's file of the customer-shared type (or another, contentTypeEnumId).
+function keepCaseFile(requestId, staged, description, contentTypeEnumId = SHARED) {
     if (!staged) return null
     const content = call("create#" + CONTENT, {
         requestId,
-        contentTypeEnumId: SHARED,
+        contentTypeEnumId,
         description: description || staged.filename,
         contentDate: now()
     })
@@ -848,6 +851,14 @@ function createCustomerCase(p) {
         throw error
     }
 }
+// Whether an address is one the signed-in account verified (it answered the mail sent there).
+function accountVerified(address) {
+    const typed = String(address || "").trim().toLowerCase()
+    if (!ec.user.userId || !typed) return false
+    return Array.from(
+        ec.entity.find("moqui.security.public.VerifiedAddress").condition("userId", ec.user.userId).disableAuthz().list()
+    ).some(row => !!row.verifiedAt && String(row.emailAddress || "").trim().toLowerCase() === typed)
+}
 function intakeCase(p, organizationPartyId, key, stage) {
     // the site's organization goes to the token check itself (SEC-PSS-66), and to create#IntakeRequest's
     const target = ec.resource.script("component://mr-mantle/service/mantle/request/Channels.js").formTarget(p.token, organizationPartyId)
@@ -879,13 +890,23 @@ function intakeCase(p, organizationPartyId, key, stage) {
         ec.message.clearErrors()
         fail("Unprocessable", message || "Your request could not be sent")
     }
-    if (out?.requestId && staged) keepCaseFile(out.requestId, staged, null)
+    // a signed-in account filing with one of its own verified addresses is the address's owner: the case is confirmed as it
+    // is filed (SEC-PSS-87; confirmSender takes it only when that account is the case's filer, the address's matched party)
+    const confirmed =
+        !!out?.requestId &&
+        accountVerified(p.emailAddress) &&
+        cases.confirmSender(out.requestId, {partyId: ec.user.userAccount?.partyId})
+    // a public form's file is the typist's, not known to be the matched customer's: kept internal, for staff (SEC-PSS-87);
+    // a confirmed filer's is the customer's own
+    if (out?.requestId && staged) keepCaseFile(out.requestId, staged, null, confirmed ? SHARED : "RqCntInternal")
     else media().unstage(staged)
-    // the sender is not verified: the answer reads no case
-    const result = {
-        receipt: {received: true, message: L("Thank you. We have your request and will answer you by email.")},
-        alreadyApplied: false
-    }
+    // an unconfirmed sender's answer reads no case; a signed-in one is told when it shows in their cases
+    const message = confirmed
+        ? "Thank you. We have your request; you can follow it in your cases."
+        : ec.user.userId
+          ? "Thank you. We have your request and will answer you by email. It shows in your cases once you reply from that address."
+          : "Thank you. We have your request and will answer you by email."
+    const result = {receipt: {received: true, message: L(message)}, alreadyApplied: false}
     lib.complete(operation, REQUEST, out?.requestId || "_NA_", result)
     return result
 }
@@ -1188,10 +1209,23 @@ function accountCard(p) {
     const organizationPartyId = served(p.siteId)
     if (!ec.user.userId) signInRequired()
     const customers = actingFor(organizationPartyId).map(row => row.partyId)
+    // the customers' open cases, by their current Customer party as find#CustomerCases reads them, counted in one join, less
+    // a public form's case its sender has not confirmed, which is no case of the account's yet (SEC-PSS-87)
+    const cf = ec.entity.conditionFactory
     const openCases = customers.length
-        ? find("mantle.request.Request")
-              .condition("customerPartyId", "in", customers)
+        ? find("mantle.request.RequestAndParty")
+              .condition("partyId", "in", customers)
+              .condition("roleTypeId", "Customer")
+              .conditionDate("fromDate", "thruDate", now())
               .condition("statusId", "in", openStatuses)
+              .condition(
+                  cf.makeCondition(
+                      [cf.makeCondition("senderVerified", "equals", null), cf.makeCondition("senderVerified", "not-equals", "N")],
+                      "or"
+                  )
+              )
+              .selectField("requestId")
+              .distinct(true)
               .count()
         : 0
     const returns = customers.length

@@ -283,6 +283,10 @@ function billCore(p, organizationPartyId) {
             })
         result = {invoiceId: created.invoiceId, attached: false, invoiceContentId: attach(created.invoiceId, p)}
     }
+    // the importer (or the supplier's user) is one who changed the bill, so does not approve it (SEC-BOS-126)
+    ec.resource.script("component://mr-mantle/service/mantle/account/InvoiceWorkflow.js").execute("recordChange", {
+        invoiceId: result.invoiceId
+    })
     if (operation) lib.complete(operation, I, result.invoiceId, result)
     return result
 }

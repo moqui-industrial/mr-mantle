@@ -11,7 +11,9 @@
 //   ignored or attached to its case only, per route, never a case and never acknowledged. A new message from a customer's
 //   address is a case, timed by its received date (the profile's intake time, the clocks' start: F84); from staff, from a
 //   party that is no customer, or from an unknown address it is held for review (a plain request in the queue, no Customer
-//   party), or ignored when the route's (else the policy's) unknown-sender rule says so. A new case is acknowledged once,
+//   party), or ignored when the route's (else the policy's) unknown-sender rule says so. All of this only for a sender the
+//   trusted mail gateway authenticated, in one plain From mailbox (senderTrust, SEC-BAP-84); other mail is held for review
+//   (or ignored as above). A new case is acknowledged once,
 //   through send#IntakeConfirmation with the route's text block, and the acknowledgement is never a response (P4).
 // - The public form: the queue's intake token is an ExternalAccessCapability on its RequestCategory (the RequestCategory
 //   kind of ExternalAccess.js, scope CaseIntake, no outside party: F61); create#IntakeRequest takes it, with its limits per
@@ -270,21 +272,88 @@ function saveRoute(p) {
 }
 
 // ===== mail =====
-function headerValue(headers, name) {
-    let found = null
+// Every value of a header field in a stored header block, a folded value unfolded.
+function headerValues(headers, name) {
+    const found = []
+    let open = false
     for (const line of String(headers || "").split(/\r?\n/)) {
-        if (found != null) {
-            if (/^[ \t]/.test(line)) {
-                found += " " + line.trim()
-                continue
-            }
-            break
+        if (open && /^[ \t]/.test(line)) {
+            found[found.length - 1] += " " + line.trim()
+            continue
         }
         const colon = line.indexOf(":")
-        if (colon > 0 && line.substring(0, colon).trim().toLowerCase() === name.toLowerCase())
-            found = line.substring(colon + 1).trim()
+        open = colon > 0 && line.substring(0, colon).trim().toLowerCase() === name.toLowerCase()
+        if (open) found.push(line.substring(colon + 1).trim())
     }
     return found
+}
+const headerValue = (headers, name) => headerValues(headers, name)[0] ?? null
+// The store keeps at most 64 KiB of a header block and marks no cut (crates/moqui-mail/src/store.rs HEADERS_MAX), so a
+// block that long may have lost a second From field (as Forum.js storedContext).
+const HEADERS_KEPT = 65536 - 1024
+function headerBytes(headers) {
+    let bytes = 0
+    for (const char of String(headers || ""))
+        bytes += char.codePointAt(0) < 0x80 ? 1 : char.codePointAt(0) < 0x800 ? 2 : char.codePointAt(0) < 0x10000 ? 3 : 4
+    return bytes
+}
+// Whether a message's sender is its From address (SEC-BAP-84), as the forum asks (Forum.js processInbound, SEC-PFS-81):
+// the stored message's fromAddress (the parsed addr-spec), in one plain From mailbox (one From field naming one address,
+// whose display name shows no other address), whose domain the trusted mail gateway authenticated (DMARC, or an aligned
+// DKIM signature, in an Authentication-Results field of smtp-server@authserv-id: ForumCore.js gatewayAuthenticated).
+// Anyone can write a From, so without that the address names no one: the mail joins no case, reopens none, confirms no
+// typed address and makes no case; it is held for review with why. For a mailbox synced from a provider, the provider's
+// authserv-id is the one to name.
+// The authserv-ids a message's account is proved under: a synced mailbox's (its server has a store host) its providers'
+// (mantle@mail-provider-authserv-ids), any other the mail listener's own (ForumCore.js listenerAuthservIds). With none, nothing
+// is trusted, logged once a process as a warning.
+function trustedIdsOf(message) {
+    const core = ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js")
+    const account = message.emailAccountId ? one("moqui.basic.email.EmailAccount", {emailAccountId: message.emailAccountId}) : null
+    const server = account?.emailServerId ? one("moqui.basic.email.EmailServer", {emailServerId: account.emailServerId}) : null
+    const synced = !!String(server?.storeHost || "").trim()
+    const ids = synced ? core.providerAuthservIds() : core.listenerAuthservIds()
+    if (!ids.length) {
+        const warned = ec.cache.getCache("mantle.request.MailTrustWarned")
+        const key = synced ? "synced" : "listener"
+        if (!warned.get(key)) {
+            warned.put(key, "Y")
+            ec.logger.warn(
+                "Service queue mail: no mail gateway is trusted for " +
+                    (synced ? "synced mailboxes (set mantle@mail-provider-authserv-ids)" : "the mail listener (set smtp-server@authserv-id)") +
+                    ", so every message is held for review"
+            )
+        }
+    }
+    return {synced, ids}
+}
+function senderTrust(message) {
+    const core = ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js")
+    const headers = message.headersString
+    const address = String(message.fromAddress || "")
+        .trim()
+        .toLowerCase()
+    const froms = headerValues(headers, "From")
+    const refused = problem => ({authenticated: false, problem})
+    if (!address || !froms.length) return refused("The message has no From field")
+    if (headerBytes(headers) >= HEADERS_KEPT) return refused("The stored header fields were cut short")
+    if (
+        froms.length > 1 ||
+        froms.some(value => core.fieldAddressCount(value) > 1 || core.fieldMailbox(value).address.toLowerCase() !== address)
+    )
+        return refused("The message names more than one From address")
+    if (core.nameShowsOtherAddress(message.fromName, address))
+        return refused("The sender's display name shows another email address")
+    const trusted = trustedIdsOf(message)
+    if (!trusted.ids.length)
+        return refused(
+            trusted.synced
+                ? "No mail provider is trusted for this synced mailbox (mantle@mail-provider-authserv-ids)"
+                : "No mail gateway is trusted (smtp-server@authserv-id)"
+        )
+    if (!core.gatewayAuthenticated(headerValues(headers, "Authentication-Results"), address, trusted.ids))
+        return refused("The mail gateway did not authenticate the sender's address")
+    return {authenticated: true, problem: null}
 }
 const SYSTEM_SENDER = /^(mailer-daemon|postmaster|no[-_.]?reply|do[-_.]?not[-_.]?reply|bounces?)([+@-]|$)/i
 // Why a message is automatic (an autoresponder's, a list's, a bounce), or null for a person's.
@@ -336,7 +405,8 @@ function senderOf(address, organizationPartyId) {
 // thread's first message is on a request (as find#EmailRequest), and the sender is verified for it: an address the
 // referenced message was from or to (To, Cc), the request's customer, reporter or a contact of its customer, or staff of the
 // queue's organization. A Message-ID is no secret (every recipient has it), so a stranger naming one in forged headers
-// joins nothing: the message goes on as a new one of its own sender.
+// joins nothing: the message goes on as a new one of its own sender. Only a request of the queue's organization is joined
+// (its OrgInternal party, or its queue's owner): another organization's case is never one, whoever writes (SEC-BAP-97).
 const addressesOf = (...values) =>
     new Set(
         values
@@ -356,6 +426,13 @@ function senderOnRequest(requestId, referencedIds, message, sender, organization
     if (parties.some(row => ["Customer", "Reporter"].includes(row.roleTypeId) && row.partyId === sender.partyId)) return true
     const customerPartyId = parties.find(row => row.roleTypeId === "Customer")?.partyId
     return !!customerPartyId && cases.customerSidesOf(sender.partyId).includes(customerPartyId)
+}
+const ofOrganization = (requestId, organizationPartyId) => {
+    if (!organizationPartyId) return false
+    if (cases.currentRows(PARTY, {requestId, roleTypeId: "OrgInternal"}).some(row => row.partyId === organizationPartyId))
+        return true
+    const categoryId = one(REQUEST, {requestId})?.requestCategoryId
+    return !!categoryId && one(CATEGORY, {requestCategoryId: categoryId})?.ownerPartyId === organizationPartyId
 }
 function referencedRequest(message, sender, organizationPartyId) {
     const ids = new Set(
@@ -377,9 +454,23 @@ function referencedRequest(message, sender, organizationPartyId) {
     for (const link of find(REQUEST_MAIL).condition("emailMessageId", "in", Array.from(ids)).list())
         byRequest.set(link.requestId, (byRequest.get(link.requestId) || []).concat([link.emailMessageId]))
     for (const [requestId, referencedIds] of byRequest)
-        if (one(REQUEST, {requestId}) && senderOnRequest(requestId, referencedIds, message, sender, organizationPartyId))
+        if (
+            one(REQUEST, {requestId}) &&
+            ofOrganization(requestId, organizationPartyId) &&
+            senderOnRequest(requestId, referencedIds, message, sender, organizationPartyId)
+        )
             return requestId
     return null
+}
+// find#EmailRequest (a rule that names no queue): whether the message may join this request by its references. A support
+// case (CaseProfile) is joined only by a sender verified for it as above, the case's organization's staff among them; any
+// other request by its references alone (SEC-BAP-97).
+function mayJoinByReference(message, requestId, referencedIds) {
+    if (!one(PROFILE, {requestId})) return true
+    const organizationPartyId =
+        cases.currentRows(PARTY, {requestId, roleTypeId: "OrgInternal"}).map(row => row.partyId)[0] || null
+    const sender = senderOf(message.fromAddress, organizationPartyId)
+    return senderOnRequest(requestId, referencedIds, message, sender, organizationPartyId)
 }
 // The case a subject's token names ([Request 123], [Case 123]), only for a sender who is that case's customer, reporter or a
 // contact of its customer, and only a case of the organization: a guessed id authorizes no one.
@@ -420,14 +511,28 @@ function answering(requestId, threadBy, sender, automatic) {
 }
 // What a message to a queue makes, as decided before anything is written (mailIntake applies it; preview#ServiceRoute shows
 // it): join (the request its thread or verified token names), case (a customer's), held (for review) or ignore, with why.
-function resolveMail(message, queue, route) {
+function resolveMail(message, queue, route, trust) {
     const organizationPartyId = queue.organizationPartyId
     const automatic = automaticReason(message)
     const autoPolicy = route?.autoGeneratedEnumId || "SagAttach"
     const sender = senderOf(message.fromAddress, organizationPartyId)
     const decision = {automatic, autoPolicy, sender, organizationPartyId, requestCategoryId: queue.category.requestCategoryId}
+    decision.authenticated = trust.authenticated
     if (automatic && autoPolicy === "SagIgnore")
         return Object.assign(decision, {action: "ignore", reason: "An automatic message, ignored by the route: " + automatic})
+    // SEC-BAP-84: a sender the gateway did not authenticate is no one: no reference, token, reopen or case of theirs
+    if (!trust.authenticated) {
+        if (automatic)
+            return Object.assign(decision, {action: "ignore", reason: trust.problem + ": an automatic message, made nothing"})
+        const policy = route?.unknownSenderEnumId || cases.policyOf(organizationPartyId)?.unknownSenderEnumId || "SusReview"
+        if (sender.kind === "unknown" && policy === "SusIgnore")
+            return Object.assign(decision, {action: "ignore", reason: "An unknown sender, ignored by the policy"})
+        const why = trust.problem + " (From " + text(message.fromAddress) + ")"
+        return Object.assign(decision, {
+            action: "held",
+            reason: (sender.kind === "unknown" ? "An unknown sender: " + why : why) + ": held for review"
+        })
+    }
     const referenced = referencedRequest(message, sender, organizationPartyId)
     if (referenced) return Object.assign(decision, answering(referenced, "reference", sender, automatic))
     const token = tokenCase(message.subject, sender, organizationPartyId)
@@ -538,7 +643,7 @@ function mailIntake(p) {
         )
         return {handled: false}
     }
-    const decision = resolveMail(message, queue, route)
+    const decision = resolveMail(message, queue, route, senderTrust(message))
     const result = {
         handled: true,
         action: decision.action,
@@ -586,7 +691,13 @@ function mailIntake(p) {
                 })
             return Object.assign(result, {requestId: made.requestId, created: true, followUpOf: decision.followUpOf})
         }
-        const sender = decision.sender.partyId ? decision.sender : reviewPerson(message)
+        // a sender the gateway did not authenticate is not the filer (SEC-BAP-84): a customer side's filer would make the
+        // request a case; it is filed by the queue's organization, so a reviewer chooses the customer (CUSTOMER_REQUIRED)
+        const sender = !decision.sender.partyId
+            ? reviewPerson(message)
+            : decision.authenticated
+              ? decision.sender
+              : {partyId: queue.organizationPartyId, contactMechId: decision.sender.contactMechId || null}
         const typeId = route?.requestTypeEnumId || listOf(queue.queue.offeredTypeEnumIds)[0] || "RqtSupport"
         const created = call(R + "create#Request", {
             requestName:
@@ -649,7 +760,9 @@ function previewRoute(p) {
         headersString: text(p.headersString)
     }
     if (!message.fromAddress) denied("SENDER_REQUIRED", "Give the sender's address to test")
-    const decision = resolveMail(message, queue, route)
+    // the sender as the gateway would have authenticated it, unless the test's header fields give a From (senderTrust)
+    const trust = headerValues(message.headersString, "From").length ? senderTrust(message) : {authenticated: true, problem: null}
+    const decision = resolveMail(message, queue, route, trust)
     const sender = decision.sender
     const policy = cases.policyOf(queue.organizationPartyId)
     const joined = decision.requestId ? one(REQUEST, {requestId: decision.requestId}) : null
@@ -998,6 +1111,12 @@ const operations = {saveRoute, previewRoute, mailIntake, createToken, removeToke
     routeText,
     heldRequests,
     automaticReason,
+    // whether a stored message's From is its sender (the trusted gateway authenticated it), for every mail intake
+    // (RequestServices create#WorkItemFromEmail, find#EmailRequest, findOrCreate#EmailSender; SEC-BAP-84)
+    senderTrust: message => runInternal(() => senderTrust(message)),
+    // whether find#EmailRequest may join a message to a request by its references (SEC-BAP-97)
+    mayJoinByReference: (message, requestId, referencedIds) =>
+        runInternal(() => mayJoinByReference(message, requestId, referencedIds)),
     // the text blocks a route may acknowledge with (Customer Service's options name the same)
     serviceGroupOf,
     // each operation checks its own permission and organization, and reads and writes with artifact authorization off

@@ -113,6 +113,11 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="invalidFlag">
                 <return error="true" message="Choose Enabled or Disabled for ${invalidFlag}"/>
             </if>
+            <!-- the write-off tolerance (SEC-BOS-127): an amount of 0 or more, empty for none -->
+            <if condition="preferenceValues.writeOffToleranceAmount === ''"><script>preferenceValues.writeOffToleranceAmount = null</script></if>
+            <if condition="preferenceValues.writeOffToleranceAmount != null &amp;&amp; !(/^\d+(\.\d+)?$/.test(String(preferenceValues.writeOffToleranceAmount).trim()))">
+                <return error="true" message="TOLERANCE_INVALID: The write-off tolerance is an amount, 0 or more"/>
+            </if>
             <!-- an enforced or yearly sequence needs a counter of its own, not built: refused rather than kept and not applied
                 (ACC-UI-035); the prefix applies on the standard sequence (create#Invoice) -->
             <if condition="preferenceValues.invoiceSequenceEnumId &amp;&amp; preferenceValues.invoiceSequenceEnumId != 'InvSqStandard'">

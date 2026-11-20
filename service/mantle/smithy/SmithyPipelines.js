@@ -1023,8 +1023,11 @@ kit => {
         if (allowedRefs && allowedRefs.split(" ").some(ref => /^[*\/]*$/.test(ref.replace(/^refs\/(?:heads\/|tags\/)?/, ""))))
             invalid("allowedRefs must name branches or tags: a pattern of only wildcards takes every one")
         // the deployment fields (DG10): an empty value clears one, a left-out one stays; the token is write-only, and
-        // left out or empty it stays (the engine clears no token: a new one replaces it). Smithy has no approver groups:
-        // an approval is any Maintainer's but the requester's, so approverGroupId is always cleared
+        // left out or empty it stays while the target does. The engine's store#CiEnvironment clears what a change would
+        // hand to a wider audience: the values of the environment's secrets when allowedRefs widens or approvalRequired
+        // goes from Y to N, and the target's token when targetUrl changes without a new one (SEC-GIT-91); it says so as
+        // its cleared, which the save returns for Smithy's notice. Smithy has no approver groups: an approval is any
+        // Maintainer's but the requester's, so approverGroupId is always cleared
         if (given(p.approverGroupId) && p.approverGroupId !== "")
             invalid("approverGroupId: Smithy has no approver groups; a Maintainer other than the requester approves")
         const cleared = value => (value === "" ? null : text(value).trim())
@@ -1061,9 +1064,10 @@ kit => {
             kit.maintainerAudit(p, "storeCiEnvironment", name)
             return out
         }
+        // what the engine cleared (its cleared, a sentence; none when nothing was) goes back with the save
         if (editing) {
-            store()
-            return {environmentId: editing.environmentId}
+            const out = store() || {}
+            return {environmentId: editing.environmentId, cleared: out.cleared || null}
         }
         // the receipt keeps no trace of the token
         return receipt({...p, token: null}, "smithy.storeCiEnvironment", () => ({environmentId: store().environmentId || null}))

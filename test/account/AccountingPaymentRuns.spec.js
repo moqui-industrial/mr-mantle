@@ -205,9 +205,17 @@ feature("a run selects the due approved bills and leaves out a held one with its
     }
 })
 
-feature("the run's creator and a user without run approval cannot approve; another approver can", {
+feature("the run's creator, a user who changed its selection and a user without run approval cannot approve; another approver can", {
     when() {
         const stamp = () => one("mantle.account.payment.PaymentRun", {paymentRunId: runId}).lastUpdatedStamp
+        // SEC-BOS-126: a run approver who leaves a bill out and puts it back changed the selection, so does not approve it
+        login("john.doe")
+        const editor = helper().user(f, "RUNEDIT", ["PAYABLE_EDIT", "PAYABLE_VIEW", "PAYMENT_RUN_APPROVE"])
+        login(editor)
+        const item = rows("mantle.account.payment.PaymentRunItem", {paymentRunId: runId}).find(row => row.selectedIndicator === "Y")
+        for (const selectedIndicator of ["N", "Y"])
+            runs("store#RunItem", {paymentRunId: runId, paymentRunItemSeqId: item.paymentRunItemSeqId, selectedIndicator, excludeComment: "Check"})
+        const changer = refused("approve#Run", {paymentRunId: runId, lastUpdatedStamp: stamp()})
         login(users.ap)
         const notice = runs("request#RunApproval", {paymentRunId: runId})
         const noPermission = refused("approve#Run", {paymentRunId: runId, lastUpdatedStamp: stamp()})
@@ -217,9 +225,10 @@ feature("the run's creator and a user without run approval cannot approve; anoth
         const notApprover = refused("approve#Run", {paymentRunId: runId, lastUpdatedStamp: stamp()})
         login(users.runApprover)
         const approved = runs("approve#Run", {paymentRunId: runId, lastUpdatedStamp: stamp()})
-        return {notice, noPermission, self, notApprover, approved}
+        return {notice, noPermission, self, notApprover, approved, changer}
     },
-    then({notice, noPermission, self, notApprover, approved}) {
+    then({notice, noPermission, self, notApprover, approved, changer}) {
+        changer.includes("SELF_APPROVAL_DENIED")
         notice.notificationMessageId != null
         noPermission.includes("PERMISSION_DENIED")
         self.includes("SELF_APPROVAL_DENIED")
@@ -304,6 +313,31 @@ feature("after approval one supplier's payment fails and the other keeps its pay
         file.fileText.includes(paymentA.paymentId)
         regenerated.fileText == file.fileText
         regenerated.paymentMethodFileId == file.paymentMethodFileId
+    }
+})
+
+feature("the bank file of a run that pays payroll is a reader of payroll's alone (SEC-BOS-93)", {
+    when() {
+        // the mark a pay run's finalization writes on its invoices (PayrollObligations.js), on this run's paid bill for the moment
+        login("john.doe")
+        helper().call("update#mantle.account.invoice.Invoice", {invoiceId: billA, payrollOrigin: "Y"})
+        login(users.treasury)
+        const read = refused("get#RunFile", {paymentRunId: runId})
+        const generated = refused("generate#RunFile", {paymentRunId: runId})
+        const written = refused("write#RunFile", {paymentRunId: runId})
+        login("john.doe")
+        const reader = runs("get#RunFile", {paymentRunId: runId})
+        helper().call("update#mantle.account.invoice.Invoice", {invoiceId: billA, payrollOrigin: "N"})
+        login(users.treasury)
+        const afterwards = runs("get#RunFile", {paymentRunId: runId})
+        return {read, generated, written, reader, afterwards}
+    },
+    then({read, generated, written, reader, afterwards}) {
+        read.includes("PAYROLL_VIEW_REQUIRED")
+        generated.includes("PAYROLL_VIEW_REQUIRED")
+        written.includes("PAYROLL_VIEW_REQUIRED")
+        reader.fileText.length > 0
+        afterwards.fileText == reader.fileText
     }
 })
 

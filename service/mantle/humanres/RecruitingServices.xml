@@ -21,6 +21,15 @@ along with this software (see the LICENSE.md file). If not, see
     and writes with authorization off, and names no application group. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
+    <service verb="check" noun="OpeningRecordVisible" allow-remote="false">
+        <description>Whether the user sees a job opening as a record, its card and panels (the RecordLinkType visibility service,
+            SEC-BOS-87): a recruiting reader (RECRUIT_VIEW) of its organization in People's scope alone.</description>
+        <implements service="mantle.party.CommunicationServices.check#RecordTypeVisible"/>
+        <actions>
+            <set field="recordVisible" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js')
+                    .openingRecordVisible(context).recordVisible"/>
+        </actions>
+    </service>
     <service verb="find" noun="Openings" allow-remote="false">
         <description>A recruiter's openings (PERMISSION_DENIED without PEOPLE_RECRUIT_VIEW) of the employers in scope (one asked for,
             ORGANIZATION_DENIED outside): by state (draft and open unless asked), a title search ignoring case, or one by id; each

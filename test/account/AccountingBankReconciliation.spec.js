@@ -428,6 +428,36 @@ feature("a statement with a difference cannot be finished; at zero difference it
         toDecimal(nextRow.openingBalance).eq(190)
     }
 })
+feature("a payroll-origin receipt is offered for a deposit, and deposited, only by a reader of payroll's (SEC-BOS-93)", {
+    when() {
+        const repaid = receipt("35")
+        // an employee's repayment of an overpayment is marked as payroll's (PayrollOrigin.js)
+        call("update#mantle.account.payment.Payment", {paymentId: repaid, payrollOrigin: "Y"})
+        const offeredIds = () =>
+            Array.from(
+                native("mantle.account.PaymentServices.find#DepositReceipts", {paymentMethodId: f.bankId, pageSize: 100}).receiptRows || []
+            ).map(row => row.paymentId)
+        // a depositor of the organization's receipts who is no reader of payroll's
+        const depositor = settlementFixtures().user(f, "DEPOSITOR", ["PAYMENT_EDIT", "PAYMENT_VIEW"])
+        login(depositor)
+        const treasury = offeredIds()
+        const slip = rejected("mantle.account.PaymentServices.create#DepositSlip", {
+            paymentMethodId: f.bankId,
+            paymentIdList: [repaid],
+            operationKey: "p9-deposit-payroll"
+        })
+        login("john.doe")
+        const reader = offeredIds()
+        call("update#mantle.account.payment.Payment", {paymentId: repaid, payrollOrigin: "N", statusId: "PmntVoid"})
+        return {repaid, treasury, slip, reader}
+    },
+    then({repaid, treasury, slip, reader}) {
+        !treasury.includes(repaid)
+        slip.includes("RECEIPT_INVALID")
+        reader.includes(repaid)
+    }
+})
+
 feature("a deposit's one bank line reconciles its receipts once", {
     when() {
         const a = receipt("40"),
@@ -698,5 +728,64 @@ feature("a payment two lines match is applied to neither, by the rules and by ma
         applied.appliedRows.every(row => !row.fitId.startsWith("TWIN-"))
         lines.every(id => id == null)
         payment(paymentId).reconcileStatusId != "PmtrRec"
+    }
+})
+// SEC-BOS-121: match#PaymentMethodTransUnmatched (Match automatically) holds the candidate rules: a reference match needs the
+// line's amount and a delivered payment, and a ledger entry is the bank owner's and posted; the matching line still reconciles
+feature("Match automatically takes a payment by reference only at its amount and delivered, and only the bank owner's posted entries", {
+    when() {
+        const big = receipt("9871.01", {paymentRefNum: "SEC121-BIG"})
+        const voided = receipt("9871.02", {paymentRefNum: "SEC121-VOID"})
+        call("update#mantle.account.payment.Payment", {paymentId: voided, statusId: "PmntVoid"})
+        bankLine("SEC121-SMALL", "1.00", {refNumber: "SEC121-BIG"})
+        bankLine("SEC121-VOIDED", "9871.02", {refNumber: "SEC121-VOID"})
+        // another organization's posted entry and an unposted one of the owner, on the bank's ledger account
+        const entry = (organizationPartyId, isPosted, amount) => {
+            const acctgTransId = call("create#mantle.ledger.transaction.AcctgTrans", {
+                organizationPartyId,
+                acctgTransTypeEnumId: "AttInternal",
+                transactionDate: f.timestamp,
+                isPosted,
+                amountUomId: "USD"
+            }).acctgTransId
+            call("create#mantle.ledger.transaction.AcctgTransEntry", {
+                acctgTransId,
+                acctgTransEntrySeqId: "01",
+                glAccountId: "111100000",
+                debitCreditFlag: "D",
+                amount,
+                reconcileStatusId: "AterNot"
+            })
+            return acctgTransId
+        }
+        const otherOrgTx = entry(f.customer, "Y", "6543.21")
+        entry(f.org, "N", "6543.22")
+        bankLine("SEC121-OTHERORG", "6543.21", {transType: "PMTT_DEP"})
+        bankLine("SEC121-UNPOSTED", "6543.22", {transType: "PMTT_DEP"})
+        bankLine("SEC121-EXACT", "9871.01", {refNumber: "SEC121-BIG"})
+        native("match#PaymentMethodTransUnmatched", {paymentMethodId: f.bankId, lookBackDays: 10})
+        const of = fitId => {
+            const row = line(f.bankId, fitId)
+            return row.paymentId || row.acctgTransId || null
+        }
+        // a manual reconciliation is held to the same rules: the $1 line to the large receipt, the other organization's entry
+        const manualPayment = rejected("reconcile#PaymentMethodTrans", {paymentMethodId: f.bankId, fitId: "SEC121-SMALL", paymentId: big})
+        const manualEntry = rejected("reconcile#PaymentMethodTrans", {paymentMethodId: f.bankId, fitId: "SEC121-OTHERORG",
+            acctgTransId: otherOrgTx, acctgTransEntrySeqId: "01"})
+        return {
+            manualPayment,
+            manualEntry,
+            small: of("SEC121-SMALL"),
+            voided: of("SEC121-VOIDED"),
+            otherOrg: of("SEC121-OTHERORG"),
+            unposted: of("SEC121-UNPOSTED"),
+            exact: line(f.bankId, "SEC121-EXACT").paymentId,
+            big
+        }
+    },
+    then({manualPayment, manualEntry, small, voided, otherOrg, unposted, exact, big}) {
+        manualPayment.includes("PAYMENT_MISMATCH") && manualEntry.includes("ENTRY_MISMATCH")
+        small == null && voided == null && otherOrg == null && unposted == null
+        exact == big
     }
 })

@@ -104,8 +104,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="qualificationTypeEnumId" type="id"/>
         <field name="title" type="text-medium"><description>Its name, such as the degree or certificate</description></field>
         <field name="issuerName" type="text-medium"/>
-        <field name="referenceNumber" type="text-medium" ai-opt-out="true"><description>The document or certificate number;
-            restricted for an identity document or work permit, and kept from every model tool (PE-21)</description></field>
+        <field name="referenceNumber" type="text-long" ai-opt-out="true" encrypt="true"><description>The document or certificate
+            number; restricted for an identity document or work permit, and kept from every model tool (PE-21); stored encrypted,
+            as PartyIdentification.idValue is (SEC-BOS-116), so nothing finds by it; text-long, as its ciphertext is longer than
+            the number</description></field>
         <field name="fromDate" type="date-time"><description>Issued, or valid from</description></field>
         <field name="thruDate" type="date-time"><description>Expires: required for an identity document or work permit</description></field>
         <field name="verificationStatusId" type="id" enable-audit-log="true"/>
@@ -389,8 +391,8 @@ along with this software (see the LICENSE.md file). If not, see
 
         <field name="taxYtdPriorIncome" type="currency-amount" enable-audit-log="update">
             <description>Added to YTD income for starting year only (for taxes limited by YTD income)</description></field>
-        <field name="taxFederalAllowances" type="number-integer" enable-audit-log="update"/>
-        <field name="taxStateAllowances" type="number-integer" enable-audit-log="update"/>
+        <field name="taxFederalAllowances" type="number-integer" ai-opt-out="true" enable-audit-log="update"/>
+        <field name="taxStateAllowances" type="number-integer" ai-opt-out="true" enable-audit-log="update"/>
 
         <relationship type="one" related="mantle.party.Party"/>
         <relationship type="one" title="PayDistributionGroup" related="moqui.basic.Enumeration" short-alias="distGroup">
@@ -442,8 +444,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="timePeriodTypeId" type="id"><description>Payroll time period</description></field>
 
         <field name="taxWorkContactMechId" type="id"/>
-        <field name="taxFederalAllowances" type="number-integer" enable-audit-log="update"/>
-        <field name="taxStateAllowances" type="number-integer" enable-audit-log="update"/>
+        <field name="taxFederalAllowances" type="number-integer" ai-opt-out="true" enable-audit-log="update"/>
+        <field name="taxStateAllowances" type="number-integer" ai-opt-out="true" enable-audit-log="update"/>
         <!-- don't use these, create PayrollAdjustment records for them for the employee:
         <field name="taxFederalAddtlWithhold" type="currency-amount"/>
         <field name="taxStateAddtlWithhold" type="currency-amount"/>

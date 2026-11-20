@@ -7,9 +7,48 @@
         calendar-email-from the sender of calendar reminders (the work effort owner's organization's when empty),
         content-root the location under which a record's files and text content are written (a task's, an order's, a
         Smithy release's notes and files, and the others), content-large-root the same for binary files. The roots are
-        settings, never a user's preference: a user who could set one would choose where the server writes. -->
+        settings, never a user's preference: a user who could set one would choose where the server writes.
+        mail-provider-authserv-ids the authserv-ids (comma separated) of the mail providers a synced (IMAP or POP) mailbox's
+        mail comes from, whose topmost Authentication-Results field proves its sender's domain for a service queue's mail
+        (mx.google.com for Gmail, for one); mail the listener takes is proved under the listener's own id
+        (smtp-server@authserv-id, else its hostname when it verifies mail itself), never this list (SEC-BAP-84).
+        forum-inbound-accounts the mail accounts (emailAccountId, comma separated) that are the forum's own inbound accounts: a
+        forum route's mail is read only from one of these (hosted or shared, fed by the mail listener), never from a person's
+        or an organization's mailbox that holds the same address (SEC-PFS-85). Empty: the forum reads no route's mail. -->
+    <!-- Mantle's count limits below (shop-*, marketing-* and forum-*, but forum-inbound-accounts and forum-sender-sites)
+        are whole numbers, 0 for no limit, read by service/mantle/other/Limits.js. They are prefixed attributes of this
+        element, not child elements: a component element's unkeyed child is appended by the conf merge, not merged, so a
+        runtime conf could not override it (mr-moqui conf.rs merge_component_elements; conf_env.rs collect_values keeps
+        the first). -->
+    <!-- Shop's payment limits: shop-payment-calls a requester's payment result and payment form calls in ten minutes,
+        shop-payment-forms the hosted payment forms one payment attempt is given in ten minutes; each asks the provider
+        (SEC-PSS-84); a customer's renewal resumptions and card changes count with the payment calls, and
+        shop-renewal-resumes is how many times a day the customer has one renewal charged again (SEC-PSS-86).
+        Marketing's event registrations: marketing-reservations-per-offer how many places an event's offer takes in a day
+        from one requester (a verified signed-in account counted as itself) and for one buyer address,
+        marketing-tickets-per-address how many tickets (one a place) are mailed a day to one attendee address (SEC-PSS-88). -->
+    <!-- allow-test-gateways: true lets the local test payment gateways (PgtTest, which approve without a charge) take payments
+        and be permitted for an organization on a production instance (instance@purpose), as a public demo server's conf does
+        (runtime/conf/MoquiDemoConf.xml); off, they are refused there (account/TestGateways.js, SEC-BOS-129). They always work
+        on a development or test instance. -->
+    <!-- The forum's limits: forum-drafts-per-member how many drafts a member keeps on a site (SEC-PFS-92), forum-draft-days
+        after how many days untouched a draft is removed, forum-report-exports-per-day how many report files
+        a staff member makes on a site a day (SEC-PFS-93), forum-owner-invitations-per-day how many list invitations a
+        site's owners send a day, all lists together (operators are not counted; SEC-PFS-94), forum-archive-reads-per-day how
+        many times a day a site's list archives are read to check a checksum (SEC-PFS-100). forum-sender-sites (no count)
+        names the sites a registered sender (pass@sender-addresses) serves besides those whose host name is its domain,
+        as "address=SITE_A;SITE_B, ..." (SEC-PFS-99). -->
+    <!-- calendar-feed-max-bytes: the largest answer a subscribed calendar feed (fetch#CalendarSubscription) is read from, in
+        bytes, 0 for no limit below the HTTP client's own; a larger feed is not parsed and the subscription records why
+        (SEC-FIL-82). -->
     <mantle smithy-github-api="https://api.github.com" smithy-agreement-max-commits="" calendar-email-from=""
-            content-root="dbresource://mantle/content" content-large-root="dbresource://mantle/content"/>
+            content-root="dbresource://mantle/content" content-large-root="dbresource://mantle/content"
+            shop-payment-calls="120" shop-payment-forms="10" shop-renewal-resumes="2"
+            marketing-reservations-per-offer="20" marketing-tickets-per-address="10"
+            mail-provider-authserv-ids="" forum-inbound-accounts=""
+            forum-drafts-per-member="50" forum-draft-days="90" forum-report-exports-per-day="20"
+            forum-owner-invitations-per-day="2000" forum-archive-reads-per-day="20" forum-sender-sites="" allow-test-gateways="false"
+            calendar-feed-max-bytes="2097152"/>
     <!-- the framework's CalDAV and CardDAV servers serve Mantle's calendars, tasks and contact books (mr-moqui docs/interfaces/Sync.md) -->
     <dav-server calendar-services="mantle.work.CalendarDavServices" contact-services="mantle.party.ContactDavServices"/>
     <!-- an internal organization's own Constitution for agent runs and readers (service/mantle/party/ConstitutionServices.xml) -->

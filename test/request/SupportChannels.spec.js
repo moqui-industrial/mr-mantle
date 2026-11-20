@@ -104,9 +104,19 @@ function party(partyId, name, roleTypeId, ownerPartyId, typeId = "PtyOrganizatio
 // a received message in the spec's account, its received date two hours ago unless given
 let messageCount = 0
 const receivedAt = Math.floor((Date.now() - 2 * 3600000) / 1000) * 1000
+// with the From field the store keeps and the trusted gateway's DMARC pass for its domain (Channels.js senderTrust, SEC-BAP-84),
+// unless fields.headersString is given whole (fields.headers adds fields to the default ones)
+const GATEWAY = "gw.sch.test"
 function receive(fields) {
     messageCount++
     const id = prefix + "MSG" + messageCount
+    const from = String(fields.fromAddress || "")
+    const {headers, ...given} = fields
+    const headersString =
+        given.headersString ??
+        ["From: " + from, "Authentication-Results: " + GATEWAY + "; dmarc=pass header.from=" + from.split("@").pop()]
+            .concat(headers ? [headers] : [])
+            .join("\r\n")
     call(
         "store#moqui.basic.email.EmailMessage",
         Object.assign(
@@ -121,9 +131,10 @@ function receive(fields) {
                 hasAttachment: "N",
                 toAddresses: "help@sch.example",
                 messageId: "<sch-" + messageCount + "-" + receivedAt + "@example.com>",
-                rootEmailMessageId: id
+                rootEmailMessageId: id,
+                headersString
             },
-            fields
+            given
         )
     )
     return id
@@ -141,6 +152,7 @@ spec({
     setupSpec() {
         login("john.doe")
         ec.artifactExecution.disableAuthz()
+        setConf("smtp-server@authserv-id", GATEWAY)
         party(org, "Channel Spec Org", "OrgInternal")
         party(otherOrg, "Channel Spec Other Org", "OrgInternal")
         party(customer, "Channel Spec Customer", "Customer", org)
@@ -320,6 +332,21 @@ feature("a queue's routes: mail with an acknowledgement, a replacement ending th
     }
 })
 
+feature("FACILITY_ALL_ORGANIZATIONS widens no Customer Service reach: another organization's queue is refused (SEC-BAP-99)", {
+    when() {
+        const wide = user("FACILITY_WIDE", ["SUPPORT_POLICY_EDIT", "FACILITY_ALL_ORGANIZATIONS"])
+        return {
+            other: run(wide, S + "save#ServiceQueue", {organizationPartyId: otherOrg, description: "Not theirs"}),
+            own: run(wide, S + "save#ServiceQueue", {organizationPartyId: org, description: "Theirs"})
+        }
+    },
+    then({other, own}) {
+        code(other) == "RECORD_UNAVAILABLE"
+        own.error == ""
+        !!own.requestCategoryId
+    }
+})
+
 feature("a route names a team's text block only where the editor is in the team's group of the organization; it keeps its own (SEC-BAP-81)", {
     when() {
         const form = {requestCategoryId: state.queue, channelEnumId: "SrcWebForm", acknowledge: "N"}
@@ -485,6 +512,143 @@ feature("a reply joins its case by its references; the case's token joins for it
     }
 })
 
+feature("a reference joins only a case of the queue's organization, and a rule with no queue joins a case only for a sender verified for it (SEC-BAP-97)", {
+    when() {
+        const first = one("moqui.basic.email.EmailMessage", {emailMessageId: state.firstMessage})
+        // staff of the other organization, mailing its own queue with the references of this organization's case
+        party(prefix + "_OTHER_STAFF", "Olga", null, otherOrg, "PtyPerson", "olga.sch@example.com")
+        call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtEmployee",
+            fromPartyId: prefix + "_OTHER_STAFF",
+            toPartyId: otherOrg,
+            toRoleTypeId: "OrgInternal",
+            fromDate: since
+        })
+        const references = {subject: "Re: SCH Thermostat is dark", inReplyTo: first.messageId, referencesHeader: first.messageId}
+        const staff = receive(Object.assign({fromAddress: "olga.sch@example.com", bodyText: "Ours now."}, references))
+        const staffOut = run("john.doe", R + "create#RequestFromEmail", {
+            emailMessageId: staff,
+            emailAccountId: account,
+            ruleOwnerUserId: state.otherAdmin,
+            value: state.otherQueue
+        })
+        // an authenticated stranger through a rule that names no queue: the case's references join nothing
+        const stranger = receive(Object.assign({fromAddress: "sam.sch@example.com", bodyText: "Me too."}, references))
+        const strangerOut = mail(stranger, null)
+        // the case's contact through the same rule joins it
+        const own = receive(Object.assign({fromAddress: "dana.sch@example.com", bodyText: "Still dark."}, references))
+        const ownOut = mail(own, null)
+        return {staffOut, staffRequest: requestOf(staff), strangerOut, strangerRequest: requestOf(stranger), ownOut}
+    },
+    then({staffOut, staffRequest, strangerOut, strangerRequest, ownOut}) {
+        staffOut.error == ""
+        staffOut.joined == false
+        staffRequest != state.mailCase
+        strangerOut.joined == false
+        strangerRequest != state.mailCase
+        ownOut.joined == true
+        ownOut.requestId == state.mailCase
+    }
+})
+
+feature("mail the gateway did not authenticate, or whose From is not one plain mailbox, joins no case and is held for review (SEC-BAP-84)", {
+    when() {
+        const first = one("moqui.basic.email.EmailMessage", {emailMessageId: state.firstMessage})
+        const token = "More [Request " + state.mailCase + "]"
+        const outOf = fields => {
+            const id = receive(Object.assign({bodyText: "Change my address."}, fields))
+            const out = mail(id)
+            const note = rows("mantle.request.RequestNote", {requestId: out.requestId})[0]?.noteText || ""
+            const customer = rows("mantle.request.RequestParty", {requestId: out.requestId, roleTypeId: "Customer"}).length
+            return {request: out.requestId, joined: out.joined, held: note.startsWith("Held for review") && !customer, note}
+        }
+        const gateway = domain => "\r\nAuthentication-Results: " + GATEWAY + "; dmarc=pass header.from=" + domain
+        return {
+            // a forged From of the case's contact, with no trusted result: by the token, by the references, as a new case
+            tokened: outOf({fromAddress: "dana.sch@example.com", subject: token, headersString: "From: dana.sch@example.com"}),
+            referenced: outOf({
+                fromAddress: "dana.sch@example.com",
+                subject: "Re: SCH Thermostat is dark",
+                inReplyTo: first.messageId,
+                referencesHeader: first.messageId,
+                headersString: "From: dana.sch@example.com"
+            }),
+            fresh: outOf({fromAddress: "dana.sch@example.com", subject: "SCH forged case", headersString: "From: dana.sch@example.com"}),
+            // another gateway's pass is no pass
+            otherGateway: outOf({
+                fromAddress: "dana.sch@example.com",
+                subject: token,
+                headersString: "From: dana.sch@example.com\r\nAuthentication-Results: gw.elsewhere.test; dmarc=pass header.from=example.com"
+            }),
+            // two From addresses, and a display name that shows the contact's address, each with the gateway's pass
+            twoFrom: outOf({
+                fromAddress: "dana.sch@example.com",
+                subject: token,
+                headersString: "From: dana.sch@example.com, sam.sch@example.com" + gateway("example.com")
+            }),
+            shownName: outOf({
+                fromAddress: "sam.sch@example.com",
+                fromName: "dana.sch@example.com",
+                subject: token,
+                headersString: 'From: "dana.sch@example.com" <sam.sch@example.com>' + gateway("example.com")
+            })
+        }
+    },
+    then({tokened, referenced, fresh, otherGateway, twoFrom, shownName}) {
+        tokened.joined == false && tokened.held == true && tokened.request != state.mailCase
+        tokened.note.includes("did not authenticate")
+        referenced.joined == false && referenced.held == true && referenced.request != state.mailCase
+        fresh.held == true
+        otherGateway.joined == false && otherGateway.held == true
+        twoFrom.joined == false && twoFrom.held == true && twoFrom.note.includes("more than one From")
+        shownName.joined == false && shownName.held == true && shownName.note.includes("display name")
+    }
+})
+
+feature("the listener's own authserv-id is trusted when the conf names none; only the topmost field counts; a synced mailbox's by its provider's id (SEC-BAP-84)", {
+    when() {
+        const token = "More [Request " + state.mailCase + "]"
+        const joinedBy = (headersString, extra = {}) => {
+            const id = receive(Object.assign({fromAddress: "dana.sch@example.com", subject: token, bodyText: "Again.", headersString}, extra))
+            return mail(id).joined
+        }
+        const from = "From: dana.sch@example.com\r\n"
+        const pass = id => "Authentication-Results: " + id + "; dmarc=pass header.from=example.com"
+        call("store#moqui.basic.email.EmailServer", {emailServerId: prefix + "_IMAP", storeHost: "imap.provider.test"})
+        call("store#moqui.basic.email.EmailAccount", {
+            emailAccountId: prefix + "_SYNCED",
+            ownerUserId: state.admin,
+            accountKindEnumId: "EakExternal",
+            emailServerId: prefix + "_IMAP",
+            emailAddress: "help@sch.example",
+            statusId: "EasActive"
+        })
+        const synced = {emailAccountId: prefix + "_SYNCED"}
+        return {
+            // the conf names no id; a listener that verifies mail writes under its hostname
+            ownHost: withConf("smtp-server@authserv-id", "", () =>
+                withConf("smtp-server@internet", "true", () =>
+                    withConf("smtp-server@hostname", "mx.sch.test", () => joinedBy(from + pass("mx.sch.test")))
+                )
+            ),
+            // behind a gateway with no id, nothing is trusted
+            noneTrusted: withConf("smtp-server@authserv-id", "", () => joinedBy(from + pass(GATEWAY))),
+            // a trusted id lower than the topmost field is a sender's own
+            lower: joinedBy(from + "Authentication-Results: other.test; dmarc=none\r\n" + pass(GATEWAY)),
+            // a synced mailbox: its provider's id, never the listener's
+            provider: withConf("mantle@mail-provider-authserv-ids", "mx.provider.test", () => joinedBy(from + pass("mx.provider.test"), synced)),
+            listenerOnSynced: withConf("mantle@mail-provider-authserv-ids", "mx.provider.test", () => joinedBy(from + pass(GATEWAY), synced))
+        }
+    },
+    then({ownHost, noneTrusted, lower, provider, listenerOnSynced}) {
+        ownHost == true
+        noneTrusted == false
+        lower == false
+        provider == true
+        listenerOnSynced == false
+    }
+})
+
 feature("an automatic reply attaches to its case as no reply, sends nothing and makes no case; one on no case makes nothing", {
     when() {
         const first = one("moqui.basic.email.EmailMessage", {emailMessageId: state.firstMessage})
@@ -494,7 +658,7 @@ feature("an automatic reply attaches to its case as no reply, sends nothing and 
             subject: "Out of office",
             bodyText: "Away until Monday.",
             inReplyTo: first.messageId,
-            headersString: "Auto-Submitted: auto-replied"
+            headers: "Auto-Submitted: auto-replied"
         })
         const attached = mail(auto)
         const event = one("mantle.party.communication.CommunicationEvent", {emailMessageId: auto})
@@ -502,7 +666,7 @@ feature("an automatic reply attaches to its case as no reply, sends nothing and 
             fromAddress: "dana.sch@example.com",
             subject: "Newsletter",
             bodyText: "News.",
-            headersString: "Precedence: bulk"
+            headers: "Precedence: bulk"
         })
         const ignored = mail(loose)
         return {
@@ -768,6 +932,16 @@ feature("a case a queue's form filed is marked sender not verified until a reply
         run(state.admin, R + "remove#IntakeToken", {requestCategoryId: state.queue})
         const profile = profileOf(filed.requestId)
         const marked = one(REQUEST, {requestId: filed.requestId})?.senderVerified
+        // a forged reply from the typed address, which the gateway did not authenticate, confirms nothing (SEC-BAP-84)
+        mail(
+            receive({
+                fromAddress: "dana.sch@example.com",
+                subject: "Re: [Request " + filed.requestId + "]",
+                bodyText: "It was me.",
+                headersString: "From: dana.sch@example.com"
+            })
+        )
+        const forged = one(REQUEST, {requestId: filed.requestId})?.senderVerified
         // a reply from the typed address on the case's token
         const reply = mail(
             receive({fromAddress: "dana.sch@example.com", subject: "Re: [Request " + filed.requestId + "]", bodyText: "It was me."})
@@ -780,10 +954,12 @@ feature("a case a queue's form filed is marked sender not verified until a reply
             marked,
             mailed: one(REQUEST, {requestId: state.mailCase})?.senderVerified ?? null,
             reply,
+            forged,
             after: one(REQUEST, {requestId: filed.requestId})?.senderVerified
         }
     },
-    then({filed, otherSite, ownSite, profile, marked, mailed, reply, after}) {
+    then({filed, otherSite, ownSite, profile, marked, mailed, reply, forged, after}) {
+        forged == "N"
         filed.requestId != null && profile != null
         otherSite.error.includes("not available") && otherSite.requestId == null
         ownSite.error == "" && ownSite.requestId != null

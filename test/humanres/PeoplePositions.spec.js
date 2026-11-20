@@ -648,3 +648,54 @@ feature(
         }
     }
 )
+
+// SEC-BOS-120: a job class another employer's current position holds is changed, ended or re-required only by an HR editor of
+// every organization; the same rename by A's HR is answered for a class only A's positions hold
+feature("a job class another employer's position holds is changed only by an HR editor of every organization", {
+    when() {
+        const hrAll = user("HRALL", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_ALL_ORGANIZATIONS"], [orgA])
+        const store = (username, parameters) => run(username, S + "store#JobClass", parameters)
+        const revision = classId => run(state.hr, S + "get#JobClass", {emplPositionClassId: classId}).jobClass.revision
+        const shared = store(state.hr, {title: "Pos spec shared class"}).emplPositionClassId
+        const own = store(state.hr, {title: "Pos spec own class"}).emplPositionClassId
+        const seatB = run(state.hrB, S + "store#Position", {
+            organizationPartyId: orgB,
+            departmentPartyId: state.depB,
+            emplPositionClassId: shared,
+            description: "B's seat",
+            fromDate: since
+        })
+        const rename = (username, classId, title) =>
+            code(store(username, {emplPositionClassId: classId, title, expectedRevision: revision(classId)}))
+        return {
+            seatB: seatB.error,
+            sharedRename: rename(state.hr, shared, "Renamed by A"),
+            sharedEnd: code(store(state.hr, {emplPositionClassId: shared, thruDate: state.now, expectedRevision: revision(shared)})),
+            sharedSkill: code(
+                run(state.hr, S + "store#JobRequirement", {emplPositionClassId: shared, skillTypeEnumId: prefix + "_SK_POS"})
+            ),
+            ownRename: rename(state.hr, own, "Pos spec own class renamed"),
+            // a class only B's costing rate names is B's too (round 2)
+            rateRename: (() => {
+                const rated = store(state.hr, {title: "Pos spec rated class"}).emplPositionClassId
+                call("create#mantle.humanres.rate.RateAmount", {rateTypeEnumId: "RatpStandard", ratePurposeEnumId: "RaprCost",
+                    rateAmount: "30", rateCurrencyUomId: "USD", timePeriodUomId: "TF_hr", emplPositionClassId: rated,
+                    organizationPartyId: orgB, fromDate: since})
+                return rename(state.hr, rated, "Renamed by A")
+            })(),
+            allRename: rename(hrAll, shared, "Pos spec shared class renamed")
+        }
+    },
+    then(out) {
+        out ==
+            {
+                seatB: "",
+                sharedRename: "CLASS_SHARED",
+                sharedEnd: "CLASS_SHARED",
+                sharedSkill: "CLASS_SHARED",
+                ownRename: "",
+                rateRename: "CLASS_SHARED",
+                allRename: ""
+            }
+    }
+})

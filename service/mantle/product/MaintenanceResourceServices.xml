@@ -119,7 +119,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="assetId"/>
             <parameter name="assetName"/>
-            <parameter name="comments" allow-html="safe"/>
+            <parameter name="comments" allow-html="app"/>
             <parameter name="serialNumber"/>
             <parameter name="softIdentifier"/>
             <parameter name="classEnumId"/>

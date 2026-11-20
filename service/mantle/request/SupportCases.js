@@ -10,7 +10,7 @@
 // party and the queue move; the rules of entity/Request.eecas.xml run it after the commit on a request made, on a type,
 // category or status change and on a Customer party added, so every entry point (Comms, Chat, Commons, Projects, email,
 // the public form, the forum) gets its case without calling anything new. The case services check SUPPORT_CASE_EDIT,
-// SUPPORT_CASE_MANAGE or SUPPORT_POLICY_EDIT and the case's organization (FacilityScope, get#PartyOrganizationInfo); they
+// SUPPORT_CASE_MANAGE or SUPPORT_POLICY_EDIT and the case's organization (FacilityScope requestScope, get#PartyOrganizationInfo); they
 // write the Request through its entity so Mantle's update#Request guard, which refuses a case's due date, resolution or close
 // from any other path, does not stop them. Refusals carry reason codes (EntityLib.denied).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -342,7 +342,7 @@ function requireOrganization(organizationPartyId) {
     if (
         !organizationPartyId ||
         !isInternal(organizationPartyId) ||
-        !facilityScope.owns(facilityScope.scope(), organizationPartyId)
+        !facilityScope.owns(facilityScope.requestScope(), organizationPartyId)
     )
         denied("RECORD_UNAVAILABLE", "Organization " + (organizationPartyId || "") + " is not available")
     return String(organizationPartyId)
@@ -355,8 +355,10 @@ function revisionOf(requestId, request = one(REQUEST, {requestId})) {
     return revision
 }
 // SEC-PSS-28: a request a public form filed with a typed address (senderVerified N) has its sender confirmed by a reply
-// from that address (by.address, the request's emailContactMechId) or by its filer signed in (by.partyId, filedByPartyId):
-// senderVerified Y. Anything else leaves the mark. In the caller's transaction, or its own (newTransaction, for a read);
+// from that address (by.address, the request's emailContactMechId), or as it is filed by a signed-in account that verified
+// the typed address and is the case's filer (by.partyId, filedByPartyId; SupportPortal.js intakeCase): senderVerified Y.
+// Opening a case signed in after the filing never confirms it: the filer of a form's case is the owner of the typed address,
+// not who typed it (SEC-PSS-87). Anything else leaves the mark. In the caller's transaction, or its own (newTransaction, for a read);
 // a failure is logged and never fails the caller. Whether it confirmed.
 function confirmSender(requestId, by, newTransaction = false) {
     try {
@@ -399,7 +401,7 @@ function caseOf(requestId, lock = false) {
     if (!profile) unavailable()
     const parties = partiesOf(requestId)
     const organizationPartyId = roleParty(parties, "OrgInternal")
-    if (!organizationPartyId || !facilityScope.owns(facilityScope.scope(), organizationPartyId)) unavailable()
+    if (!organizationPartyId || !facilityScope.owns(facilityScope.requestScope(), organizationPartyId)) unavailable()
     return {
         request,
         profile,

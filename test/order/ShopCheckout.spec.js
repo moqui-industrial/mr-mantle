@@ -19,6 +19,7 @@ const ids = {
     host: "checkout.shco.example.test",
     hosted: prefix + "_HOSTED",
     unknown: prefix + "_UNKNOWN",
+    form: prefix + "_FORM",
     book: prefix + "_BOOK",
     mug: prefix + "_MUG",
     free: prefix + "_FREE",
@@ -59,12 +60,12 @@ function op(service, input) {
 }
 const checkout = (name, input) => op(CHECKOUT + name, input)
 // a guest's cart with a product and its checkout up to a ready payment: {token, view}
-function readyCart(productId, quantity, {physical = false, code = null} = {}) {
+function readyCart(productId, quantity, {physical = false, code = null, email = "guest@shco.example.test"} = {}) {
     const added = op(CART + "add#CartItem", {productId, quantity: String(quantity || 1)})
     const token = added.result.token
     if (code) op(CART + "apply#PromoCode", {token, promoCode: code, expectedRevision: added.result.cart.revision})
     checkout("begin#Checkout", {token})
-    checkout("set#CheckoutContact", {token, emailAddress: "guest@shco.example.test", name: "Gail Guest"})
+    checkout("set#CheckoutContact", {token, emailAddress: email, name: "Gail Guest"})
     if (physical) {
         const begun = checkout("get#Checkout", {token}).result
         checkout("set#CheckoutAddresses", {
@@ -106,8 +107,25 @@ const checkoutRow = token => {
     return access ? list("mantle.order.StoreCheckout", {cartAccessId: access.cartAccessId})[0] : null
 }
 
+// The cart-making specs of one run share the requester's cart-creation throttle (30 in ten minutes, Shop P4): this window's
+// bucket goes before this spec's carts, as ShopOperations and mr-pass ShopCheckout do; the throttle is unchanged.
+function resetCartCreations() {
+    const requester = ec.resource.script("component://framework/service/org/moqui/public/Account.js").requesterKey()
+    const window = Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 600000)
+    const wasDisabled = ec.artifactExecution.disableAuthz()
+    try {
+        ec.entity
+            .find("moqui.security.public.AccountAttempt")
+            .condition({bucketId: ec.user.singleUseCodeHash("cart-create:" + requester + ":" + window)})
+            .deleteAll()
+    } finally {
+        if (!wasDisabled) ec.artifactExecution.enableAuthz()
+    }
+}
+
 spec({
     setupSpec() {
+        resetCartCreations()
         system(() => {
             make("mantle.party.Party", {partyId: ids.org, partyTypeEnumId: "PtyOrganization"})
             make("mantle.party.Organization", {partyId: ids.org, organizationName: "Checkout organization"})
@@ -189,7 +207,16 @@ spec({
                 authorizeServiceName: T + "alwaysUnknown#PaymentAuthorization",
                 detailsServiceName: T + "alwaysPending#PaymentDetails"
             })
-            for (const paymentGatewayConfigId of [ids.hosted, ids.unknown])
+            // a hosted page that takes a posted form token, as Authorize.Net Accept Hosted (the relay's form)
+            make("mantle.account.method.PaymentGatewayConfig", {
+                paymentGatewayConfigId: ids.form,
+                paymentGatewayTypeEnumId: "PgtTest",
+                description: "Checkout form-token test gateway",
+                authorizeServiceName: T + "hostedForm#PaymentAuthorization",
+                captureServiceName: T + "alwaysApprove#PaymentCapture",
+                detailsServiceName: T + "alwaysApprove#PaymentDetails"
+            })
+            for (const paymentGatewayConfigId of [ids.hosted, ids.unknown, ids.form])
                 make("mantle.account.method.PaymentGatewayOrganization", {
                     organizationPartyId: ids.org,
                     paymentGatewayConfigId,
@@ -782,5 +809,133 @@ feature("a checkout's visitor key: its digest kept at the freeze, not the submit
         r.placed.marketingVisitorKeyHash == null
         r.malformed.result.checkout.state == "completed"
         r.freeOrder.marketingVisitorKeyHash == null
+    }
+})
+feature("only the cart's holder is given the payment form; the reference and key read the state, and forms are bounded", {
+    when() {
+        const {token, view} = readyCart(ids.book, 1)
+        // SEC-PSS-84, SEC-PSF-82: the store's page takes a posted form token for this checkout
+        system(() =>
+            call("update#mantle.order.StoreCheckout", {checkoutId: checkoutRow(token).checkoutId, paymentGatewayConfigId: ids.form})
+        )
+        const submitted = submit(token, view.checkout.revision)
+        const reference = submitted.result.checkout.reference
+        const key = submitted.result.returnKey
+        // a visitor with another shopper's reference and key (a link): the state, never the payment page
+        const byReference = checkout("get#CheckoutPaymentResult", {reference, key})
+        const formByReference = checkout("get#CheckoutPaymentForm", {reference, key})
+        const byCart = checkout("get#CheckoutPaymentResult", {reference, key, token})
+        const formByCart = checkout("get#CheckoutPaymentForm", {reference, key, token})
+        // a bounded number of forms for one attempt (the conf's limit, two here, the call above the first)
+        const bounded = withConf("mantle@shop-payment-forms", "2", () => [
+            checkout("get#CheckoutPaymentForm", {reference, key, token}),
+            checkout("get#CheckoutPaymentForm", {reference, key, token})
+        ])
+        return {submitted, byReference, formByReference, byCart, formByCart, bounded}
+    },
+    then({submitted, byReference, formByReference, byCart, formByCart, bounded}) {
+        submitted.result.checkout.state == "paymentPending"
+        byReference.result.checkout.minimal == true
+        byReference.result.checkout.attempt.state == "pending"
+        byReference.result.checkout.attempt.providerForm == false
+        byReference.result.checkout.attempt.providerUrl == null
+        formByReference.error.includes("NOT_AVAILABLE")
+        byCart.result.checkout.attempt.providerForm == true
+        formByCart.result.formUrl == "https://test.authorize.net/payment/payment"
+        !!formByCart.result.fields.token == true
+        !!bounded[0].result?.formUrl == true
+        bounded[1].error.includes("RATE_LIMITED")
+    }
+})
+// SEC-PSS-84: a signed-in buyer's own account checkout, named by its reference and key, is the account's: its form is given;
+// and a resume by the reference and key, which may ask the provider, counts with the payment calls
+feature("a signed-in buyer's own checkout gets its payment form by reference and key; a resume counts with the payment calls", {
+    when() {
+        const asBuyer = (name, input) => {
+            login("john.doe")
+            ec.message.pushErrors()
+            try {
+                return {
+                    result: ec.service
+                        .sync()
+                        .name(name)
+                        .parameters({input: Object.assign({siteId: ids.site}, input)})
+                        .call().result
+                }
+            } catch (error) {
+                return {error: String(error.message)}
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        }
+        const own = asBuyer(CART + "add#CartItem", {productId: ids.book, quantity: "1"}).result.token
+        asBuyer(CHECKOUT + "begin#Checkout", {token: own})
+        asBuyer(CHECKOUT + "set#CheckoutContact", {token: own, name: "John Doe"})
+        asBuyer(CHECKOUT + "select#Payment", {token: own, paymentOptionId: "PiCreditCard"})
+        system(() =>
+            call("update#mantle.order.StoreCheckout", {checkoutId: checkoutRow(own).checkoutId, paymentGatewayConfigId: ids.form})
+        )
+        const ready = asBuyer(CHECKOUT + "get#Checkout", {token: own}).result
+        const submitted = asBuyer(CHECKOUT + "submit#Checkout", {token: own, expectedRevision: ready.checkout.revision})
+        const reference = submitted.result?.checkout.reference
+        const key = submitted.result?.returnKey
+        const account = asBuyer(CHECKOUT + "get#CheckoutPaymentForm", {reference, key})
+        const visitor = checkout("get#CheckoutPaymentForm", {reference, key})
+        // with this requester's payment calls used up, a resume asks the provider no more
+        const resumed = withConf("mantle@shop-payment-calls", "1", () => checkout("resume#Checkout", {reference, key}))
+        login("john.doe")
+        return {submitted, account, visitor, resumed}
+    },
+    then({submitted, account, visitor, resumed}) {
+        submitted.result.checkout.state == "paymentPending"
+        account.result.formUrl == "https://test.authorize.net/payment/payment"
+        visitor.error.includes("NOT_AVAILABLE")
+        resumed.error.includes("RATE_LIMITED")
+    }
+})
+feature("a guest's once-per-customer code is counted by the checkout's email: used again with that email it is refused", {
+    when() {
+        // SEC-PSS-85: a code each customer may use once, 1.00 off a book; a guest's checkout makes a new guest party each
+        // time, so the guest's uses are counted by the checkout's contact email (lower case, trimmed)
+        system(() => {
+            make(S + "ProductStorePromotion", {
+                storePromotionId: prefix + "_PERCODE",
+                productStoreId: ids.store,
+                itemDescription: "Once a customer",
+                serviceRegisterId: "FlatDiscount",
+                requireCode: "Y",
+                fromDate: new Date(Date.now() - 60000)
+            })
+            make(S + "ProductStorePromoParameter", {storePromotionId: prefix + "_PERCODE", parameterName: "discountAmount", parameterValue: "1"})
+            make(S + "ProductStorePromoProduct", {storePromotionId: prefix + "_PERCODE", productId: ids.book, excludeProduct: "N"})
+            make(S + "ProductStorePromoCode", {
+                promoCodeId: prefix + "_FIRST",
+                storePromotionId: prefix + "_PERCODE",
+                promoCode: prefix + "_FIRST",
+                userEntered: "Y",
+                requireParty: "N",
+                useLimitPerCustomer: 1
+            })
+        })
+        const code = prefix + "_FIRST"
+        const first = readyCart(ids.book, 1, {code, email: "once@shco.example.test"})
+        const placed = submit(first.token, first.view.checkout.revision)
+        returned(placed.result.checkout.reference, placed.result.returnKey)
+        // the same address again, written otherwise
+        const second = readyCart(ids.book, 1, {code, email: " Once@SHCO.example.test "})
+        const refused = submit(second.token, second.view.checkout.revision)
+        const reviewed = checkout("get#Checkout", {token: second.token})
+        // another address takes the code
+        const other = readyCart(ids.book, 1, {code, email: "other@shco.example.test"})
+        return {first: first.view, refused, reviewed: reviewed.result, other: other.view}
+    },
+    then({first, refused, reviewed, other}) {
+        first.checkout.totals.total.amount == "11.00"
+        refused.error.includes("REVIEW_REQUIRED")
+        reviewed.checkout.state == "reviewRequired"
+        reviewed.checkout.review.some(change => change.kind == "promotionEmail" && change.text.includes("already used with this email address"))
+        other.checkout.state == "ready"
+        other.checkout.totals.total.amount == "11.00"
     }
 })

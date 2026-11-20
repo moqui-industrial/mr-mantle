@@ -312,9 +312,35 @@ feature(
             out.found = [!!match, match?.relationshipText || "", match?.matchedBy, Object.keys(match || {}).includes("workEmail")]
             // a new person by the same names and email is refused unless confirmed
             out.duplicate = code(hire({firstName: "Priya", lastName: "DUAL", workEmail: dualEmail}))
-            // chosen by id alone they are not available (an id names no one); with the email they were found by, hired
+            // chosen by id alone they are not available (an id names no one); with the email they were found by, still not, as
+            // B employs them (SEC-BOS-118), nor a person with a user account; an HR editor of both employers hires them, and A's
+            // HR one held by no one else by the email
             out.byId = code(previewHire({partyId: dual}))
-            const hired = hire({partyId: dual, managerPartyId: state.MGR})
+            out.byEmailElsewhere = code(hire({partyId: dual, managerPartyId: state.MGR}))
+            const account = person("ACCOUNT")
+            call("create#moqui.security.UserAccount", {userId: prefix + "_ACCOUNT", username: prefix + "_ACCOUNT", partyId: account})
+            out.byEmailAccount = code(previewHire({partyId: account, workEmail: emailOf(account)}))
+            const loose = person("LOOSE")
+            out.byEmailFree = code(previewHire({partyId: loose, workEmail: emailOf(loose)}))
+            // round 2: a contact of A whom B employs is no employee or agent of A; B's employee who applied to A is admitted
+            // only by their own application; a personal contact is reached by no address
+            const contactB = person("CONTACTB")
+            employ(contactB, orgB)
+            call("create#mantle.party.PartyRelationship", {relationshipTypeEnumId: "PrtContact", fromPartyId: contactB, toPartyId: orgA, fromDate: since})
+            out.contactElsewhere = code(previewHire({partyId: contactB, workEmail: emailOf(contactB)}))
+            const applicant = person("APPLICANT")
+            employ(applicant, orgB)
+            const application = {applyingPartyId: applicant, organizationPartyId: orgA, statusId: "EaReceived", applicationDate: since}
+            const filed = call("create#mantle.humanres.employment.EmploymentApplication",
+                Object.assign({createdByUserId: prefix + "_U_HR"}, application)).employmentApplicationId
+            out.applicantFiledByHr = code(previewHire({partyId: applicant}))
+            call("create#moqui.security.UserAccount", {userId: prefix + "_APPLICANT", username: prefix + "_APPLICANT", partyId: applicant})
+            call("update#mantle.humanres.employment.EmploymentApplication", {employmentApplicationId: filed, createdByUserId: prefix + "_APPLICANT"})
+            out.applicantOwn = code(previewHire({partyId: applicant}))
+            const privateContact = person("PRIVATE")
+            call("update#mantle.party.Party", {partyId: privateContact, privateOwnerUserId: prefix + "_U_HR"})
+            out.privateByEmail = code(previewHire({partyId: privateContact, workEmail: emailOf(privateContact)}))
+            const hired = hire({partyId: dual, managerPartyId: state.MGR}, state.hrBoth)
             out.hired = [hired.error, employments(dual, orgA).length, employments(dual, orgB).length]
             out.persons = rows("mantle.party.Person", {firstName: "Priya", lastName: "DUAL"}).length
             out.owner = one("mantle.party.Party", {partyId: dual}).ownerPartyId
@@ -377,6 +403,9 @@ feature(
             out.found.join() == "true,,email,false"
             out.duplicate == "PERSON_MATCHES"
             out.byId == "RECORD_UNAVAILABLE"
+            out.byEmailElsewhere == "RECORD_UNAVAILABLE" && out.byEmailAccount == "RECORD_UNAVAILABLE" && out.byEmailFree == ""
+            out.contactElsewhere == "RECORD_UNAVAILABLE" && out.applicantFiledByHr == "RECORD_UNAVAILABLE" && out.applicantOwn == ""
+            out.privateByEmail == "RECORD_UNAVAILABLE"
             out.hired.join() == ",1,1"
             out.persons == 1
             out.owner != orgA
@@ -534,7 +563,8 @@ feature(
             const both = person("BOTH")
             for (const party of [lead, both]) employ(party, orgB)
             employ(lead, orgA)
-            const hired = hire({partyId: both, managerPartyId: lead})
+            // employed by B, so hired at A by an HR editor of both (SEC-BOS-118)
+            const hired = hire({partyId: both, managerPartyId: lead}, state.hrBoth)
             out.at = [managersAt(both, orgA), managersAt(both, orgB)]
             // B's HR sets no manager at B: no line shared, nothing to refuse; B's employment has none
             const tree = run(state.hrBoth, O + "get#ReportingTree", {organizationPartyId: orgA, partyId: both})

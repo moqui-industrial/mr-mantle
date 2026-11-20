@@ -486,7 +486,7 @@ function effects(ch, checked, amounts) {
                 ec.service
                     .sync()
                     .name("mantle.account.CreditServices.evaluate#OrderCredit")
-                    .parameters({orderId: so.orderId, placeHold: false})
+                    .parameters({orderId: so.orderId, placeHold: false, forChange: true})
                     .disableAuthz()
                     .call() || {}
             const now = {pass: "within its credit now", warn: "near its credit limit now", hold: "over its credit limit now"}[
@@ -581,10 +581,15 @@ function apply(ch, p, revision, tools) {
     // 4. the part retaxed (and a store's shipping) while the order is held: X1 for a storeless order, the store's rules otherwise
     for (const orderPartSeqId of [...parts].filter(Boolean).sort())
         call("mantle.order.OrderServices.handle#OrderMajorChange", {orderId: so.orderId, orderPartSeqId})
-    // 5. Accounting's credit check on a higher total (it may leave a Credit hold, which keeps the order held)
+    // 5. Accounting's credit check on a higher total (it may leave a Credit hold, which keeps the order held): a part held by
+    // this Change hold alone is checked as the status it returns to (an approved order's included, SEC-BAP-91)
     const after = one(ORDER, {orderId: so.orderId})
     if (toDecimal(after.grandTotal ?? 0).compare(toDecimal(so.order.grandTotal ?? 0)) > 0)
-        call("mantle.account.CreditServices.evaluate#OrderCredit", {orderId: so.orderId, placeHold: true})
+        call("mantle.account.CreditServices.evaluate#OrderCredit", {
+            orderId: so.orderId,
+            placeHold: true,
+            changeHoldReasonId: hold && !hold.alreadyHeld ? hold.orderHoldReasonId : null
+        })
     // 6. only its own Change hold released; another open hold (a Credit hold) keeps the order held
     let stillHeld = false
     if (hold && !hold.alreadyHeld) {

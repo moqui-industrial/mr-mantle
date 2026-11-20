@@ -34,6 +34,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="approvedDate" type="date-time" enable-audit-log="true"/>
         <field name="approvedSourceVersion" type="text-long" enable-audit-log="true"/>
         <field name="isSelfApproved" type="text-indicator" enable-audit-log="true"/>
+        <field name="draftChangedByUserIds" type="text-long"><description>Each user who changed the draft's header or lines
+            (store#InvoiceDraft, store#InvoiceDraftItem, delete#InvoiceDraftItem), comma separated: none of them approves it
+            unless the organization allows self-approval (SEC-BOS-126)</description></field>
         <field name="creditForInvoiceId" type="id" enable-audit-log="true"/>
         <field name="workflowSourceKey" type="text-medium" enable-audit-log="true"/>
         <field name="financeOrganizationPartyId" type="id" enable-audit-log="true"/>

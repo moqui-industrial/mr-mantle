@@ -1003,11 +1003,15 @@ function publish(p) {
             fromDate: new Date(fromDate),
             thruDate: thruDate == null ? null : new Date(thruDate),
             otherPartyItemId: line.otherPartyProductId || null,
-            sourceOrderId: po.orderId,
-            sourceOrderItemSeqId: line.orderItemSeqId,
             changeReason: reason
         })
     )
+    // the quote line it is the price of: written here alone (PricePolicy.js writeFields leave it out, SEC-BAP-90)
+    call("update#mantle.product.ProductPrice", {
+        productPriceId: stored.productPriceId,
+        sourceOrderId: po.orderId,
+        sourceOrderItemSeqId: line.orderItemSeqId
+    })
     return {productPriceId: stored.productPriceId, endedPriceIds: endedIds, fromDate: new Date(fromDate)}
 }
 

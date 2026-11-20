@@ -21,6 +21,7 @@ spec({
     setupSpec() {
         login("john.doe")
         ec.user.setEffectiveTime(effectiveTime)
+        setConf("smtp-server@authserv-id", GATEWAY)
     },
     setup() { ec.artifactExecution.disableAuthz() },
     cleanup() {
@@ -57,13 +58,17 @@ const all = (entityName, fields) => Array.from(ec.entity.find(entityName).condit
 const current = (entityName, fields) => Array.from(ec.entity.find(entityName).condition(fields).conditionDate("fromDate", "thruDate", null).list())
 const request = (id) => one("mantle.request.Request", { requestId: id })
 let messageCount = 0
-// a message stored in the spec's account, as the sync stores received mail
+// a message stored in the spec's account, as the sync stores received mail, with its From field and the trusted gateway's DMARC
+// pass for it (Channels.js senderTrust, SEC-BAP-84) unless fields.headersString is given
+const GATEWAY = "gw.rqp.test"
 function receive(fields) {
     messageCount++
     const id = "RQPMSG" + messageCount
+    const from = String(fields.fromAddress || "")
+    const headersString = `From: ${from}\r\nAuthentication-Results: ${GATEWAY}; dmarc=pass header.from=${from.split("@").pop()}`
     call("store#moqui.basic.email.EmailMessage", Object.assign({ emailMessageId: id, emailAccountId: "RQP_ACCOUNT", emailFolderId: "RQP_INBOX",
         statusId: "ES_RECEIVED", contentType: "text/plain", messageDate: ec.user.nowTimestamp, receivedDate: ec.user.nowTimestamp, isRead: "N",
-        hasAttachment: "N", messageId: `<rqp-${messageCount}-${effectiveTime}@example.com>`, rootEmailMessageId: id }, fields))
+        hasAttachment: "N", messageId: `<rqp-${messageCount}-${effectiveTime}@example.com>`, rootEmailMessageId: id, headersString }, fields))
     return id
 }
 const runRules = (ids) => call(`${MAIL}.run#EmailRules`, { emailAccountId: "RQP_ACCOUNT", emailMessageIdList: ids })
@@ -148,6 +153,8 @@ feature("a request from the public form: in the project, Submitted on channel We
         row.rootWorkEffortId == "RQP"
         row.statusId == "ReqSubmitted"
         row.salesChannelEnumId == "ScWeb"
+        // the requester was matched by a typed address and name: not verified (SEC-BOS-103)
+        row.senderVerified == "N"
         row.requestTypeEnumId == "RqtBugFix"
         row.requestName == "RQP The export is empty"
         reporter.length == 1
@@ -232,6 +239,31 @@ feature("a reply in the request's thread joins its conversation and makes no req
     },
 })
 
+feature("a reply from the address the project's form was given confirms its sender; one from another address does not (SEC-BOS-103)", {
+    when() {
+        // the form request's own message, as its confirmation is
+        const sent = receive({ fromAddress: "support@rqp.example", toAddresses: "fern.formby@example.com", subject: "RQP The export is empty" })
+        call("create#mantle.request.RequestEmailMessage", { requestId: made.formRequest, emailMessageId: sent })
+        const first = one("moqui.basic.email.EmailMessage", { emailMessageId: sent })
+        const reply = (fromAddress) => {
+            const id = receive({ fromAddress, toAddresses: "support+rqp@rqp.example", subject: "Re: RQP The export is empty",
+                bodyText: "Still empty.", inReplyTo: first.messageId, referencesHeader: first.messageId })
+            runRules([id])
+            return all("mantle.request.RequestEmailMessage", { emailMessageId: id })[0]?.requestId || null
+        }
+        const otherJoined = reply("dana.rqp@example.com")
+        const afterOther = request(made.formRequest).senderVerified
+        const typedJoined = reply("Fern.Formby@example.com")
+        return { otherJoined, afterOther, typedJoined, afterTyped: request(made.formRequest).senderVerified }
+    },
+    then({ otherJoined, afterOther, typedJoined, afterTyped }) {
+        otherJoined == made.formRequest
+        afterOther == "N"
+        typedJoined == made.formRequest
+        afterTyped == "Y"
+    },
+})
+
 feature("a rule whose owner is not on the project files no project: the request waits for triage with none", {
     when() {
         call("store#moqui.basic.email.EmailRule", { emailRuleId: "RQP_STRANGER", ownerUserId: "joe@public.com", emailAccountId: "RQP_ACCOUNT",
@@ -270,6 +302,36 @@ feature("createWorkItem: an internal sender on the project makes a work item; an
         item.workEffortName == "RQP work: rename the field"
         item.ownerPartyId == "EX_JOHN_DOE"
         request(outsideLink.requestId).rootWorkEffortId == "RQP"
+    },
+})
+
+// SEC-BAP-84: a From the trusted gateway did not authenticate is no one's: a project member's makes no work item, a reply's
+// references join nothing, and a known sender is named no party
+feature("a From the gateway did not authenticate makes no work item, joins no request and names no party (SEC-BAP-84)", {
+    when() {
+        const johnAddress = one("moqui.security.UserAccount", { userId: "EX_JOHN_DOE" }).emailAddress
+        const first = one("moqui.basic.email.EmailMessage", { emailMessageId: made.firstMessage })
+        const forged = (fields) => receive(Object.assign({ toAddresses: "support@rqp.example", bodyText: "Forged.",
+            headersString: `From: ${fields.fromAddress}` }, fields))
+        const work = forged({ fromAddress: johnAddress, subject: "RQP work: forged by someone" })
+        const reply = forged({ fromAddress: "dana.rqp@example.com", toAddresses: "support+rqp@rqp.example", subject: "Re: RQP Totals are off by one",
+            inReplyTo: first.messageId, referencesHeader: first.messageId })
+        runRules([work, reply])
+        const workEvent = one("mantle.party.communication.CommunicationEvent", { emailMessageId: work })
+        const replyLink = all("mantle.request.RequestEmailMessage", { emailMessageId: reply })[0]
+        const replyRequest = replyLink ? replyLink.requestId : null
+        return {
+            workItems: workEvent ? all("mantle.work.effort.WorkEffortCommEvent", { communicationEventId: workEvent.communicationEventId }).length : 0,
+            replyRequest,
+            customers: replyRequest ? all("mantle.request.RequestParty", { requestId: replyRequest, roleTypeId: "Customer" }).length : -1,
+            note: replyRequest ? (all("mantle.request.RequestNote", { requestId: replyRequest })[0]?.noteText || "") : ""
+        }
+    },
+    then({ workItems, replyRequest, customers, note }) {
+        workItems == 0
+        replyRequest != null && replyRequest != made.emailRequest
+        customers == 0
+        note.includes("Sender not verified")
     },
 })
 

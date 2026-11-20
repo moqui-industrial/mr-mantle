@@ -212,6 +212,23 @@ along with this software (see the LICENSE.md file). If not, see
                         in-map="{indexName:indexName, documentType:documentType, queryString:queryString, flattenDocument:false,
                              orderByFields:orderByFields, highlightFields:highlightFields, nestedQueryMap:nestedQueryMap, filter:filter,
                              pageIndex:pageIndex, pageSize:pageSize, pageNoLimit:pageNoLimit}"/>
+                <!-- a person who is only an applicant is a hit only for a recruiter of their application's employer or its panel,
+                    as search#Universal has it (Recruiting.js hiddenApplicants through SearchScope.js hitHidden; SEC-DAT-98) -->
+                <script><![CDATA[
+                    const partyHits = Array.from(documentList || [])
+                    const hidden = new Set(ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js')
+                            .hiddenApplicants(partyHits.map(doc => doc.partyId || String(doc._id || '').split('::')[0]).filter(Boolean)))
+                    const page = ec.resource.script('component://mr-mantle/service/mantle/search/SearchScope.js').keepPage(
+                            {documentList, documentListCount, documentListPageIndex, documentListPageSize},
+                            doc => !hidden.has(doc.partyId || String(doc._id || '').split('::')[0]))
+                    if (hidden.size) {
+                        documentList = page.documentList
+                        documentListCount = page.documentListCount
+                        documentListPageMaxIndex = page.documentListPageMaxIndex
+                        documentListPageRangeLow = page.documentListPageRangeLow
+                        documentListPageRangeHigh = page.documentListPageRangeHigh
+                    }
+                ]]></script>
             </if>
         </actions>
     </service>
@@ -567,9 +584,11 @@ along with this software (see the LICENSE.md file). If not, see
             SEC-BOS-100): read with authorization on, so the calling app's entity filters decide (MANTLE_USER_ORG's
             organizations, MANTLE_PRIVATE_CONTACT: not another user's personal contact), not disabled unless includeDisabled;
             and a party that works for an internal organization (a current agent, employee or member relationship to a party
-            with the OrgInternal role, as UserAccountOrganization counts it) only when one of those organizations is one the
-            user may see too, so another organization's staff member whose party is shared (_NA_) is not reached (the owner's
-            decision, 2026-11-19). With authorization disabled (internal work) every party that exists is kept; with no user
+            with the OrgInternal role, or to a unit whose PrtOrgRollup root has it, such as a department) only when one of those
+            organizations is one the user may see too, or shares its top-level organization (its rollup root) with one the user
+            works for or their filter names, so a department reaches its parent's and its sibling departments' staff, and another
+            organization's staff member whose party is shared (_NA_) is not reached (the owner's decisions, 2026-11-19). The
+            user's data filters are not changed. With authorization disabled (internal work) every party that exists is kept; with no user
             and authorization on, none. The order of partyIdList is kept.</description>
         <in-parameters>
             <parameter name="partyIdList" type="List"/>
@@ -577,39 +596,9 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="visiblePartyIdList" type="List"/></out-parameters>
         <actions><script><![CDATA[
-            const cf = ec.entity.conditionFactory
-            const ids = Array.from(new Set(Array.from(partyIdList || []).map((id) => String(id || '')).filter((id) => id)))
-            visiblePartyIdList = []
-            if (!ids.length) return
-            if (ec.artifactExecution.authzDisabled()) {
-                const exists = new Set(Array.from(ec.entity.find('mantle.party.Party').condition('partyId', 'in', ids).selectField('partyId').list()).map((row) => row.partyId))
-                visiblePartyIdList = ids.filter((id) => exists.has(id))
-                return
-            }
-            if (!ec.user.userId) return
-            const visible = cf.makeCondition([cf.makeCondition('privateOwnerUserId', 'equals', null), cf.makeCondition('privateOwnerUserId', 'equals', ec.user.userId)], 'or')
-            // with authorization on: the calling app's filters
-            let find = ec.entity.find('mantle.party.PartyDetail').condition('partyId', 'in', ids).condition(visible).selectField('partyId')
-            if (!includeDisabled) find = find.condition(cf.makeCondition('disabled', 'not-equals', 'Y', true))
-            const seen = new Set(Array.from(find.list()).map((row) => row.partyId))
-            if (!seen.size) return
-            // the internal organizations each works for, read as the system: a relationship is no record the user reads here
-            const orgsOf = {}
-            const wasDisabled = ec.artifactExecution.disableAuthz()
-            try {
-                const relationships = Array.from(ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', 'in', Array.from(seen))
-                        .condition('relationshipTypeEnumId', 'in', ['PrtAgent', 'PrtEmployee', 'PrtMember']).conditionDate('fromDate', 'thruDate', null)
-                        .selectField('fromPartyId').selectField('toPartyId').list())
-                const targets = Array.from(new Set(relationships.map((row) => row.toPartyId)))
-                const internal = new Set(targets.length ? Array.from(ec.entity.find('mantle.party.PartyRole').condition('partyId', 'in', targets)
-                        .condition('roleTypeId', 'OrgInternal').selectField('partyId').list()).map((row) => row.partyId) : [])
-                for (const row of relationships) if (internal.has(row.toPartyId)) (orgsOf[row.fromPartyId] || (orgsOf[row.fromPartyId] = [])).push(row.toPartyId)
-            } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
-            const organizations = Array.from(new Set(Object.values(orgsOf).flat()))
-            // the organizations the user may see, under the same filters
-            const seenOrganizations = new Set(organizations.length ? Array.from(ec.entity.find('mantle.party.PartyDetail').condition('partyId', 'in', organizations)
-                    .selectField('partyId').list()).map((row) => row.partyId) : [])
-            visiblePartyIdList = ids.filter((id) => seen.has(id) && (!orgsOf[id] || orgsOf[id].some((org) => seenOrganizations.has(org))))
+            // the rule is PartyReach.js's, so a caller in a frame of its own (a shell provider) runs it without a service call
+            visiblePartyIdList = ec.resource.script('component://mr-mantle/service/mantle/party/PartyReach.js')
+                    .visibleParties(partyIdList, includeDisabled)
         ]]></script></actions>
     </service>
 
@@ -908,7 +897,9 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="create" noun="PartyUserAccount">
-        <description>Create a UserAccount for a Party, and set EmailPrimary if applicable.</description>
+        <description>Create a UserAccount for a Party, and set EmailPrimary if applicable. A userGroupId is given through
+            org.moqui.admin.AccessServices.store#Membership (ADMIN_ACCESS_MANAGE and its bundle rules) for a caller with
+            authorization on, and must be of a type groupTypeEnumIdList names when it names any (SEC-ADM-91).</description>
         <in-parameters>
             <!-- NOTE: these are the same excludes as org.moqui.impl.UserServices.create#UserAccount -->
             <auto-parameters entity-name="moqui.security.UserAccount" include="nonpk"><exclude field-name="currentPassword"/>
@@ -981,15 +972,28 @@ along with this software (see the LICENSE.md file). If not, see
                     <entity-find-one entity-name="moqui.security.UserGroup" value-field="userGroup"/>
                     <set field="groupValid" from="groupTypeEnumIdList.includes(userGroup.groupTypeEnumId)"/>
                 </if>
-                <if condition="groupValid">
+                <if condition="!groupValid">
+                    <return error="true" message="GROUP_TYPE_INVALID: Group ${userGroupId} is not one this screen gives"/></if>
+                <!-- the membership through Admin's access rules (ADMIN_ACCESS_MANAGE, registered bundles, privileged and sealed
+                    groups), never a write of the row, for a caller with authorization on (SEC-ADM-91): a screen that passes its
+                    context makes no account in a group the user may not give; work with authorization disabled answers for
+                    itself -->
+                <if condition="ec.artifactExecution.authzDisabled()"><then>
                     <service-call name="create#moqui.security.UserGroupMember"
                             in-map="{userGroupId:userGroupId, userId:userId, fromDate:ec.user.nowTimestamp}"/>
-                </if>
+                </then><else>
+                    <service-call name="org.moqui.admin.AccessServices.store#Membership" out-map="membership"
+                            in-map="{userGroupId:userGroupId, userId:userId, reason:'Given with the new account'}"/>
+                    <if condition="!membership?.applied">
+                        <return error="true" message="${membership?.reasonCode || 'REFUSED'}: ${membership?.reason || 'The group was not given'}"/></if>
+                </else></if>
             </if>
         </actions>
     </service>
     <service verb="update" noun="PartyUserAccount">
-        <description>Update only the UserAccount and EmailPrimary.</description>
+        <description>Update only the UserAccount and EmailPrimary. The account is partyId's own (a userId given must be
+            that party's account), and it is the caller's own or the caller holds ADMIN_IDENTITY_MANAGE, as update#Account
+            asks; work with authorization disabled answers for itself (SEC-ADM-89).</description>
         <in-parameters>
             <!-- NOTE: these are the same excludes as org.moqui.impl.UserServices.update#UserAccount -->
             <auto-parameters entity-name="moqui.security.UserAccount" include="nonpk">
@@ -1011,6 +1015,18 @@ along with this software (see the LICENSE.md file). If not, see
                     <order-by field-name="userId"/>
                 </entity-find>
                 <set field="userId" from="userAccountList?.[0]?.userId"/>
+            </if>
+            <!-- only partyId's own account (SEC-ADM-89): a userId of another party is refused, whoever calls -->
+            <if condition="userId">
+                <entity-find-one entity-name="moqui.security.UserAccount" value-field="partyUserAccount" auto-field-map="false">
+                    <field-map field-name="userId"/></entity-find-one>
+                <if condition="partyUserAccount == null || partyUserAccount.partyId != partyId">
+                    <return error="true" message="That account is not the party's"/></if>
+            </if>
+            <!-- the caller's own account and party, or an account administrator, as update#Account -->
+            <if condition="!ec.artifactExecution.authzDisabled() &amp;&amp; !ec.user.hasPermission('ADMIN_IDENTITY_MANAGE')">
+                <if condition="!ec.user.userId || partyId != ec.user.userAccount?.partyId || (userId &amp;&amp; userId != ec.user.userId)">
+                    <return error="true" message="That account is not yours"/></if>
             </if>
 
             <if condition="userId"><service-call name="org.moqui.impl.UserServices.update#UserAccount" in-map="context"/></if>
@@ -1611,6 +1627,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!new RegExp('^(?:' + partySettingType.validRegexp + ')$').test(settingValue)">
                     <return error="true" message="Value ${settingValue} is not valid"/></if>
             </else-if></if>
+            <!-- a party's default shipping gateway makes it one the party's shipments offer and counts the party among the
+                gateway's users: only a gateway whose every use the user's organizations hold, or any for a system administrator
+                (Shipping.js gatewayManaged; SEC-BAP-101), whoever writes it -->
+            <if condition="partySettingTypeId == 'DefaultShipmentGatewayConfigId'
+                    &amp;&amp; !ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js').gatewayManaged(settingValue)">
+                <return error="true" message="GATEWAY_INVALID: Shipping gateway ${settingValue} is not one your organizations configure"/></if>
         </actions>
     </service>
 

@@ -124,8 +124,10 @@ function queueNotice(p) {
         const reservation = one(RESERVATION, {reservationId: text(p.recordId)})
         if (!reservation) return {}
         const policy = one(POLICY, {registrationPolicyId: reservation.registrationPolicyId})
-        const state = places().stateOfReservation(reservation, policy).state
-        if (["expired", "held"].includes(state)) return {}
+        const facts = places().stateOfReservation(reservation, policy)
+        const state = facts.state
+        // a held reservation gets no receipt, but a free one held for its buyer's address, whose receipt confirms it (SEC-PSS-88)
+        if (state === "expired" || (state === "held" && !facts.addressToConfirm)) return {}
         queue(
             "evreg-receipt:" + reservation.reservationId + ":" + state + (suffix ? ":" + suffix : ""),
             reservation.buyerPartyId,
@@ -271,6 +273,10 @@ function scheduledOne(row, policy, schedule, suffix) {
 
 // ===== build#RegistrationDelivery =====
 const MESSAGES = {
+    confirmAddress: [
+        "Confirm your registration",
+        "Open the link below to confirm your registration for {title} on {when}. Your places are held until then."
+    ],
     confirmed: ["Your registration is confirmed", "Your registration for {title} on {when} is confirmed."],
     pending: [
         "Payment received: awaiting the organizer's confirmation",
@@ -293,12 +299,12 @@ const MESSAGES = {
 }
 const fill = (words, values) => L(words).replace(/\{(\w+)\}/g, (all, name) => values[name] ?? "")
 // The link to MyRegistration: a capability of the reservation (view and cancel) made for this attempt, its token only here.
-function registrationLink(reservation) {
+function registrationLink(reservation, more = []) {
     try {
         const made = externalAccess().create({
             recordType: "EventRegistration",
             recordId: reservation.reservationId,
-            scopes: ["RegistrationView", "RegistrationCancel"],
+            scopes: ["RegistrationView", "RegistrationCancel", ...more],
             validDays: 366
         })
         return made.url || null
@@ -338,9 +344,11 @@ function buildDelivery(p) {
     if (kind === "receipt") {
         const state = places().stateOfReservation(reservation, policy).state
         if (state !== third) return {suppress: "The registration changed"}
-        ;[subject, intro] = MESSAGES[state] || MESSAGES.confirmed
-        const link = registrationLink(reservation)
-        if (link) lines.push({label: L("Your registration"), url: link})
+        const facts = places().stateOfReservation(reservation, policy)
+        // a free registration held for its buyer's address: the link, sent only there, confirms it (SEC-PSS-88)
+        ;[subject, intro] = facts.addressToConfirm ? MESSAGES.confirmAddress : MESSAGES[state] || MESSAGES.confirmed
+        const link = registrationLink(reservation, facts.addressToConfirm ? ["RegistrationConfirm"] : [])
+        if (link) lines.push({label: L(facts.addressToConfirm ? "Confirm your registration" : "Your registration"), url: link})
     } else if (kind === "ticket") {
         if (row.statusId !== "EvrConfirmed") return {suppress: "The place is not confirmed"}
         ;[subject, intro] = MESSAGES.ticket

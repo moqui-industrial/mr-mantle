@@ -180,6 +180,8 @@ spec({
         })
         state.buyer = user("BUYER", ["PURCHASE_ORDER_EDIT", "SUPPLIER_PRICE_VIEW"])
         state.approver = user("APPROVER", ["PURCHASE_APPROVE", "PURCHASE_ORDER_APPROVE"])
+        // a second buyer who applies the change of the first one's order (SEC-BAP-110)
+        state.reviser = user("REVISER", ["PURCHASE_ORDER_EDIT", "SUPPLIER_PRICE_VIEW"])
         state.none = user("NONE", [])
         capture.enable()
 
@@ -292,9 +294,36 @@ feature(
                 itemChanges: [{orderItemSeqId: "01", quantity: 8}],
                 partChanges: {currencyUomId: "EUR"}
             })
-            return {cut, codes, refused, lower, currency}
+            // SEC-BAP-92: a ship-to address is the buying organization's (or its facilities'); another's is refused, by its id
+            const address = (contactMechId, partyId) => {
+                call("create#mantle.party.contact.ContactMech", {contactMechId, contactMechTypeEnumId: "CmtPostalAddress"})
+                call("create#mantle.party.contact.PostalAddress", {
+                    contactMechId,
+                    address1: contactMechId + " Lane",
+                    city: "Elsewhere"
+                })
+                if (partyId)
+                    call("create#mantle.party.contact.PartyContactMech", {
+                        partyId,
+                        contactMechId,
+                        contactMechPurposeId: "PostalShippingDest",
+                        fromDate: ec.user.nowTimestamp
+                    })
+            }
+            address(prefix + "_ADDR_OWN", org)
+            address(prefix + "_ADDR_OTHER", null)
+            const shipTo = contactMechId =>
+                run(state.buyer, O + "preview#PurchaseRevision", {
+                    orderId: state.orderId,
+                    partChanges: {postalContactMechId: contactMechId}
+                }).changeRows.find(row => row.field == "postalContactMechId")
+            const ownAddress = shipTo(prefix + "_ADDR_OWN"),
+                otherAddress = shipTo(prefix + "_ADDR_OTHER")
+            return {cut, codes, refused, lower, currency, ownAddress, otherAddress}
         },
-        then({cut, codes, refused, lower, currency}) {
+        then({cut, codes, refused, lower, currency, ownAddress, otherAddress}) {
+            ownAddress.refusalCode == null && ownAddress.toText.includes("Lane")
+            otherAddress.refusalCode == "ADDRESS_INVALID" && otherAddress.toText == prefix + "_ADDR_OTHER"
             currency.changeRows.find(row => row.field == "currencyUomId").refusalCode == "CURRENCY_CHANGE_WITH_AMOUNTS"
             currency.canApply == false
             cut.error == ""
@@ -351,8 +380,8 @@ feature(
                 operationKey: key()
             }
             state.beforeApply = Number(ec.user.nowTimestamp) - 1
-            const applied = run(state.buyer, O + "apply#PurchaseRevision", state.applyRequest)
-            const replay = run(state.buyer, O + "apply#PurchaseRevision", state.applyRequest)
+            const applied = run(state.reviser, O + "apply#PurchaseRevision", state.applyRequest)
+            const replay = run(state.reviser, O + "apply#PurchaseRevision", state.applyRequest)
             const logged = rows("moqui.entity.EntityAuditLog", {
                 changedEntityName: "mantle.order.OrderItem",
                 changedFieldName: "quantity",
@@ -390,6 +419,18 @@ feature(
     {
         when() {
             const stale = run(state.approver, P + "decide#PurchaseApproval", {orderId: state.orderId, orderRevision: state.r1})
+            // the buyer who applied the revision of another buyer's order, made an approver too, may not approve it (SEC-BAP-110)
+            for (const permission of ["PURCHASE_APPROVE", "PURCHASE_ORDER_APPROVE"])
+                call("create#moqui.security.UserGroupPermission", {userGroupId: state.reviser, userPermissionId: permission, fromDate: since})
+            const reviser = run(state.reviser, P + "decide#PurchaseApproval", {orderId: state.orderId, orderRevision: state.r2})
+            // nor once the Change hold is released and the order is back to Placed at the same revision (SEC-BAP-110 review)
+            const changeHold = rows("mantle.order.OrderHoldReason", {orderId: state.orderId}).find(row => row.holdTypeEnumId == "OhtChange")
+            call("update#mantle.order.OrderHoldReason", {orderHoldReasonId: changeHold.orderHoldReasonId, releasedDate: ec.user.nowTimestamp})
+            call("update#mantle.order.OrderHeader", {orderId: state.orderId, statusId: "OrderPlaced"})
+            const reviserReleased = run(state.reviser, P + "decide#PurchaseApproval", {orderId: state.orderId, orderRevision: state.r2})
+            for (const permission of ["PURCHASE_APPROVE", "PURCHASE_ORDER_APPROVE"])
+                ec.entity.find("moqui.security.UserGroupPermission").condition({userGroupId: state.reviser, userPermissionId: permission})
+                    .disableAuthz().deleteAll()
             const decided = run(state.approver, P + "decide#PurchaseApproval", {
                 orderId: state.orderId,
                 orderRevision: state.r2,
@@ -414,10 +455,13 @@ feature(
             const hold = rows("mantle.order.OrderHoldReason", {orderId: state.orderId}).find(
                 row => row.holdTypeEnumId == "OhtChange"
             )
-            return {stale, decided, approved, sent, issued, before, now, hold, mailed: capture.count()}
+            return {stale, reviser, reviserReleased, decided, approved, sent, issued, before, now, hold, mailed: capture.count()}
         },
-        then({stale, decided, approved, sent, issued, before, now, hold, mailed}) {
+        then({stale, reviser, reviserReleased, decided, approved, sent, issued, before, now, hold, mailed}) {
             stale.error.includes("STALE_REVISION")
+            reviser.error.includes("SELF_APPROVAL")
+            reviserReleased.error.includes("SELF_APPROVAL")
+            hold.changedByUserIds == state.reviser
             decided.error == ""
             approved == "OrderApproved"
             hold.releasedDate != null
@@ -595,3 +639,46 @@ feature(
         }
     }
 )
+
+feature("a drop-ship purchase order may ship to its sales order's customer's address, which no other order may (SEC-BAP-92)", {
+    when() {
+        const shipTo = contactMechId =>
+            run(state.buyer, O + "preview#PurchaseRevision", {
+                orderId: state.orderId,
+                partChanges: {postalContactMechId: contactMechId}
+            }).changeRows.find(row => row.field == "postalContactMechId")
+        call("create#mantle.party.Party", {partyId: prefix + "_DS_CUST", partyTypeEnumId: "PtyOrganization"})
+        call("create#mantle.party.contact.ContactMech", {
+            contactMechId: prefix + "_ADDR_CUST",
+            contactMechTypeEnumId: "CmtPostalAddress"
+        })
+        call("create#mantle.party.contact.PostalAddress", {
+            contactMechId: prefix + "_ADDR_CUST",
+            address1: "1 Customer Lane",
+            city: "Elsewhere"
+        })
+        call("create#mantle.party.contact.PartyContactMech", {
+            partyId: prefix + "_DS_CUST",
+            contactMechId: prefix + "_ADDR_CUST",
+            contactMechPurposeId: "PostalShippingDest",
+            fromDate: ec.user.nowTimestamp
+        })
+        call("create#mantle.order.OrderHeader", {
+            orderId: prefix + "_DS_SO",
+            statusId: "OrderApproved",
+            entryDate: ec.user.nowTimestamp
+        })
+        call("create#mantle.order.OrderPart", {
+            orderId: prefix + "_DS_SO",
+            orderPartSeqId: "01",
+            customerPartyId: prefix + "_DS_CUST"
+        })
+        const before = shipTo(prefix + "_ADDR_CUST")
+        call("update#mantle.order.OrderItem", {orderId: state.orderId, orderItemSeqId: "01", salesOrderId: prefix + "_DS_SO"})
+        return {before, after: shipTo(prefix + "_ADDR_CUST")}
+    },
+    then({before, after}) {
+        before.refusalCode == "ADDRESS_INVALID"
+        after.refusalCode == null
+    }
+})

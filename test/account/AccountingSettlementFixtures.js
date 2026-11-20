@@ -76,13 +76,20 @@ function credit(f, sourceInvoiceId, amount = "25") {
         operationKey: "settle-credit-" + sourceInvoiceId
     })
     const row = lib.one(lib.invoiceEntity, {invoiceId: result.invoiceId})
-    call("mantle.account.InvoiceServices.change#InvoiceState", {
-        organizationPartyId: f.org,
-        invoiceId: row.invoiceId,
-        action: "finalize",
-        lastUpdatedStamp: row.lastUpdatedStamp,
-        operationKey: "settle-final-" + row.invoiceId
-    })
+    // a linked customer credit is issued by an approver who did not draft it (SEC-BOS-127)
+    const username = ec.user.username
+    login(f.users.approve)
+    try {
+        call("mantle.account.InvoiceServices.change#InvoiceState", {
+            organizationPartyId: f.org,
+            invoiceId: row.invoiceId,
+            action: "approve",
+            lastUpdatedStamp: row.lastUpdatedStamp,
+            operationKey: "settle-final-" + row.invoiceId
+        })
+    } finally {
+        login(username)
+    }
     return row.invoiceId
 }
 function key(kind, id) {

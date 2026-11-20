@@ -136,12 +136,35 @@ function check(p) {
     return {}
 }
 
+// The users who changed a draft (draftChangedByUserIds), with the current user added: none of them approves it (SEC-BOS-126).
+const changersOf = value =>
+    String(value || "")
+        .split(",")
+        .map(id => id.trim())
+        .filter(Boolean)
+function recordChange(p) {
+    const userId = ec.user.userId
+    if (!userId) return {}
+    const record = one(I, {invoiceId: p.invoiceId})
+    if (!record) return {}
+    const changers = changersOf(record.draftChangedByUserIds)
+    if (!changers.includes(userId))
+        call("update#" + I, {invoiceId: record.invoiceId, draftChangedByUserIds: changers.concat([userId]).join(",")})
+    return {}
+}
 function approve(scope, preference) {
     lib.requirePermission("INVOICE_APPROVE")
     const record = scope.record
-    const selfApproved = record.draftedByUserId === ec.user.userId
+    // its creator and anyone who changed its lines, amounts or header since (SEC-BOS-126)
+    const changed = changersOf(record.draftChangedByUserIds).includes(ec.user.userId)
+    const selfApproved = record.draftedByUserId === ec.user.userId || changed
     if (selfApproved && preference.allowAccountingSelfApproval !== "Y")
-        denied("SELF_APPROVAL_DENIED", "Another finance approver must approve this invoice")
+        denied(
+            "SELF_APPROVAL_DENIED",
+            changed
+                ? "You changed this invoice; another finance approver must approve it"
+                : "Another finance approver must approve this invoice"
+        )
     call("update#" + I, {
         invoiceId: record.invoiceId,
         approvedByUserId: ec.user.userId,
@@ -150,6 +173,25 @@ function approve(scope, preference) {
         isSelfApproved: selfApproved ? "Y" : "N"
     })
 }
+// SEC-BOS-127: a customer credit linked to an issued invoice (creditForInvoiceId) clears its balance, so it is issued only by
+// an approver (approve: INVOICE_APPROVE, never its drafter or a changer), unless it is a return's credit (its
+// ReturnItemBilling rows: the return settlement's own rules), a prompt-payment discount PaymentTerms confirmed (its source key,
+// set by create#InvoiceCreditMemo; a line's item type is no proof, the clerk types it) or within the organization's write-off
+// tolerance, the credits it let through for the same invoice before counted.
+function creditNeedsApprover(scope) {
+    const record = scope.record
+    if (!scope.receivable || !record.creditForInvoiceId) return false
+    if (find("mantle.order.return.ReturnItemBilling", {invoiceId: record.invoiceId}).count()) return false
+    if (record.workflowSourceKey === lib.promptDiscountKey(record.creditForInvoiceId)) return false
+    return !lib.writeOffTolerated(
+        scope.organizationPartyId,
+        lib.totals(record).invoiceTotal,
+        record.currencyUomId,
+        record.creditForInvoiceId,
+        record.invoiceId
+    )
+}
+const approvedNow = record => !!record.approvedByUserId && record.approvedSourceVersion === lib.fingerprint(record)
 // The target status of each action, after its checks.
 const transitions = {
     approve: issue,
@@ -187,6 +229,7 @@ function issue(scope, p, preference, action) {
     // A sales invoice gets its tax lines before it is issued; one whose tax cannot be calculated is refused (AC-08).
     if (scope.receivable) call("mantle.other.TaxServices.calculate#InvoiceSalesTax", {invoiceId: record.invoiceId})
     if (action === "approve" || !scope.receivable) approve(scope, preference)
+    else if (creditNeedsApprover(scope) && !approvedNow(record)) approve(scope, preference)
     else if (
         preference.invoiceApprovalRequired === "Y" &&
         (!record.approvedByUserId || record.approvedSourceVersion !== lib.fingerprint(record))
@@ -370,6 +413,8 @@ function applyCredit(p) {
         denied("SETTLEMENT_SCOPE_INVALID", "A credit and invoice must have the same parties and currency")
     if ([credit.record, target.record].some(row => draftStatuses.includes(row.statusId) || row.statusId === "InvoiceCancelled"))
         denied("SETTLEMENT_STATE_INVALID", "Finalize the credit and invoice before applying them")
+    // a linked customer credit issued with no approver is applied only by one (SEC-BOS-127)
+    if (creditNeedsApprover(credit) && !credit.record.approvedByUserId) lib.requirePermission("INVOICE_APPROVE")
     creditCap(credit.record)
     const creditBalance = lib.totals(credit.record).unpaidTotal
     const invoiceBalance = lib.totals(target.record).unpaidTotal
@@ -661,6 +706,7 @@ const operations = {
     organization,
     permissions,
     check,
+    recordChange,
     changeState,
     creditLines,
     applyCredit,

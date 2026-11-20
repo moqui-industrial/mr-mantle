@@ -447,7 +447,9 @@ along with this software (see the LICENSE.md file). If not, see
             completed, or a rehire beside the ended employment), the terms with their names and the findings: errors that refuse
             the hire (as hire#Employee does) and warnings and notes. Refuses a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT
             (PERMISSION_DENIED), no employer (ORGANIZATION_REQUIRED), one outside the scope (ORGANIZATION_DENIED) and a person
-            not found (RECORD_UNAVAILABLE).</description>
+            not found (RECORD_UNAVAILABLE). A chosen person unrelated to the caller's employers is admitted by their exact email
+            only when held by no one else: no user account and no current employment outside those employers (SEC-BOS-118; a
+            person employed elsewhere is hired by an HR editor of both, and is found but RECORD_UNAVAILABLE to the others).</description>
         <implements service="mantle.humanres.PeopleServices.define#HireTerms"/>
         <out-parameters>
             <parameter name="organizationPartyId"/>

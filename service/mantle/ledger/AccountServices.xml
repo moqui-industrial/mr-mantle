@@ -17,8 +17,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="Account" allow-remote="false">
         <description>Create a chart account assigned to the organization, or edit one the organization may post to. Refuses
             a user without GL posting, a stale revision, a missing name or a code that is not digits, a parent outside
-            the organization or one that would make a cycle, a change of a shared account without finance administration,
-            and a change of class or type after posting.</description>
+            the organization or one that would make a cycle, a change of an account assigned to other organizations too without
+            finance administration of each of them, or of one the organization is not assigned (SEC-BOS-94:
+            AccountingPolicy.js chartAccountRefusal, ACCOUNT_SHARED), and a change of class or type after posting.</description>
         <in-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="glAccountId"/>
@@ -51,13 +52,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <script>policy.record({kind:'accounts', recordId:glAccountId, organizationPartyId:scope.organizationPartyId},
                     'glPost', true)</script>
                 <script>policy.revision(oldAccount, lastUpdatedStamp)</script>
-                <entity-find-count entity-name="mantle.ledger.account.GlAccountOrganization" count-field="assignmentCount"
-                        disable-authz="true">
-                    <econdition field-name="glAccountId"/>
-                </entity-find-count>
-                <if condition="!scope.capabilities.admin &amp;&amp; assignmentCount &gt; 1">
-                    <return error="true" message="Changing a shared chart account requires finance administration"/>
-                </if>
+                <script>policy.requireChartAccount(scope, glAccountId)</script>
             </if>
             <set field="accountValues" from="policy.pick(context, ['accountCode', 'accountName', 'parentGlAccountId',
                     'glAccountClassEnumId', 'glAccountTypeEnumId', 'description', 'disallowPosting'])"/>
@@ -134,8 +129,9 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="Assignment" allow-remote="false">
         <description>Create or change the organization's dated assignment of a chart account and the dimensions its lines
-            require. Refuses a user without GL posting, an unknown account, a stale revision and an end before the
-            start.</description>
+            require. Refuses a user without GL posting, an unknown account or one of no organization of its chain and not of
+            the standard chart (SEC-BOS-94: AccountingPolicy.js requireAssignableAccount), a stale revision and an end before
+            the start.</description>
         <in-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="glAccountId"/>
@@ -162,6 +158,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="account == null">
                 <return error="true" message="Account ${glAccountId || '(missing)'} is not available"/>
             </if>
+            <script>policy.requireAssignableAccount(scope, glAccountId)</script>
             <entity-find-one entity-name="mantle.ledger.account.GlAccountOrganization" value-field="oldAssignment"
                     for-update="true" disable-authz="true">
                 <field-map field-name="glAccountId"/>
@@ -237,7 +234,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Put a chart account in a category from a date, ending its current membership there, or in a report
             group of a group type, replacing its group of that type; the changes are audit logged. Refuses a user without
             finance administration, an account the user may not read, an unknown category or group, a category date not
-            after the current membership's start and a stale group revision.</description>
+            after the current membership's start and a stale group revision. The category and group memberships are the
+            account's in every organization, so an account assigned to other organizations too takes finance administration
+            of each of them (SEC-BOS-94: AccountingPolicy.js chartAccountRefusal).</description>
         <in-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="glAccountId"/>
@@ -253,8 +252,9 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <set field="policy" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/AccountingPolicy.js')"/>
-            <script>policy.organization(context, 'admin')</script>
+            <set field="scope" from="policy.organization(context, 'admin')"/>
             <script>policy.record({kind:'accounts', recordId:glAccountId, organizationPartyId:organizationPartyId})</script>
+            <script>policy.requireChartAccount(scope, glAccountId)</script>
             <set field="changeReason" from="policy.reason(context)"/>
             <script>policy.audit(['fromDate', 'thruDate', 'glAccountGroupId'], changeReason)</script>
             <if condition="glAccountCategoryId">

@@ -34,8 +34,10 @@ const optional = [
     "agreementId",
     "agreementItemSeqId"
 ]
+// sourceOrderId and sourceOrderItemSeqId are not among them: only publish#SupplierQuotePrice names a quote line as a price's
+// source, writing them itself after the store (SEC-BAP-90), so no price editor's store, correction or import sets them
 const writeFields =
-    "productId,productStoreId,vendorPartyId,customerPartyId,priceTypeEnumId,pricePurposeEnumId,fromDate,thruDate,minQuantity,price,priceUomId,termUomId,taxInPrice,taxAmount,taxPercentage,taxAuthorityId,agreementId,agreementItemSeqId,otherPartyItemName,otherPartyItemId,comments,quantityIncrement,quantityIncluded,quantityUomId,preferredOrderEnumId,supplierRatingTypeEnumId,standardLeadTimeDays,canDropShip,changeReason,sourceOrderId,sourceOrderItemSeqId".split(
+    "productId,productStoreId,vendorPartyId,customerPartyId,priceTypeEnumId,pricePurposeEnumId,fromDate,thruDate,minQuantity,price,priceUomId,termUomId,taxInPrice,taxAmount,taxPercentage,taxAuthorityId,agreementId,agreementItemSeqId,otherPartyItemName,otherPartyItemId,comments,quantityIncrement,quantityIncluded,quantityUomId,preferredOrderEnumId,supplierRatingTypeEnumId,standardLeadTimeDays,canDropShip,changeReason".split(
         ","
     )
 const pick = (p, keys) =>
@@ -159,6 +161,22 @@ function validate(r, ignoreIds = []) {
     if (one("moqui.basic.Uom", {uomId: r.priceUomId})?.uomTypeEnumId !== "UT_CURRENCY_MEASURE")
         throw new Error("Choose a price currency")
     if (r.price == null || toDecimal(r.price).compare(0) < 0) throw new Error("Price must be zero or positive")
+    // a quote line named as the row's source (publish#SupplierQuotePrice) is a line of that product on a purchase quote of the
+    // row's supplier to its buying organization: Purchasing's awards price the line from it (SEC-BAP-90)
+    if (r.sourceOrderId || r.sourceOrderItemSeqId) {
+        const line =
+            r.sourceOrderId && r.sourceOrderItemSeqId
+                ? one("mantle.order.OrderItem", {orderId: r.sourceOrderId, orderItemSeqId: r.sourceOrderItemSeqId})
+                : null
+        const part = line ? one("mantle.order.OrderPart", {orderId: line.orderId, orderPartSeqId: line.orderPartSeqId}) : null
+        if (
+            !part ||
+            line.productId !== r.productId ||
+            part.vendorPartyId !== r.vendorPartyId ||
+            part.customerPartyId !== r.customerPartyId
+        )
+            throw new Error("The source quote line is not this supplier's line of the product for this organization")
+    }
     if (toDecimal(r.minQuantity || 0).compare(0) < 0) throw new Error("Minimum quantity cannot be negative")
     const from = ms(r.fromDate),
         thru = ms(r.thruDate)

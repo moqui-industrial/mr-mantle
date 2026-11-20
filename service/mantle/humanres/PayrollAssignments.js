@@ -115,6 +115,13 @@ function employmentIn(userScope, partyRelationshipId) {
         denied("RECORD_UNAVAILABLE", "Employment " + id + " is not available")
     return employmentOf(row)
 }
+// SEC-BOS-114: a payroll editor never changes the pay inputs of their own employment (its structure, input values and elected
+// lines, tax profile and benefits), as no one verifies their own qualification (Development.js verifyQualification); another
+// payroll editor does. The system (no user) is not refused.
+function notOwnPay(partyId) {
+    const mine = ec.user.userAccount?.partyId || null
+    if (mine && partyId === mine) denied("SELF_APPROVAL", "Your own pay is changed by another payroll editor")
+}
 // a structure or group of an employer in the caller's scope, else a missing one
 function readable(userScope, entityName, key, id, label) {
     const row = id ? one(entityName, {[key]: id}) : null
@@ -133,8 +140,10 @@ const salariesOf = partyRelationshipId =>
 const salaryRevision = partyRelationshipId => revisionOf(rows(SALARY, {partyRelationshipId}))
 // A salary from fromMs: the row in effect then ends on it, and the new one starts; a row from the same moment, or a later one set
 // already, is refused, so a change never silently chooses between two rows. Written with authorization off: the caller has been
-// checked (create#EmploymentSalary for PAYROLL_EDIT, the pay change by its request and approval).
+// checked (create#EmploymentSalary for PAYROLL_EDIT, the pay change by its request and approval). Never the caller's own
+// employment (SEC-BOS-114: a repair, the employees import's first salary, a pay change applied): notOwnPay.
 function writeSalary(partyRelationshipId, values, reason) {
+    notOwnPay(one(RELATIONSHIP, {partyRelationshipId})?.fromPartyId || null)
     const fromMs = values.fromMs
     checkSalaryDate(partyRelationshipId, fromMs)
     const inEffect = salariesOf(partyRelationshipId).find(row => openAt(row, fromMs))
@@ -692,6 +701,7 @@ function checkAssignable(userScope, terms, partyRelationshipId, replaceCurrent) 
     )
         denied("EMPLOYMENT_OUTSIDE", "Employment " + partyRelationshipId + " is not one of the structure's employer")
     const employment = employmentOf(relationship)
+    notOwnPay(employment.partyId)
     if (!openAt({fromDate: employment.fromMs, thruDate: employment.thruMs}, terms.fromMs))
         denied("DATE_OUTSIDE", "The person is not employed on that date")
     const existing = assignmentsOf(partyRelationshipId)
@@ -749,6 +759,7 @@ function endAssignment(userScope, p) {
     const row = one(ASSIGNMENT, {payrollAssignmentId: text(p.payrollAssignmentId)})
     if (!row || !userScope.organizationPartyIds.includes(row.organizationPartyId))
         denied("RECORD_UNAVAILABLE", "Pay assignment " + text(p.payrollAssignmentId) + " is not available")
+    notOwnPay(row.partyId)
     if (text(p.expectedRevision) !== String(stampOf(row)))
         denied("REVISION_CHANGED", "This pay assignment changed since you read it; open it again (revision " + stampOf(row) + ")")
     const thruMs = effective(p.thruDate)
@@ -980,6 +991,7 @@ function storeBenefit(employment, p) {
 function storePayrollProfile(p) {
     const userScope = editorScope()
     const employment = employmentIn(userScope, p.partyRelationshipId)
+    notOwnPay(employment.partyId)
     if (!blank(p.benefitTypeId)) return Object.assign({payrollTaxProfileId: null}, storeBenefit(employment, p))
     const payrollLocalizationId = text(p.payrollLocalizationId)
     const localization = payrollLocalizationId ? one(LOCALIZATION, {payrollLocalizationId}) : null

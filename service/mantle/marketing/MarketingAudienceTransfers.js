@@ -272,11 +272,12 @@ function channelContact(row, channel, found) {
 // or disabled. Commons' match#Contact is not called for it: it stops at the first visible party, so the importer's own personal
 // contact would hide a directory contact of the same address (a duplicate made), and it falls back to a name alone, which would
 // file the evidence of one number on another (Marketing P4 review).
-function matchOf(row, channel, found) {
+function matchOf(row, channel, found, organizationPartyId) {
     const cf = ec.entity.conditionFactory
     const now = ec.user.nowTimestamp
+    // a party of the list's organization's audience only (SEC-BAP-88): another organization's is no match, and is not named
     const member = partyId => {
-        const party = audience.requestableParty(partyId)
+        const party = audience.requestableParty(partyId, organizationPartyId)
         return party && !party.privateOwnerUserId ? party : null
     }
     if (channel !== "CmtTelecomNumber") {
@@ -470,7 +471,7 @@ function previewAudienceImport(p) {
             counts[item.proposedAction]++
         } else {
             seen.set(found.key, item.rowNumber)
-            const match = matchOf(source, channel, found)
+            const match = matchOf(source, channel, found, list.ownerPartyId)
             item.proposedAction = match ? "match" : "add"
             counts[item.proposedAction]++
             if (match) {
@@ -556,7 +557,7 @@ function applyAudienceImportRow(p) {
     const evidence = evidenceOf(source, terms)
     if (evidence.problem) return done("invalid", evidence.problem)
     // the contact: the address's party the user may see, else a new directory contact of the row's names and address
-    let partyId = matchOf(source, channel, found)?.partyId || null
+    let partyId = matchOf(source, channel, found, list.ownerPartyId)?.partyId || null
     if (!partyId) {
         const made = ec.service
             .sync()

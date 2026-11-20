@@ -172,4 +172,10 @@ along with this software (see the LICENSE.md file). If not, see
                     enumTypeId="ReturnDecision"/>
         </seed-data>
     </entity>
+    <!-- the separation of a return exception's approval, by the organization's ServicePolicy row (SEC-BAP-112 review) -->
+    <extend-entity entity-name="ServicePolicy" package="mantle.request.support">
+        <field name="returnExceptionSelfApproval" type="text-indicator" enable-audit-log="true"><description>Y: who asked
+            for a return's exception or entered the return may also approve it (a team of one manager). Empty or N (the
+            default): another holder of RETURN_EXCEPTION_APPROVE decides (SELF_APPROVAL).</description></field>
+    </extend-entity>
 </entities>

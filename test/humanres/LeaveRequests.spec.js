@@ -138,6 +138,10 @@ spec({
         state.uMgr = user("MAX", ["PEOPLE_SELF_SERVICE", "PEOPLE_TEAM_VIEW", "PEOPLE_REQUEST_APPROVE"], state.max)
         state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrParty)
         state.hrB = user("HRB", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrBParty)
+        // a second HR officer of A, who grants the first one's own leave (no one grants their own, SEC-BOS-117)
+        const hr2Party = person("HR2")
+        employ(hr2Party, orgA)
+        state.hr2 = user("HR2", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], hr2Party)
         // A's holiday on Monday the 15th
         call("create#mantle.work.effort.WorkEffort", {
             workEffortId: prefix + "_HOLIDAY",
@@ -161,17 +165,31 @@ spec({
             policy.error,
             run(state.hr, L + "assign#Policy", {
                 leavePolicyId: state.policy,
-                partyRelationshipIds: [state.anaEmp, state.hrEmp],
+                partyRelationshipIds: [state.anaEmp],
+                fromDate: "2026-01-01",
+                reason: "Spec"
+            }).error,
+            run(state.hr2, L + "assign#Policy", {
+                leavePolicyId: state.policy,
+                partyRelationshipIds: [state.hrEmp],
                 fromDate: "2026-01-01",
                 reason: "Spec"
             }).error,
             run(state.hr, L + "allocate#Leave", {
                 leavePolicyId: state.policy,
-                partyRelationshipIds: [state.anaEmp, state.hrEmp],
+                partyRelationshipIds: [state.anaEmp],
                 amount: "3",
                 periodFromDate: "2026-01-01",
                 periodThruDate: "2026-12-31",
                 operationKey: prefix + "_GRANT"
+            }).error,
+            run(state.hr2, L + "allocate#Leave", {
+                leavePolicyId: state.policy,
+                partyRelationshipIds: [state.hrEmp],
+                amount: "3",
+                periodFromDate: "2026-01-01",
+                periodThruDate: "2026-12-31",
+                operationKey: prefix + "_GRANT_HR"
             }).error
         ].join("")
     },

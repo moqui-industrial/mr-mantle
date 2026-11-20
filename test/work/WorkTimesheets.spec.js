@@ -346,3 +346,67 @@ feature("Home counts the week's hours with its status, and the timesheets to app
         bobSees == false
     },
 })
+
+feature("with the policy any, a Time approver of the person's organization decides the week, one of another organization does not (SEC-BOS-97)", {
+    when() {
+        const past = at(1, 0)
+        call("create#mantle.party.Party", { partyId: "TSW_OTHER_ORG", partyTypeEnumId: "PtyOrganization", ownerPartyId: "TSW_OTHER_ORG" })
+        call("create#mantle.party.Organization", { partyId: "TSW_OTHER_ORG", organizationName: "Timesheet other organization" })
+        call("create#mantle.party.PartyRole", { partyId: "TSW_OTHER_ORG", roleTypeId: "OrgInternal" })
+        call("create#moqui.security.UserGroup", { userGroupId: "TSW_ANY", description: "Timesheet any approvers" })
+        call("create#moqui.security.UserGroupPermission", { userGroupId: "TSW_ANY", userPermissionId: "TIMESHEET_APPROVE", fromDate: 0 })
+        for (const [username, orgId] of [["tsw.same", made.org], ["tsw.other", "TSW_OTHER_ORG"]]) {
+            const partyId = call("mantle.party.PartyServices.create#Person", { firstName: username, lastName: "Timesheet" }).partyId
+            const userId = call("mantle.party.PartyServices.create#PartyUserAccount", { partyId, emailAddress: username + "@example.com", username,
+                newPassword: "moqui1!!", newPasswordVerify: "moqui1!!" }).userId
+            call("create#mantle.party.PartyRelationship", { relationshipTypeEnumId: "PrtEmployee", fromPartyId: partyId, fromRoleTypeId: "Employee",
+                toPartyId: orgId, toRoleTypeId: "OrgInternal", fromDate: past })
+            call("create#moqui.security.UserGroupMember", { userGroupId: "TSW_ANY", userId, fromDate: 0 })
+        }
+        call(`${TS}.store#TimesheetPolicy`, { organizationPartyId: made.org, weekStart: 1, approvers: "any", lock: true })
+        // the other organization's policy is any too: its approvers read their own organization's time, not joe's
+        call(`${TS}.store#TimesheetPolicy`, { organizationPartyId: "TSW_OTHER_ORG", weekStart: 1, approvers: "any", lock: true })
+        const timeOf = (username) => {
+            login(username, "moqui1!!")
+            ec.user.setEffectiveTime(made.now || at(18, 9))
+            try {
+                // joe's entries among the ones the user sees (without a partyId of the find, which the find narrows by itself)
+                const entries = Array.from(call(`${TIME}.find#TimeEntries`, { pageNoLimit: true }).rowList || []).filter((row) => row.partyId === "ORG_ZIZI_JD").length
+                const report = Array.from(call("mantle.work.ProjectReportServices.get#ReportScope", {}).timePartyIds || [])
+                return { entries, report }
+            } finally {
+                login("john.doe")
+                ec.user.setEffectiveTime(made.now || at(18, 9))
+            }
+        }
+        const time = { same: timeOf("tsw.same"), other: timeOf("tsw.other") }
+        const access = (username) => {
+            login(username, "moqui1!!")
+            ec.user.setEffectiveTime(made.now || at(18, 9))
+            try { return call(`${TS}.get#TimesheetAccess`, { timesheetId: made.timesheetId }) } finally {
+                login("john.doe")
+                ec.user.setEffectiveTime(made.now || at(18, 9))
+            }
+        }
+        const approvers = call(`${TS}.get#TimesheetApprovers`, { timesheetId: made.timesheetId })
+        const out = { same: access("tsw.same"), other: access("tsw.other"), approvers, time,
+            otherParty: one("moqui.security.UserAccount", { username: "tsw.other" }).partyId,
+            sameParty: one("moqui.security.UserAccount", { username: "tsw.same" }).partyId }
+        call(`${TS}.store#TimesheetPolicy`, { organizationPartyId: made.org, weekStart: 1, approvers: "project", lock: true })
+        return out
+    },
+    then({ same, other, approvers, otherParty, sameParty, time }) {
+        time.same.entries > 0
+        time.same.report.includes("ORG_ZIZI_JD")
+        time.other.entries == 0
+        !time.other.report.includes("ORG_ZIZI_JD")
+        same.canView == true
+        same.isApprover == true
+        other.canView == false
+        other.isApprover == false
+        other.canEdit == false
+        approvers.organizationPartyId == made.org
+        Array.from(approvers.approverPartyIds).includes(sameParty)
+        !Array.from(approvers.approverPartyIds).includes(otherParty)
+    },
+})

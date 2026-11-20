@@ -217,7 +217,7 @@ feature("legacy invoice date edits recompute the chosen book day and ignore call
         detail.invoice.approvedByUserId == null
     }
 })
-feature("an AR-only user creates finalizes and applies a linked credit with original revenue accounts", {
+feature("an AR-only user creates a linked credit with original revenue accounts, refused its finalization; an approver issues it, under a tolerance the AR user does", {
     when() {
         const originalTransactions = helper()
             .lib.rows("mantle.ledger.transaction.AcctgTrans", {
@@ -255,12 +255,41 @@ feature("an AR-only user creates finalizes and applies a linked credit with orig
                 operationKey: "native-ar-credit"
             })
             creditId = credit.invoiceId
+            const stampOf = id => helper().lib.one(helper().lib.invoiceEntity, {invoiceId: id}).lastUpdatedStamp
+            // SEC-BOS-127: a linked customer credit clears the invoice's balance, so an approver issues it
+            const clerkFinalize = helper().rejected("mantle.account.InvoiceServices.change#InvoiceState", {
+                invoiceId: creditId, organizationPartyId: f.org, action: "finalize", lastUpdatedStamp: stampOf(creditId)})
+            login(f.users.approve)
             const status = native("change#InvoiceState", {
                 invoiceId: creditId,
                 organizationPartyId: f.org,
-                action: "finalize",
-                lastUpdatedStamp: helper().lib.one(helper().lib.invoiceEntity, {invoiceId: creditId}).lastUpdatedStamp
+                action: "approve",
+                lastUpdatedStamp: stampOf(creditId)
             })
+            // within the organization's write-off tolerance the AR user issues a small one alone
+            login("john.doe")
+            helper().call("update#mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: f.org, writeOffToleranceAmount: "2"})
+            login(f.users.ar)
+            const small = native("create#InvoiceCreditMemo", {originalInvoiceId: invoiceId, amount: "1.50", linkToOriginal: true, allocateToLines: true, operationKey: "native-ar-small-credit"})
+            const smallStatus = native("change#InvoiceState", {
+                invoiceId: small.invoiceId, organizationPartyId: f.org, action: "finalize", lastUpdatedStamp: stampOf(small.invoiceId)}).statusId
+            // round 3: a second credit of the same invoice that the tolerance would let through alone is refused, the first
+            // counted; a line retyped to a prompt discount is refused, and one made with that type is no discount PaymentTerms
+            // confirmed, so it is not let through either
+            const second = native("create#InvoiceCreditMemo", {originalInvoiceId: invoiceId, amount: "1.00", linkToOriginal: true,
+                allocateToLines: true, operationKey: "native-ar-split-credit"})
+            const splitFinalize = helper().rejected("mantle.account.InvoiceServices.change#InvoiceState", {
+                invoiceId: second.invoiceId, organizationPartyId: f.org, action: "finalize", lastUpdatedStamp: stampOf(second.invoiceId)})
+            const secondLine = helper().lib.rows("mantle.account.invoice.InvoiceItem", {invoiceId: second.invoiceId})[0]
+            const retype = helper().rejected("mantle.account.InvoiceServices.store#InvoiceDraftItem", {invoiceId: second.invoiceId,
+                invoiceItemSeqId: secondLine.invoiceItemSeqId, lastUpdatedStamp: secondLine.lastUpdatedStamp, itemTypeEnumId: "ItemPromptDiscount"})
+            helper().call("update#mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: f.org, writeOffToleranceAmount: null})
+            const typed = native("create#InvoiceCreditMemo", {originalInvoiceId: invoiceId, amount: "3", linkToOriginal: true,
+                itemTypeEnumId: "ItemPromptDiscount", overrideGlAccountId: secondLine.overrideGlAccountId, operationKey: "native-ar-typed-credit"})
+            const typedFinalize = helper().rejected("mantle.account.InvoiceServices.change#InvoiceState", {
+                invoiceId: typed.invoiceId, organizationPartyId: f.org, action: "finalize", lastUpdatedStamp: stampOf(typed.invoiceId)})
+            login("john.doe")
+            login(f.users.ar)
             const applied = native("apply#InvoiceCredit", {
                 invoiceId: creditId,
                 toInvoiceId: invoiceId,
@@ -292,6 +321,11 @@ feature("an AR-only user creates finalizes and applies a linked credit with orig
             for (const row of creditEntries)
                 actual[row.glAccountId] = (actual[row.glAccountId] || toDecimal(0)).add(row.amount || 0)
             return {
+                clerkFinalize,
+                smallStatus,
+                splitFinalize,
+                retype,
+                typedFinalize,
                 status,
                 applied,
                 replay,
@@ -307,7 +341,10 @@ feature("an AR-only user creates finalizes and applies a linked credit with orig
             else helper().call("delete#mantle.ledger.config.ItemTypeGlAccount", mappingKey)
         }
     },
-    then({status, applied, replay, expected, actual, sourceTotal, changedAccount, creditTotal}) {
+    then({clerkFinalize, smallStatus, splitFinalize, retype, typedFinalize, status, applied, replay, expected, actual, sourceTotal, changedAccount, creditTotal}) {
+        clerkFinalize.includes("INVOICE_APPROVE")
+        smallStatus == "InvoiceFinalized"
+        splitFinalize.includes("INVOICE_APPROVE") && retype.includes("ITEM_TYPE_FIXED") && typedFinalize.includes("INVOICE_APPROVE")
         status.statusId == "InvoiceFinalized"
         applied.amountApplied.eq(25)
         replay.paymentApplicationId == applied.paymentApplicationId
@@ -396,6 +433,38 @@ feature("self approval is refused by default and explicitly recorded when organi
         refused.includes("SELF_APPROVAL_DENIED")
         saved.isSelfApproved == "Y"
         !!saved.approvedSourceVersion
+    }
+})
+// SEC-BOS-126: a user who changed a draft's lines does not approve it either, though another created it; an approver who
+// changed nothing does
+feature("the user who changed a draft's lines is refused its approval; another approver approves it", {
+    when() {
+        const id = "NATIVE_AR_APPROVE_EDIT"
+        helper().call("create#moqui.security.UserGroup", {userGroupId: id, description: "Native finance approve and edit"})
+        for (const permission of ["INVOICE_APPROVE", "ACCOUNTING_VIEW", "RECEIVABLE_EDIT", "RECEIVABLE_VIEW"])
+            helper().call("create#moqui.security.UserGroupPermission", {userGroupId: id, userPermissionId: permission, fromDate: 0})
+        helper().call("create#mantle.party.Party", {partyId: id, partyTypeEnumId: "PtyPerson"})
+        helper().call("create#moqui.security.UserAccount", {userId: id, username: id, partyId: id, currentPassword: "16ac58bbfa332c1c55bd98b53e60720bfa90d394",
+            passwordHashType: "SHA", timeZone: ec.user.userAccount?.timeZone || "America/Chicago"})
+        helper().call("create#moqui.security.UserGroupMember", {userId: id, userGroupId: id, fromDate: 0})
+        helper().call("create#mantle.party.PartyRelationship", {partyRelationshipId: id, fromPartyId: id, toPartyId: f.org, relationshipTypeEnumId: "PrtAgent", fromDate: 0})
+        const invoice = helper().draft(f, "21")
+        const line = helper().lib.rows("mantle.account.invoice.InvoiceItem", {invoiceId: invoice.invoiceId})[0]
+        login(id)
+        native("store#InvoiceDraftItem", {invoiceId: invoice.invoiceId, invoiceItemSeqId: line.invoiceItemSeqId,
+            lastUpdatedStamp: line.lastUpdatedStamp, amount: "2100"})
+        const stamp = () => helper().lib.one(helper().lib.invoiceEntity, {invoiceId: invoice.invoiceId}).lastUpdatedStamp
+        const changer = helper().rejected("mantle.account.InvoiceServices.change#InvoiceState", {invoiceId: invoice.invoiceId, action: "approve", lastUpdatedStamp: stamp()})
+        login(f.users.approve)
+        const other = native("change#InvoiceState", {invoiceId: invoice.invoiceId, action: "approve", lastUpdatedStamp: stamp()})
+        login("john.doe")
+        return {changer, other, saved: helper().lib.one(helper().lib.invoiceEntity, {invoiceId: invoice.invoiceId})}
+    },
+    then({changer, other, saved}) {
+        changer.includes("SELF_APPROVAL_DENIED")
+        other.statusId == "InvoiceFinalized"
+        saved.approvedByUserId == f.users.approve && saved.isSelfApproved == "N"
+        saved.draftChangedByUserIds.includes("NATIVE_AR_APPROVE_EDIT")
     }
 })
 feature("negative customer drafts become positive credits using outgoing revenue and credit edits cannot exceed the original", {
@@ -601,11 +670,14 @@ feature("fully applied invoices with a retained sent status stay outside unpaid 
             operationKey: "native-paid-credit"
         })
         const creditRecord = helper().lib.one(helper().lib.invoiceEntity, {invoiceId: credit.invoiceId})
+        // an approver issues the linked credit (SEC-BOS-127)
+        login(f.users.approve)
         native("change#InvoiceState", {
             invoiceId: creditRecord.invoiceId,
-            action: "finalize",
+            action: "approve",
             lastUpdatedStamp: creditRecord.lastUpdatedStamp
         })
+        login(f.users.ar)
         native("apply#InvoiceCredit", {
             invoiceId: creditRecord.invoiceId,
             toInvoiceId: invoice.invoiceId,
@@ -852,11 +924,14 @@ feature("an open-period credit settles a closed-period original without rewritin
                 operationKey: "native-closed-source-credit"
             })
             const creditRow = helper().lib.one(helper().lib.invoiceEntity, {invoiceId: credit.invoiceId})
+            // an approver issues the linked credit (SEC-BOS-127)
+            login(fixture.users.approve)
             native("change#InvoiceState", {
                 invoiceId: creditRow.invoiceId,
-                action: "finalize",
+                action: "approve",
                 lastUpdatedStamp: creditRow.lastUpdatedStamp
             })
+            login(fixture.users.ar)
             helper().call("create#mantle.ledger.config.AccountingLock", {
                 accountingLockId: "NATIVE_SETTLE_LOCK",
                 organizationPartyId: fixture.org,

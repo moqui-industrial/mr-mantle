@@ -151,10 +151,11 @@ const records = {
     // impl-marketing P17 (F80; design-marketing §13 Registration): an event reservation's places, reached by its buyer: the scopes
     // RegistrationView (MyRegistration) and RegistrationCancel (CancelRegistration), issued only by the registration services (a
     // reservation's receipt, MarketingPortal.js reserve), never by a user, and opening the organization's Marketing mount; the
-    // buyer's own verified account reaches it by the self relationship. A capability reads its own reservation alone.
+    // buyer's own verified account reaches it by the self relationship. A capability reads its own reservation alone. The
+    // receipt of a free registration held for its buyer's address adds RegistrationConfirm, which confirms it (SEC-PSS-88).
     EventRegistration: {
         permissions: ["MARKETING_EVENT_MANAGE"],
-        scopes: ["RegistrationView", "RegistrationCancel"],
+        scopes: ["RegistrationView", "RegistrationCancel", "RegistrationConfirm"],
         page: {app: "marketing", path: "/Registration?token="},
         self: true,
         resolve(recordId) {

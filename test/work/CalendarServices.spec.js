@@ -804,6 +804,38 @@ feature("a subscription refuses an http URL, and its fetch refuses an internal a
     },
 })
 
+// a feed larger than mantle@calendar-feed-max-bytes is not parsed, and the subscription records why (SEC-FIL-82)
+feature("a feed over the conf's size is refused unparsed, with a fixed error", {
+    when() {
+        setTime(14.5)
+        const http = ec.factory.getTool("HttpFixtures")
+        const url = "https://calendar.example.com/large.ics"
+        http.enable()
+        http.add({method: "GET", url, status: 200, contentType: "text/calendar", body: feedIcs})
+        try {
+            return withConf("mantle@calendar-feed-max-bytes", "64", () =>
+                as("Ada", () => {
+                    const large = call(`${CAL}.subscribe#Calendar`, { url, fetchNow: false }).calendarId
+                    const fetched = call(`${CAL}.fetch#CalendarSubscriptions`, { calendarId: large, force: true })
+                    const row = ec.entity.find("mantle.work.calendar.CalendarSubscription").condition("calendarId", large).one()
+                    const events = ec.entity.find("mantle.work.calendar.CalendarWorkEffort").condition("calendarId", large).count()
+                    call(`${CAL}.delete#Calendar`, { calendarId: large })
+                    return { fetched, row, events, asked: http.count() }
+                })
+            )
+        } finally {
+            http.reset()
+        }
+    },
+    then({ fetched, row, events, asked }) {
+        asked == 1
+        fetched.failedCount == 1
+        row.lastFetchStatus == "error"
+        row.lastFetchError.includes("larger than the 64 bytes")
+        events == 0
+    },
+})
+
 feature("export#Calendar writes an iCalendar file that reads back through the ICalendar tool; import#Calendar reads a series, its moved instance and an all-day event", {
     when() {
         setTime(14.5)
@@ -924,24 +956,41 @@ feature("import#Calendar splits a series at a RANGE=THISANDFUTURE override: the 
     },
 })
 
-feature("a publish link reads the calendar with its password only", {
+// SEC-BOS-102: the password is checked once, for a grant the events take; only a wrong try counts, ten a link in ten minutes, past
+// which even the right one is refused; right ones never lock the link
+feature("a publish link reads the calendar with the grant its right password gives, and stops taking wrong tries after ten", {
     when() {
         setTime(15)
         logout()
-        const wrong = errorOf(`${CAL}.get#PublishedCalendarEvents`, { publishToken, password: "wrong", start: "2027-05-09", end: "2027-05-15" })
-        const right = call(`${CAL}.get#PublishedCalendarEvents`, { publishToken, password: "open sesame", start: "2027-05-09", end: "2027-05-15" })
+        const range = { start: "2027-05-09", end: "2027-05-15" }
+        const open = (password) => call(`${CAL}.open#PublishedCalendar`, { publishToken, password }).grant
+        const wrong = errorOf(`${CAL}.open#PublishedCalendar`, { publishToken, password: "wrong" })
+        const noGrant = errorOf(`${CAL}.get#PublishedCalendarEvents`, Object.assign({ publishToken }, range))
+        const badGrant = errorOf(`${CAL}.get#PublishedCalendarEvents`, Object.assign({ publishToken, grant: "1.forged" }, range))
+        let grant = null
+        for (let i = 0; i < 12; i++) grant = open("open sesame")
+        const right = call(`${CAL}.get#PublishedCalendarEvents`, Object.assign({ publishToken, grant }, range))
+        const guesses = []
+        for (let i = 0; i < 9; i++) guesses.push(errorOf(`${CAL}.open#PublishedCalendar`, { publishToken, password: "guess " + i }))
+        const limited = errorOf(`${CAL}.open#PublishedCalendar`, { publishToken, password: "open sesame" })
+        const stillOpen = call(`${CAL}.get#PublishedCalendarEvents`, Object.assign({ publishToken, grant }, range)).eventList.length
         login("john.doe")
         setTime(15.1)
         const ended = as("Ada", () => call(`${CAL}.unshare#Calendar`, { calendarId: cal.projects, publish: true }).unsharedCount)
         logout()
-        const after = errorOf(`${CAL}.get#PublishedCalendarEvents`, { publishToken, password: "open sesame", start: "2027-05-09", end: "2027-05-15" })
+        const after = errorOf(`${CAL}.get#PublishedCalendarEvents`, Object.assign({ publishToken, grant }, range))
         login("john.doe")
-        return { wrong, right, ended, after }
+        return { wrong, noGrant, badGrant, right, guesses, limited, stillOpen, ended, after }
     },
-    then({ wrong, right, ended, after }) {
-        wrong.includes("not valid")
+    then({ wrong, noGrant, badGrant, right, guesses, limited, stillOpen, ended, after }) {
+        wrong.includes("The password is not right")
+        noGrant.includes("needs its password")
+        badGrant.includes("needs its password")
         right.calendarName == "Ada Projects"
         right.eventList.map((item) => item.title).sort() == ["Design review", "Focus time"]
+        guesses.every((error) => error.includes("The password is not right"))
+        limited.includes("Too many tries")
+        stillOpen == 2
         ended == 1
         after.includes("not valid")
     },
@@ -1017,5 +1066,185 @@ feature("an organizer outside gets an iMIP REPLY by email that carries the reply
         cyLines[0].includes("PARTSTAT=DECLINED")
         emails.includes("Ben Calendarspec accepted: Supplier visit")
         emails.includes("Cy Calendarspec declined: Supplier visit")
+    },
+})
+
+feature("a REPLY to an organizer the replier may not reach keeps the organizer's address, while their own calendar file leaves it out (SEC-BOS-88)", {
+    when() {
+        setTime(17.5)
+        // Yuri, Ada's personal contact with no user, organizes: Ben may not reach Yuri's address
+        const yuri = call("create#mantle.party.Party", { partyTypeEnumId: "PtyPerson", privateOwnerUserId: user.Ada }).partyId
+        call("create#mantle.party.Person", { partyId: yuri, firstName: "Yuri", lastName: "Private" })
+        call("mantle.party.ContactServices.create#EmailAddress", { partyId: yuri, emailAddress: "yuri.private@example.com", contactMechPurposeId: "EmailPrimary" })
+        const visit = event("Private visit", { ownerPartyId: yuri, estimatedStartDate: at(31 * 24 + 10), estimatedCompletionDate: at(31 * 24 + 11) })
+        invite(visit, party.Ben)
+        // the event services as an app's screen grants them, to a group of Ben's, so they run for him with authorization on
+        call("create#moqui.security.UserGroup", { userGroupId: "CS_EVENT_CALLER", description: "Spec event callers" })
+        call("create#moqui.security.UserGroupMember", { userGroupId: "CS_EVENT_CALLER", userId: user.Ben, fromDate: 0 })
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "CS_EVENT_SERVICES", description: "Spec event services" })
+        call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "CS_EVENT_SERVICES", artifactName: "mantle\\.work\\.EventServices\\..*",
+            artifactTypeEnumId: "AT_SERVICE", nameIsPattern: "Y", inheritAuthz: "Y" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "CS_EVENT_AUTHZ", userGroupId: "CS_EVENT_CALLER", artifactGroupId: "CS_EVENT_SERVICES",
+            authzTypeEnumId: "AUTHZT_ALWAYS", authzActionEnumId: "AUTHZA_ALL" })
+        const asBen = (run) => as("Ben", () => {
+            const wasDisabled = ec.artifactExecution.authzDisabled()
+            ec.artifactExecution.enableAuthz()
+            try { return run() } finally { if (wasDisabled) ec.artifactExecution.disableAuthz() }
+        })
+        const own = asBen(() => call(`${EV}.get#EventIcsMaps`, { workEffortIdList: [visit] }).eventMapList[0])
+        const reply = asBen(() => call(`${EV}.respond#EventInvitation`, { workEffortId: visit, response: "accept" }))
+        ec.entity.find("moqui.security.ArtifactAuthz").condition("artifactAuthzId", "CS_EVENT_AUTHZ").deleteAll()
+        ec.entity.find("moqui.security.ArtifactGroupMember").condition("artifactGroupId", "CS_EVENT_SERVICES").deleteAll()
+        ec.entity.find("moqui.security.ArtifactGroup").condition("artifactGroupId", "CS_EVENT_SERVICES").deleteAll()
+        ec.entity.find("moqui.security.UserGroupMember").condition("userGroupId", "CS_EVENT_CALLER").deleteAll()
+        ec.entity.find("moqui.security.UserGroup").condition("userGroupId", "CS_EVENT_CALLER").deleteAll()
+        return { own, parsed: ec.factory.getTool("ICalendar").parse(reply.replyIcsText) }
+    },
+    then({ own, parsed }) {
+        own.organizer.email == null
+        parsed.events[0].organizer.email == "yuri.private@example.com"
+    },
+})
+
+// SEC-BOS-107: an event set to "Only the people on it" (WevRestricted) is Busy to a viewer of its calendar who is not on it: no
+// title, place or organizer in the grid or its calendar file, and check#EventAccess gives no view; its organizer sees it whole
+feature("an event only the people on it see is Busy to a viewer of its calendar who is not on it (SEC-BOS-107)", {
+    when() {
+        setTime(18)
+        const appraisal = as("Ada", () => {
+            cal.reviews = call(`${CAL}.create#Calendar`, { calendarName: "Ada Reviews" }).calendarId
+            call(`${CAL}.share#Calendar`, { calendarId: cal.reviews, userId: user.Ben, permissionEnumId: "CalpView" })
+            return event("Private appraisal", { estimatedStartDate: at(2 * 24 + 16), estimatedCompletionDate: at(2 * 24 + 17),
+                assignToPartyId: party.Ada, calendarId: cal.reviews, visibilityEnumId: "WevRestricted", location: "Room 9" })
+        })
+        we.appraisal = appraisal
+        const ben = as("Ben", () => ({
+            access: call(`${EV}.check#EventAccess`, { workEffortId: appraisal, permission: "none" }),
+            shown: week({ calendarIdList: [cal.reviews] }).find((item) => item.workEffortId === appraisal),
+            ics: call(`${EV}.get#EventIcsMaps`, { workEffortIdList: [appraisal] }).eventMapList[0],
+        }))
+        const ada = as("Ada", () => week({ calendarIdList: [cal.reviews] }).find((item) => item.workEffortId === appraisal))
+        return { ben, ada }
+    },
+    then({ ben, ada }) {
+        ben.access.canView == false
+        ben.shown.title == "Busy"
+        ben.shown.freeBusyOnly == true
+        ben.shown.location == null
+        ben.ics.summary == "Busy"
+        ben.ics.location == null
+        ben.ics.organizer == null
+        ada.title.includes("Private appraisal")
+        ada.freeBusyOnly == false
+    },
+})
+
+// SEC-BOS-108: Find a time answers the busy times of a party the caller may reach and no other: Ben, with the event services
+// granted and authorization on, gets Ada's but not those of Ada's personal contact, who has an appointment that day
+feature("get#FreeBusy answers only a party the caller may reach: not another user's personal contact (SEC-BOS-108)", {
+    when() {
+        setTime(18.5)
+        const zed = call("create#mantle.party.Party", { partyTypeEnumId: "PtyPerson", privateOwnerUserId: user.Ada }).partyId
+        call("create#mantle.party.Person", { partyId: zed, firstName: "Zed", lastName: "Private" })
+        event("Zed's appointment", { ownerPartyId: zed, estimatedStartDate: at(32 * 24 + 10), estimatedCompletionDate: at(32 * 24 + 11) })
+        call("create#moqui.security.UserGroup", { userGroupId: "CS_FREEBUSY_CALLER", description: "Spec free/busy callers" })
+        call("create#moqui.security.UserGroupMember", { userGroupId: "CS_FREEBUSY_CALLER", userId: user.Ben, fromDate: 0 })
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "CS_FREEBUSY_SERVICES", description: "Spec free/busy services" })
+        call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "CS_FREEBUSY_SERVICES", artifactName: "mantle\\.work\\.EventServices\\..*",
+            artifactTypeEnumId: "AT_SERVICE", nameIsPattern: "Y", inheritAuthz: "Y" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "CS_FREEBUSY_AUTHZ", userGroupId: "CS_FREEBUSY_CALLER", artifactGroupId: "CS_FREEBUSY_SERVICES",
+            authzTypeEnumId: "AUTHZT_ALWAYS", authzActionEnumId: "AUTHZA_ALL" })
+        try {
+            return as("Ben", () => {
+                const wasDisabled = ec.artifactExecution.authzDisabled()
+                ec.artifactExecution.enableAuthz()
+                try {
+                    const out = call(`${EV}.get#FreeBusy`, { partyIdList: [zed, party.Ada], fromDate: at(32 * 24), thruDate: at(33 * 24) })
+                    return { zed, parties: out.freeBusyList.map((entry) => entry.partyId) }
+                } finally { if (wasDisabled) ec.artifactExecution.disableAuthz() }
+            })
+        } finally {
+            ec.entity.find("moqui.security.ArtifactAuthz").condition("artifactAuthzId", "CS_FREEBUSY_AUTHZ").deleteAll()
+            ec.entity.find("moqui.security.ArtifactGroupMember").condition("artifactGroupId", "CS_FREEBUSY_SERVICES").deleteAll()
+            ec.entity.find("moqui.security.ArtifactGroup").condition("artifactGroupId", "CS_FREEBUSY_SERVICES").deleteAll()
+            ec.entity.find("moqui.security.UserGroupMember").condition("userGroupId", "CS_FREEBUSY_CALLER").deleteAll()
+            ec.entity.find("moqui.security.UserGroup").condition("userGroupId", "CS_FREEBUSY_CALLER").deleteAll()
+        }
+    },
+    then({ zed, parties }) {
+        parties.includes(party.Ada)
+        !parties.includes(zed)
+    },
+})
+
+// SEC-BOS-108/112 (review): naming another party (a contact's calendar tab, a REST caller's partyId) shows its events the user
+// may not open as Busy: Ben asks for Ada's week and sees her dentist visit's time only, Ada sees it whole
+feature("an event in only because another asked party is on it is Busy unless the user may open it", {
+    when() {
+        setTime(19)
+        const dentist = as("Ada", () => event("Dentist visit", { estimatedStartDate: at(3 * 24 + 8), estimatedCompletionDate: at(3 * 24 + 9),
+                assignToPartyId: party.Ada, location: "Main Street clinic" }))
+        const ben = as("Ben", () => week({ partyId: party.Ada, includeAllUsers: false }).find((item) => item.workEffortId === dentist))
+        const ada = as("Ada", () => week({ partyId: party.Ada, includeAllUsers: false }).find((item) => item.workEffortId === dentist))
+        return { ben, ada }
+    },
+    then({ ben, ada }) {
+        ben.title == "Busy"
+        ben.freeBusyOnly == true
+        ben.location == null
+        ben.ownerName == null
+        ada.title.includes("Dentist visit")
+    },
+})
+
+// SEC-BOS-107 (review): a changed occurrence is Busy in a calendar file when it or its series is restricted, and the record rule
+// (get#RecordLinkInfo, which EventDetail and the popover fall back on) gives a viewer of the calendar no view of a restricted event
+feature("a restricted changed occurrence of an open series is Busy in Ben's calendar file, and the record rule hides a restricted event from a calendar viewer", {
+    when() {
+        setTime(19.5)
+        const ids = as("Ada", () => {
+            const series = event("Weekly one-to-one", { estimatedStartDate: at(4 * 24 + 9), estimatedCompletionDate: at(4 * 24 + 9.5),
+                    assignToPartyId: party.Ada, calendarId: cal.reviews })
+            const moved = event("One-to-one about pay", { estimatedStartDate: at(4 * 24 + 15), estimatedCompletionDate: at(4 * 24 + 15.5),
+                    assignToPartyId: party.Ada, visibilityEnumId: "WevRestricted", location: "Room 9" })
+            return { series, moved }
+        })
+        call("create#mantle.work.effort.WorkEffortAssoc", { workEffortId: ids.series, toWorkEffortId: ids.moved,
+                workEffortAssocTypeEnumId: "WeatRecurrenceInstance", fromDate: at(4 * 24 + 9) })
+        call("create#moqui.security.UserGroup", { userGroupId: "CS_RECORD_CALLER", description: "Spec record callers" })
+        call("create#moqui.security.UserGroupMember", { userGroupId: "CS_RECORD_CALLER", userId: user.Ben, fromDate: 0 })
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "CS_RECORD_SERVICES", description: "Spec record services" })
+        call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "CS_RECORD_SERVICES",
+            artifactName: "mantle\\.(work\\.EventServices|party\\.CommunicationServices)\\..*", artifactTypeEnumId: "AT_SERVICE", nameIsPattern: "Y", inheritAuthz: "Y" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "CS_RECORD_AUTHZ", userGroupId: "CS_RECORD_CALLER", artifactGroupId: "CS_RECORD_SERVICES",
+            authzTypeEnumId: "AUTHZT_ALWAYS", authzActionEnumId: "AUTHZA_ALL" })
+        call("create#moqui.security.ArtifactAuthzFilter", { artifactAuthzId: "CS_RECORD_AUTHZ", entityFilterSetId: "MANTLE_USER_ORG" })
+        try {
+            return as("Ben", () => {
+                const maps = call(`${EV}.get#EventIcsMaps`, { workEffortIdList: [ids.series] }).eventMapList
+                const wasDisabled = ec.artifactExecution.authzDisabled()
+                ec.artifactExecution.enableAuthz()
+                try {
+                    const record = (recordId) => call("mantle.party.CommunicationServices.get#RecordLinkInfo", { recordEntityName: "mantle.work.effort.WorkEffort",
+                            recordId, checkOnly: true }).recordVisible
+                    return { maps, ids, appraisal: record(we.appraisal), series: record(ids.series) }
+                } finally { if (wasDisabled) ec.artifactExecution.disableAuthz() }
+            })
+        } finally {
+            ec.entity.find("moqui.security.ArtifactAuthzFilter").condition("artifactAuthzId", "CS_RECORD_AUTHZ").deleteAll()
+            ec.entity.find("moqui.security.ArtifactAuthz").condition("artifactAuthzId", "CS_RECORD_AUTHZ").deleteAll()
+            ec.entity.find("moqui.security.ArtifactGroupMember").condition("artifactGroupId", "CS_RECORD_SERVICES").deleteAll()
+            ec.entity.find("moqui.security.ArtifactGroup").condition("artifactGroupId", "CS_RECORD_SERVICES").deleteAll()
+            ec.entity.find("moqui.security.UserGroupMember").condition("userGroupId", "CS_RECORD_CALLER").deleteAll()
+            ec.entity.find("moqui.security.UserGroup").condition("userGroupId", "CS_RECORD_CALLER").deleteAll()
+        }
+    },
+    then({ maps, ids, appraisal, series }) {
+        maps.length == 2
+        maps.find((map) => map.recurrenceId != null).summary == "Busy"
+        maps.find((map) => map.recurrenceId != null).location == null
+        maps.find((map) => map.recurrenceId == null).summary == "Weekly one-to-one"
+        appraisal != true
+        series == true
     },
 })

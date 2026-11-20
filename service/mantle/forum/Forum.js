@@ -100,8 +100,20 @@ function canEditPost(state, event, a) {
         trustLevel(a.category.siteId) !== 'new'
     )
 }
-function postProjection(state, event, a, t) {
+/* A message of a private conversation held as spam (the only hold a private message has) that the caller, a participant,
+   may release. */
+const heldPrivate = (state, a) =>
+    state.visibility === 'pending' &&
+    a.category?.visibility === 'private' &&
+    !!a.canRead
+function postProjection(state, event, a, t, shownHeld = null) {
     if (!postVisible(state, event, a)) return null
+    // a held message's text is collapsed for the conversation's other participants until one asks to see it (getPosts
+    // showHeld): it may be what the gateway took it for
+    const collapsed =
+        heldPrivate(state, a) &&
+        event.fromPartyId !== me() &&
+        shownHeld !== event.communicationEventId
     const profile = one(S + 'PublicSiteProfile', {
         siteId: a.category.siteId,
         partyId: event.fromPartyId,
@@ -115,16 +127,18 @@ function postProjection(state, event, a, t) {
         author: pick(profile, 'handle displayName avatarId'),
         entryDate: event.entryDate,
         // A record's post links what it names (#12, @handle) for this reader; a state change is a line with no text.
-        body: deleted
+        body:
+            deleted || collapsed
             ? ''
             : a.record
               ? core.recordText(
-                    StringUtilities.cleanHtml(event.body || ''),
+                    core.memberHtml(event.body || '', a.category.siteId),
                     state.rootCommEventId,
                 )
-              : StringUtilities.cleanHtml(event.body || ''),
+              : core.memberHtml(event.body || '', a.category.siteId),
         postKind: state.postKind || null,
         visibility: state.visibility,
+        collapsed,
         parentCommEventId: event.parentCommEventId || null,
         wiki: state.wiki === 'Y',
         accepted: !!t && t.acceptedAnswerId === event.communicationEventId,
@@ -154,6 +168,8 @@ function postProjection(state, event, a, t) {
                 !deleted &&
                 state.visibility === 'approved' &&
                 event.fromPartyId !== me(),
+            // a message of a conversation held as spam is released by its sender or another participant
+            canRelease: heldPrivate(state, a) && !!a.canReply,
             canDelete:
                 !deleted &&
                 state.rootCommEventId !== event.communicationEventId &&
@@ -467,6 +483,30 @@ function protectListOwner(contactListId, partyId) {
     )
     if (!replacements) invalid('Assign another active category owner first')
 }
+/* A change to who holds a site's or a category's rights asks a recent sign-in (SEC-PFS-96), as the framework's
+   require#RecentAuth does: a password, a second factor's code or a provider sign-in with its auth_time in the last five
+   minutes, so an account that signs in through a provider acts too and no password is asked or counted as a failed login.
+   It asks check#RecentAuth, as Smithy's git access does: the PASS authority runs an operation with authorization disabled
+   (PassAuthority.js), which require#RecentAuth lets through. Through a remote frontend it is the visitor's own sign-in that
+   its delegation carries (passSignedInAt). Refused with the reason reauthRequired and require#RecentAuth's header. */
+const RECENT_SIGN_IN = 5 * 60000
+function reauthenticate() {
+    const signedInAt = ec.user.context.passSignedInAt
+    const recent =
+        signedInAt != null
+            ? millis(now()) - Number(signedInAt) <= RECENT_SIGN_IN
+            : ec.service
+                  .sync()
+                  .name('org.moqui.sso.RecentAuthServices.check#RecentAuth')
+                  .parameters({ maxAgeSeconds: RECENT_SIGN_IN / 1000 })
+                  .call()?.recent === true
+    if (recent) return
+    ec.web?.response?.setHeader('X-Moqui-Reauth', 'required')
+    fail(
+        'AuthenticationRequired',
+        'reauthRequired: Confirm it is you: sign in again to do this',
+    )
+}
 methods.setMembership = (p) => {
     site(p.siteId, true)
     const m = member(p.siteId, p.targetPartyId)
@@ -477,6 +517,9 @@ methods.setMembership = (p) => {
         invalid('Invalid member state')
     if (m.role === 'owner' && p.state !== 'active')
         protectOwner(p.siteId, m.partyId)
+    // an owner's membership takes away or gives back an owner's rights, as a role change does
+    if (m.role === 'owner')
+        reauthenticate()
     audit(
         p.siteId,
         null,
@@ -497,21 +540,7 @@ methods.setMembership = (p) => {
 }
 methods.setSiteRole = (p) => {
     site(p.siteId, true)
-    const auth = ec.service
-        .sync()
-        .throwOnError(true)
-        .name('org.moqui.impl.UserServices.login#UserAccount')
-        .parameters({
-            username: ec.user.userAccount.username,
-            password: p.password,
-            code: p.code,
-        })
-        .call()
-    if (!auth.loggedIn)
-        fail(
-            'AuthenticationRequired',
-            'Reauthenticate before changing site roles',
-        )
+    reauthenticate()
     if (!['member', 'moderator', 'owner'].includes(p.role))
         invalid('Invalid role')
     const m = member(p.siteId, p.targetPartyId)
@@ -635,7 +664,7 @@ methods.storeProfile = (p) => {
         avatarId,
         handle: p.handle,
         displayName: String(p.displayName || p.handle).slice(0, 100),
-        bio: StringUtilities.cleanHtml(p.bio || ''),
+        bio: core.memberHtml(p.bio || '', p.siteId),
         discoverability: p.discoverability || 'members',
         locale: p.locale,
         timeZone: p.timeZone,
@@ -686,6 +715,7 @@ methods.getProfile = (p) => {
                 v,
                 'handle displayName avatarId bio locale timeZone revision',
             ),
+            bio: core.memberHtml(v.bio || '', p.siteId),
             ...(v.partyId === me()
                 ? { discoverability: v.discoverability }
                 : {}),
@@ -1161,6 +1191,10 @@ methods.getPosts = (p) => {
                         'equals',
                         me() || '_ANONYMOUS_',
                     ),
+                    // a conversation's participants see a message held in it, to release it
+                    ...(t.kind === 'private'
+                        ? [cf.makeCondition('visibility', 'equals', 'pending')]
+                        : []),
                 ],
                 'or',
             ),
@@ -1221,7 +1255,7 @@ methods.getPosts = (p) => {
             communicationEventId: st.communicationEventId,
         })
         if (event) {
-            const out = postProjection(st, event, a, t)
+            const out = postProjection(st, event, a, t, p.showHeld || null)
             if (out) list.push(out)
         }
     }
@@ -1235,6 +1269,22 @@ methods.getPosts = (p) => {
         generation: Number(a.site.generation),
     }
 }
+/* A draft is a member's (or an internal account's, which posts through Comms, or the operator's), within the post's length and title
+   limits; a member keeps at most mantle@forum-drafts-per-member of a site's drafts, and one untouched for
+   mantle@forum-draft-days is removed (cleanup#Drafts). */
+function draftLimits(p) {
+    const m = member(p.siteId)
+    if (!(active(m) && m.state === 'active') && !internalParty(me()) && !isOperator())
+        fail('Unauthorized', 'Join the site to keep drafts')
+    draftLength(p)
+    if (p.title != null && String(p.title).length > 250)
+        invalid('A title is at most 250 characters')
+}
+function draftLength(p) {
+    const most = policy(p.siteId).maxPostLength
+    if (String(p.body || '').length > most)
+        invalid('Body must contain at most ' + most + ' characters')
+}
 methods.storeDraft = (p) => {
     site(p.siteId)
     const partyId = requireUser(),
@@ -1246,6 +1296,19 @@ methods.storeDraft = (p) => {
         fail('Conflict', 'Draft changed; reload and compare')
     if (p.poll && JSON.stringify(p.poll).length > 20000)
         invalid('The poll draft is too large')
+    draftLimits(p)
+    if (!old) {
+        const most = ec.resource.script('component://mr-mantle/service/mantle/other/Limits.js').limit(
+            'forum-drafts-per-member',
+        )
+        if (
+            find(F + 'ForumDraft', { siteId: p.siteId, partyId }).count() >=
+            most
+        )
+            invalid(
+                'You have ' + most + ' drafts here; publish or discard one first',
+            )
+    }
     if (old) revision(old, p.expectedRevision)
     if (p.contactListId) category(p.contactListId, p.siteId)
     // A record's conversation keeps a reply's or an edit's draft, never a new topic's.
@@ -1314,8 +1377,9 @@ methods.discardDraft = (p) => {
 methods.previewPost = (p) => {
     site(p.siteId)
     requireUser()
+    draftLength(p)
     return {
-        body: renderSource(sourceFormatOf(p.sourceFormat), p.body || ''),
+        body: renderSource(sourceFormatOf(p.sourceFormat), p.body || '', p.siteId),
     }
 }
 methods.publishPost = (p) => {
@@ -1402,7 +1466,7 @@ methods.publishPost = (p) => {
                 contactListId: a.category.contactListId,
                 kind: isRecord ? 'comment' : existing ? 'reply' : 'topic',
                 ...(existing ? {} : { title: p.title ?? '' }),
-                body: renderSource(format, p.body || ''),
+                body: renderSource(format, p.body || '', p.siteId),
                 source: p.body ?? '',
                 sourceFormat: format,
                 canModerate: a.canModerate,
@@ -1497,18 +1561,21 @@ methods.publishPost = (p) => {
         const poll = p.poll || json(savedDraft?.pollJson, null)
         if (poll) createPoll(p.siteId, root, postId, poll)
         gateCommit(gated, { pending })
-        // a private message held (the mail gateway's spam verdict, the only hold a private post has) stays with its author
-        // and files no review item: staff read a private message only from a participant's report (SEC-PFS-83)
-        if (pending && !isPrivate)
-            review(
-                p.siteId,
-                a.category.contactListId,
-                'post',
-                postId,
-                1,
-                gated.reasonFamily,
-            )
-        else {
+        // A held post waits in its review queue. A private message held (the mail gateway's spam verdict, the only hold a
+        // private post has) files no review item, as staff read a private message only from a participant's report
+        // (SEC-PFS-83): its sender and the conversation's other participants see it held and release it
+        // (releaseHeldMessage), and until then it is delivered to no one.
+        if (pending) {
+            if (!isPrivate)
+                review(
+                    p.siteId,
+                    a.category.contactListId,
+                    'post',
+                    postId,
+                    1,
+                    gated.reasonFamily,
+                )
+        } else {
             if (gated.flag)
                 review(
                     p.siteId,
@@ -1620,6 +1687,12 @@ methods.updatePost = (p) => {
         invalid('Only the author changes attachments')
     if (a.canModerate && event.fromPartyId !== me() && !p.reason)
         invalid('Staff edits require a reason')
+    // The author or staff may take the earlier versions out of the post's public history when they edit, so text an
+    // edit removes (an address, a secret, abuse) is no longer shown to readers or restored by a wiki editor; the history
+    // stays readable unless they ask (setPostHistory hides or shows it later). The author and staff read every version.
+    const hideHistory = p.hideHistory === true
+    if (hideHistory && !a.canModerate && event.fromPartyId !== me())
+        fail('Unauthorized', 'Only the author or staff hide earlier versions')
     // An edit keeps the post's authoring format unless it names one.
     const format =
         p.sourceFormat == null || p.sourceFormat === ''
@@ -1641,7 +1714,7 @@ methods.updatePost = (p) => {
                     : p.postId === st.rootCommEventId
                       ? 'topic'
                       : 'reply',
-            body: renderSource(format, p.body || ''),
+            body: renderSource(format, p.body || '', p.siteId),
             source: p.body ?? '',
             sourceFormat: format,
             canModerate: a.canModerate,
@@ -1662,6 +1735,14 @@ methods.updatePost = (p) => {
         reason: p.reason,
         publicHistoryAllowed: 'Y',
     })
+    if (hideHistory)
+        for (const earlier of Array.from(
+            find(F + 'ForumPostRevision', { communicationEventId: p.postId })
+                .condition('revision', 'less', r)
+                .condition('publicHistoryAllowed', 'equals', 'Y')
+                .list(),
+        ))
+            update(earlier, { publicHistoryAllowed: 'N' })
     update(event, { body, editedDate: now() })
     update(st, {
         revision: r,
@@ -2419,23 +2500,9 @@ methods.resolveDelivery = (p) => {
 }
 methods.storeMailSettings = (p) => {
     site(p.siteId, true)
-    const allowed = String(ec.factory.getConfValue('pass@sender-addresses') || '')
-        .split(',')
-        .map((x) => x.trim())
-    if (!allowed.includes(p.senderAddress))
-        invalid('Sender must be registered by the operator')
-    const template = one('moqui.basic.email.EmailTemplate', {
-        emailTemplateId: p.templateId,
-    })
-    const templates = String(ec.factory.getConfValue('pass@mail-template-ids') || '')
-        .split(',')
-        .map((x) => x.trim())
-    if (
-        !template ||
-        template.fromAddress !== p.senderAddress ||
-        !templates.includes(p.templateId)
-    )
-        invalid('Template and sender must be registered together')
+    // a sender of the operator's registration that serves this site (ForumCore.js senderServes, SEC-PFS-99)
+    const refusal = core.mailSettingsRefusal(p.siteId, p.senderAddress, p.templateId)
+    if (refusal) invalid(refusal)
     const old = one(F + 'ForumMailSettings', { siteId: p.siteId }, true)
     if (old) revision(old, p.expectedRevision)
     const values = {
@@ -2553,17 +2620,7 @@ methods.stageAttachment = (p) => {
         invalid('Upload must contain 1 byte to ' + maxBytes + ' bytes')
     const type = String(file.contentType || 'application/octet-stream')
     // A repository's file is of any type: it is committed, never served as a post's media.
-    if (
-        repositoryBytes == null &&
-        ![
-            'image/png',
-            'image/jpeg',
-            'image/webp',
-            'image/gif',
-            'application/pdf',
-            'text/plain',
-        ].includes(type)
-    )
+    if (repositoryBytes == null && !core.ATTACHMENT_TYPES.includes(type))
         invalid('Unsupported attachment type')
     if (p.purpose === 'avatar' && !type.startsWith('image/'))
         invalid('Avatars require a raster image')
@@ -2603,9 +2660,7 @@ methods.stageAttachment = (p) => {
         ownerPartyId: partyId,
         draftId: p.draftId,
         location,
-        filename: String(file.name || 'attachment')
-            .replace(/[^a-zA-Z0-9._ -]/g, '_')
-            .slice(0, 100),
+        filename: core.attachmentName(file.name),
         mimeType: type,
         byteSize: Number(file.size),
         scanState: 'pending',
@@ -3099,7 +3154,7 @@ methods.getDraft = (p) => {
             body:
                 d.sourceFormat === 'markdown'
                     ? d.sourceText || ''
-                    : StringUtilities.cleanHtml(d.sourceText || ''),
+                    : core.memberHtml(d.sourceText || '', p.siteId),
             sourceFormat: d.sourceFormat === 'markdown' ? 'markdown' : 'html',
             attachments: rows(
                 F + 'ForumAttachment',
@@ -3127,15 +3182,31 @@ methods.joinCategory = (p) => {
     site(p.siteId)
     const partyId = requireUser(),
         a = category(p.contactListId, p.siteId)
+    // A current, active member of the site, as site() tests one: in its dates and not suspended there.
+    const m = member(p.siteId)
     // Joining a help category would open every other member's thread; staff add help members.
     if (
-        member(p.siteId)?.state !== 'active' ||
+        !active(m) ||
+        m.state !== 'active' ||
+        sanctioned(p.siteId, partyId, p.contactListId, 'suspend') ||
         !a.canRead ||
         a.category.visibility === 'help'
     )
         fail('Unauthorized', 'Joining is not permitted')
-    const old = listMember(p.contactListId, partyId)
-    if (old) return { state: 'active' }
+    // a current request or membership is answered as it stands, so asking again adds no row for the moderators
+    const old = Array.from(
+        find('mantle.marketing.contact.ContactListParty', {
+            contactListId: p.contactListId,
+            partyId,
+        })
+            .condition('statusId', 'in', ['CLPT_PENDING', 'CLPT_ACCEPTED'])
+            .conditionDate('fromDate', 'thruDate', now())
+            .orderBy('-fromDate')
+            .limit(1)
+            .list(),
+    )[0]
+    if (old)
+        return { state: old.statusId === 'CLPT_PENDING' ? 'pending' : 'active' }
     const values = {
         contactListId: p.contactListId,
         partyId,
@@ -3220,21 +3291,7 @@ methods.setCategoryMember = (p) => {
                 'Unauthorized',
                 'Site owner approval is required to delegate category roles',
             )
-        const auth = ec.service
-            .sync()
-            .throwOnError(true)
-            .name('org.moqui.impl.UserServices.login#UserAccount')
-            .parameters({
-                username: ec.user.userAccount.username,
-                password: p.password,
-                code: p.code,
-            })
-            .call()
-        if (!auth.loggedIn)
-            fail(
-                'AuthenticationRequired',
-                'Reauthenticate before changing category roles',
-            )
+        reauthenticate()
     }
     ec.service
         .sync()
@@ -3715,9 +3772,12 @@ methods.getEditablePost = (p) => {
             title: root.subject,
             body: markdown
                 ? source.sourceText || ''
-                : StringUtilities.cleanHtml(event.body || ''),
+                : core.memberHtml(event.body || '', p.siteId),
             sourceFormat: markdown ? 'markdown' : 'html',
             mode: 'edit',
+            // the author and staff may hide the earlier versions from readers as they edit
+            canHideHistory: a.canModerate || event.fromPartyId === me(),
+            hideHistory: false,
             attachments: rows(
                 F + 'ForumAttachment',
                 { siteId: p.siteId, communicationEventId: p.postId },
@@ -4460,6 +4520,9 @@ methods.getPostHistory = (p) => {
         rootCommEventId: st.rootCommEventId,
         revision: Number(st.revision),
         canRestore: canEditPost(st, event, historyAccess(p).a),
+        // the author and staff hide the earlier versions from readers, or show them again (setPostHistory)
+        canSetHistory:
+            !!me() && (historyAccess(p).a.canModerate || event.fromPartyId === me()),
         revisionList: list,
     }
 }
@@ -4506,7 +4569,80 @@ methods.restorePostRevision = (p) => {
         body: r.sourceText || r.sanitizedBody,
         expectedRevision: p.expectedRevision,
         reason: p.reason || 'Restored revision ' + r.revision,
+        hideHistory: p.hideHistory ?? false,
     })
+}
+/* The author or staff hide a post's earlier versions from its readers (history 'hidden'), or show them again ('shown'):
+   every revision before the current one is marked publicHistoryAllowed N or Y. The author and staff read them either way. */
+methods.setPostHistory = (p) => {
+    requireUser()
+    if (!['hidden', 'shown'].includes(p.history))
+        invalid('history is hidden or shown')
+    const { st, event, a } = historyAccess(p)
+    if (!a.canModerate && event.fromPartyId !== me())
+        fail('Unauthorized', 'Only the author or staff hide or show earlier versions')
+    one(F + 'ForumPostState', { communicationEventId: p.postId }, true)
+    const flag = p.history === 'hidden' ? 'N' : 'Y'
+    for (const r of Array.from(
+        find(F + 'ForumPostRevision', { communicationEventId: p.postId })
+            .condition('revision', 'less', Number(st.revision))
+            .list(),
+    ))
+        if (r.publicHistoryAllowed !== flag) update(r, { publicHistoryAllowed: flag })
+    if (a.canModerate && event.fromPartyId !== me())
+        audit(
+            p.siteId,
+            a.category.contactListId,
+            'post',
+            p.postId,
+            'history-' + p.history,
+            p.reason || '',
+            null,
+            null,
+        )
+    return { history: p.history }
+}
+/* A participant of a private conversation (its sender or a recipient) who may reply in it releases a message of it the mail gateway held as
+   spam: it is delivered to the conversation as a sent message is. No review item and no staff: a private message is
+   staff's only on a participant's report (SEC-PFS-83). The release adds nothing to the sender's approved contributions,
+   so another's release of a held message does not raise the sender's trust. */
+methods.releaseHeldMessage = (p) => {
+    requireUser()
+    site(p.siteId)
+    one(S + 'PublicSite', { siteId: p.siteId }, true)
+    const st = one(
+        F + 'ForumPostState',
+        { communicationEventId: p.postId },
+        true,
+    )
+    if (!st) missing()
+    const t = one(F + 'ForumTopic', { rootCommEventId: st.rootCommEventId }, true)
+    if (!t || t.siteId !== p.siteId || t.kind !== 'private') missing()
+    const a = conversationAccess(t)
+    if (!a.canRead) missing()
+    revision(st, p.expectedRevision)
+    if (!heldPrivate(st, a)) fail('Conflict', 'The message is not held')
+    // as writing in it: a participant who may not reply (silenced, or private messages turned off) releases nothing
+    if (!a.canReply) fail('Unauthorized', 'Releasing is not permitted')
+    const event = one(E + 'CommunicationEvent', {
+        communicationEventId: p.postId,
+    })
+    update(st, { visibility: 'approved', approvedRevision: st.revision })
+    update(t, {
+        visiblePostCount: Number(t.visiblePostCount || 0) + 1,
+        lastActivity: now(),
+        revision: Number(t.revision) + 1,
+    })
+    allocatePrivate(p.postId, t.rootCommEventId, event.fromPartyId)
+    create(F + 'ForumOutbox', {
+        outboxId: id(),
+        siteId: p.siteId,
+        communicationEventId: p.postId,
+        eventType: 'post',
+        state: 'pending',
+        createdAt: now(),
+    })
+    return { visibility: 'approved', revision: Number(st.revision) }
 }
 methods.deletePost = (p) => {
     requireUser()
@@ -4887,6 +5023,16 @@ methods.storeRoute = (p) =>
     receipt(p, 'storeRoute', () => {
         site(p.siteId, true)
         const address = routeAddress(p.address)
+        // a route takes no mail while the operator names no forum inbound account (SEC-PFS-85): said once a process
+        if (!forumInboundAccounts().length) {
+            const warned = ec.cache.getCache('mantle.forum.InboundAccountsWarned')
+            if (!warned.get('routes')) {
+                warned.put('routes', 'Y')
+                ec.logger.warn(
+                    'Forum route ' + address + ' is saved, but mantle@forum-inbound-accounts names no account: no route takes mail until one is named',
+                )
+            }
+        }
         if (p.contactListId) {
             const c = one(F + 'ForumCategory', {
                 contactListId: p.contactListId,
@@ -4973,7 +5119,7 @@ methods.testRoute = (p) => {
     site(p.siteId, true)
     const r = one(F + 'ForumMailRoute', { routeId: p.routeId })
     if (!r || r.siteId !== p.siteId) missing()
-    const settings = one(F + 'ForumMailSettings', { siteId: p.siteId }),
+    const settings = core.mailSettings(p.siteId),
         ua = ec.user.userAccount
     if (!settings) fail('Conflict', 'Configure outbound mail first')
     if (
@@ -5109,140 +5255,21 @@ const textHtml = (text) =>
                 '</p>',
         )
         .join('')
-/* The tokens of an Authentication-Results field (RFC 8601 section 2.2) in its parts between semicolons: comments
-   (nested, with quoted pairs) are dropped, a quoted string is one token {quoted}, '=' is a token, and anything else up
-   to white space, '=', ';' or a quote is a word ("header.from", "dkim"; a property's "header . d" is joined). */
-function authResultParts(text) {
-    const parts = [[]]
-    const source = String(text || '')
-    let word = ''
-    const end = () => {
-        if (word) parts[parts.length - 1].push(word)
-        word = ''
-    }
-    for (let i = 0; i < source.length; i++) {
-        const ch = source[i]
-        if (ch === '(') {
-            end()
-            let depth = 1
-            for (i++; i < source.length && depth; i++) {
-                if (source[i] === '\\') i++
-                else if (source[i] === '(') depth++
-                else if (source[i] === ')') depth--
-            }
-            i--
-        } else if (ch === '"') {
-            end()
-            let quoted = ''
-            for (i++; i < source.length && source[i] !== '"'; i++)
-                quoted += source[i] === '\\' ? source[++i] || '' : source[i]
-            parts[parts.length - 1].push({ quoted })
-        } else if (ch === ';') {
-            end()
-            parts.push([])
-        } else if (ch === '=') {
-            end()
-            parts[parts.length - 1].push('=')
-        } else if (/\s/.test(ch)) end()
-        else word += ch
-    }
-    end()
-    // a property's name may have white space around its dot
-    return parts.map((tokens) => {
-        const out = []
-        for (const token of tokens) {
-            const last = out[out.length - 1]
-            if (
-                typeof token === 'string' &&
-                typeof last === 'string' &&
-                token !== '=' &&
-                last !== '=' &&
-                (token.startsWith('.') || last.endsWith('.'))
-            )
-                out[out.length - 1] = last + token
-            else out.push(token)
-        }
-        return out
-    })
-}
-const tokenText = (token) =>
-    token == null ? '' : typeof token === 'string' ? token : token.quoted
-/* An Authentication-Results field read (RFC 8601): {authservId, results: method -> {result, props}}, the first result
-   of each method only (a later one of the same method, which a sender can add, counts for nothing); null for no field. */
-function readAuthResults(text) {
-    const parts = authResultParts(text)
-    const authservId = tokenText(parts[0][0]).toLowerCase()
-    if (!authservId) return null
-    const results = {}
-    for (const tokens of parts.slice(1)) {
-        if (tokens[1] !== '=' || typeof tokens[0] !== 'string') continue
-        const method = tokens[0].toLowerCase().split('/')[0]
-        if (!method || method === 'none' || results[method]) continue
-        const props = {}
-        for (let k = 3; k + 2 < tokens.length; k++) {
-            if (tokens[k + 1] !== '=' || typeof tokens[k] !== 'string') continue
-            const name = tokens[k].toLowerCase()
-            if (!(name in props)) props[name] = tokenText(tokens[k + 2])
-            k += 2
-        }
-        results[method] = {
-            result: tokenText(tokens[2]).toLowerCase(),
-            props,
-        }
-    }
-    return { authservId, results }
-}
-/* The authserv-ids of the mail gateway whose Authentication-Results are trusted (smtp-server@authserv-id, comma
-   separated, in lower case): with none configured nothing counts as authenticated. */
-const trustedAuthservIds = () =>
-    String(ec.factory.getConfValue('smtp-server@authserv-id') || '')
-        .split(',')
-        .map((value) => value.trim().toLowerCase())
-        .filter(Boolean)
-/* Whether the mail gateway authenticated a sender's domain: in an Authentication-Results field of a trusted authserv-id,
-   DMARC passed for the From domain, or a DKIM signature passed for that very domain (strict alignment). A parent's
-   signature is not the subdomain's (d=host.example for team.host.example, SEC-PFS-64): relaxed alignment needs the
-   organizational domain, which the gateway's DMARC finds by the public suffix list and this code does not.
-   Another domain's pass, another server's field and a later result of a method count for nothing. Every path that trusts
-   "authenticated by the gateway" asks this: a post by mail, a held message's sender, a report filed as an account. */
-function gatewayAuthenticated(values, sender) {
-    const trusted = trustedAuthservIds()
-    const domain = String(sender || '')
-        .split('@')
-        .pop()
-        .toLowerCase()
-    if (!trusted.length || !domain || !String(sender || '').includes('@'))
-        return false
-    const aligned = (d) => {
-        const signer = String(d || '')
-            .replace(/^.*@/, '')
-            .toLowerCase()
-        return !!signer && domain === signer
-    }
-    return values.some((value) => {
-        const read = readAuthResults(value)
-        if (!read || !trusted.includes(read.authservId)) return false
-        const dmarc = read.results.dmarc
-        if (
-            dmarc?.result === 'pass' &&
-            String(dmarc.props['header.from'] || '').toLowerCase() === domain
-        )
-            return true
-        const dkim = read.results.dkim
-        return (
-            dkim?.result === 'pass' &&
-            aligned(dkim.props['header.d'] || dkim.props['header.i'])
-        )
-    })
-}
 /* Whether a mail account is one of the forum's own inbound accounts for a route: hosted or shared, fed by the mail
    listener (its server has no store host, so the gateway wrote its trace and authentication fields, not a mailbox's
-   owner), and holding the route's address as its own or as an identity. A user's synced mailbox, whose header fields
-   its owner controls, never is. */
+   owner), named by the operator in mantle@forum-inbound-accounts, and holding the route's address as its own or as an
+   identity. A user's synced mailbox, whose header fields its owner controls, never is, nor any other account that holds a
+   route's address (SEC-PFS-85). */
+const forumInboundAccounts = () =>
+    String(ec.factory.getConfValue('mantle@forum-inbound-accounts') || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
 function forumAccount(emailAccountId, route) {
-    const account = emailAccountId
-        ? one('moqui.basic.email.EmailAccount', { emailAccountId })
-        : null
+    // only an account the operator named as the forum's own (mantle@forum-inbound-accounts, SEC-PFS-85): a person's or an
+    // organization's mailbox holding the route's address is never read, whoever owns it
+    if (!emailAccountId || !forumInboundAccounts().includes(String(emailAccountId))) return false
+    const account = one('moqui.basic.email.EmailAccount', { emailAccountId })
     if (!account || !['EakHosted', 'EakShared'].includes(account.accountKindEnumId))
         return false
     const server = account.emailServerId
@@ -5305,8 +5332,14 @@ function processInbound(ctx) {
     if (
         (ctx.emailAccountId || ctx.emailMessageId || ctx.stored) &&
         !forumAccount(accountId, route)
-    )
+    ) {
+        // a route's address on an account that is not the forum's (SEC-PFS-85): said, so an operator who meant it to be lists it
+        ec.logger.warn(
+            'Forum route ' + route.address + ': mail on account ' + (accountId || '(none)') +
+                ' is not read; it is not one of mantle@forum-inbound-accounts (or not hosted or shared, or synced)',
+        )
         return { handled: false }
+    }
     // the sender is the From mailbox's address, never text of its display name (fromMailbox)
     const mailbox = fromMailbox(stored, fields.from)
     const siteId = route.siteId,
@@ -5405,7 +5438,7 @@ function processInbound(ctx) {
     )
         return record('ignored', 'Message from this forum')
     // DMARC or an aligned DKIM signature passed in a field of the trusted gateway (gatewayAuthenticated)
-    const authenticated = gatewayAuthenticated(
+    const authenticated = core.gatewayAuthenticated(
         headerValues(headers, 'authentication-results'),
         sender,
     )
@@ -5697,7 +5730,7 @@ function postInbound(p) {
 /* A safe outcome notice to a verified member: what happened, never another thread's content. */
 function feedback(siteId, ua, text) {
     if (!text) return
-    const settings = one(F + 'ForumMailSettings', { siteId })
+    const settings = core.mailSettings(siteId)
     if (!settings) return
     try {
         ec.service
@@ -5930,6 +5963,7 @@ function execute(operation, p) {
         'mine',
         'sourceFrozen',
         'ownersOnly',
+        'hideHistory',
     ])
     const listFields = new Set([
         'attachmentIds',
@@ -6074,7 +6108,7 @@ function execute(operation, p) {
     // the word rules, for Smithy's names and descriptions (mr-pass plan/design-smithy.md §11)
     applyRules,
     processInbound,
-    gatewayAuthenticated,
+    gatewayAuthenticated: core.gatewayAuthenticated,
     processJunk,
     postInbound,
     replyAddress,
@@ -6086,5 +6120,7 @@ function execute(operation, p) {
     advanceRun: operations.advanceRun,
     runJobItem: operations.runItem,
     cleanupExports: operations.cleanupExports,
+    // the runs the dispatcher takes next, in turn across sites (ForumOperations.js)
+    fairRuns: operations.fairRuns,
     sourceGate,
 })

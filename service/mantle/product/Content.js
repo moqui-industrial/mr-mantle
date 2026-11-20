@@ -84,6 +84,38 @@ function owned(row, c, location = row.contentLocation) {
         roots.some(root => value.startsWith(String(root).replace(/\/+$/, "") + "/" + c.folder + "/" + row[c.owner] + "/"))
     )
 }
+// every other type, a category's included (SEC-BAP-138): a location a caller gives is only the record's own content folder
+const locationRefused = "A catalog document's file is kept in its record's content folder: upload the file or enter the text, a location is not taken"
+// Why a caller-given location of a content type is refused, or null when it is the record's own folder (create#, update)
+function locationRefusal(row, c, location) {
+    if (!location || owned(row, c, location)) return null
+    const type = row[c.type]
+    return c.kind === "product" && type === "PcntDownload"
+        ? downloadLocationRefused
+        : c.kind === "product" && shopTextTypes.includes(type)
+          ? textLocationRefused
+          : locationRefused
+}
+// Whether a staff screen may stream or show a row's file (mr-marble's Catalog downloads and views, BOSS's record files and
+// product copy): its record's own folder, or an image file in a component (the demo's images) or under a content root (another
+// record's folder: a copy's or a shared image), never another location (a conf file, runtime://, file:, http, or a
+// dbresource:// path outside the content roots) a row was written with before SEC-BAP-138.
+function served(row, c) {
+    if (owned(row, c)) return true
+    const location = String(row.contentLocation || "")
+    const roots = [
+        "dbresource://mantle/content",
+        ec.factory.getConfValue("mantle@content-root"),
+        ec.factory.getConfValue("mantle@content-large-root")
+    ]
+        .filter(Boolean)
+        .map(root => String(root).replace(/\/+$/, "") + "/")
+    return (
+        (location.startsWith("component://") || roots.some(root => location.startsWith(root))) &&
+        !/(?:^|[\/\\])\.\.(?:[\/\\]|$)|\\|%2e|%2f|%5c/i.test(location) &&
+        /\.(?:png|jpe?g|gif|webp)$/i.test(location)
+    )
+}
 function reference(row, c) {
     if (!owned(row, c)) throw new Error("Copy this resource through an authorized drive before opening or editing it")
     return ec.resource.getLocationReference(row.contentLocation)
@@ -200,12 +232,17 @@ function update(p, category = false) {
         delete data.contentLocation
     }
     // a download's file, and a name's or description's, stays in the product's own content folder (ShopFulfillment and
-    // ShopCatalog read no other location)
+    // ShopCatalog read no other location); and a location given for any type, a category's included, is the record's own
+    // folder (SEC-BAP-138)
     const merged = Object.assign({}, row, data)
     if (c.kind === "product" && merged[c.type] === "PcntDownload" && merged.contentLocation && !owned(merged, c))
         throw new Error(downloadLocationRefused)
     if (c.kind === "product" && shopTextTypes.includes(merged[c.type]) && merged.contentLocation && !owned(merged, c))
         throw new Error(textLocationRefused)
+    if (data.contentLocation && data.contentLocation !== row.contentLocation) {
+        const refusal = locationRefusal(merged, c, data.contentLocation)
+        if (refusal) throw new Error(refusal)
+    }
     call("update#" + c.entity, data)
     return {
         [c.id]: row[c.id],
@@ -598,4 +635,17 @@ function execute(op, p) {
     if (!p[c.id] && p.contentId) p[c.id] = p.contentId
     return {list, detail, store, upload, resource, restore, translations, translate, datasheet}[op](p)
 }
-;({execute, update, revision, config, owned, safeName, get, downloadLocationRefused, shopTextTypes, textLocationRefused})
+;({
+    execute,
+    update,
+    revision,
+    config,
+    owned,
+    served,
+    locationRefusal,
+    safeName,
+    get,
+    downloadLocationRefused,
+    shopTextTypes,
+    textLocationRefused
+})

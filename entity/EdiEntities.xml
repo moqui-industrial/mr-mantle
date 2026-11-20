@@ -109,7 +109,9 @@ along with this software (see the LICENSE.md file). If not, see
             authenticated transport and holds the interchange IDs (internalId/remoteId and their types, ISA05-08), the
             application codes (GS02/03), usageCode (ISA15, T or P), ackRequested (ISA14) and the separators. The product
             store gives the organization, currency and facility of the orders received; the partner is the customer. A
-            received interchange is routed by the connection it came on, never by the IDs in it.</description>
+            received interchange is routed by the connection it came on, never by the IDs in it, so a remote that receives
+            by login names the partner's own integration account as its receiveUserId (SEC-BAP-96): it takes posts from
+            that account alone.</description>
         <field name="systemMessageRemoteId" type="id" is-pk="true"/>
         <field name="ediProfileId" type="id"/>
         <field name="productStoreId" type="id"/>

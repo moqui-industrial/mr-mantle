@@ -14,6 +14,7 @@ const T = "mantle.ext.account.gateway.PayTraceServices."
 const BASE = "https://api.sandbox.paytrace.com"
 const SECRETS = ["spec-api-password"]
 const TOKEN_CACHE = "mantle.ext.account.gateway.PayTrace.accessToken"
+const TOKEN_ROW = "mantle.account.method.PaymentGatewayAccessToken"
 const http = ec.factory.getTool("HttpFixtures")
 let customerId, productId, addressId
 let tokenCount = 0
@@ -91,6 +92,7 @@ spec({
         ec.artifactExecution.disableAuthz()
         // each feature asks for its own access token first
         ec.cache.getCache(TOKEN_CACHE).clear()
+        ec.entity.find(TOKEN_ROW).disableAuthz().deleteAll()
         accessToken()
     },
     cleanup() {
@@ -106,6 +108,9 @@ spec({
         ec.artifactExecution.enableAuthz()
         http.reset()
         ec.cache.getCache(TOKEN_CACHE).clear()
+        ec.artifactExecution.disableAuthz()
+        ec.entity.find(TOKEN_ROW).deleteAll()
+        ec.artifactExecution.enableAuthz()
     }
 })
 
@@ -723,10 +728,12 @@ feature("the access token is cached; a 401 gets a new token and is sent once mor
         reply("POST", "/v3/card/authorize/pt-protect", approved("70081"))
         call(P + "authorize#SinglePayment", {paymentId: secondId, paymentToken: protectToken()})
         const cached = paths(sent())
-        // the cache keeps the token sealed: not readable in the Tools cache screen
+        // the cache holds no token, nor anything sealed with the password: the token is in the encrypted row (SEC-BAP-136)
         const tokenKey = "PT_SPEC|" + BASE + "|spec-api-user"
-        const held = JSON.stringify(ec.cache.getCache(TOKEN_CACHE).get(tokenKey))
+        const held = JSON.stringify(ec.cache.getCache(TOKEN_CACHE).get(tokenKey) ?? null)
         const readable = tokensSent.filter(token => token.startsWith("spec-access-") && held.includes(token))
+        const rows = Array.from(ec.entity.find(TOKEN_ROW).disableAuthz().list())
+        const kept = rows.length == 1 && tokensSent.includes(rows[0].accessToken)
         http.clear()
 
         // the cached token is refused (expired or revoked): one new token, the authorization sent once more, approved once
@@ -756,9 +763,13 @@ feature("the access token is cached; a 401 gets a new token and is sent once mor
         const backedOffSent = sent().length
 
         // a token past its lifetime is not used: a new one is asked for first
-        const cache = ec.cache.getCache(TOKEN_CACHE)
-        for (const key of ["PT_SPEC|" + BASE + "|spec-api-user"])
-            cache.put(key, {token: "spec-access-stale", expiresAt: Number(ec.user.nowTimestamp) - 1000})
+        ec.cache.getCache(TOKEN_CACHE).clear()
+        for (const row of Array.from(ec.entity.find(TOKEN_ROW).disableAuthz().list()))
+            call("update#" + TOKEN_ROW, {
+                accessTokenKey: row.accessTokenKey,
+                accessToken: "spec-access-stale",
+                expiresAt: Number(ec.user.nowTimestamp) - 1000
+            })
         tokensSent.push("spec-access-stale")
         accessToken()
         const expiredId = cardPayment(35)
@@ -776,6 +787,7 @@ feature("the access token is cached; a 401 gets a new token and is sent once mor
             backedOffSent,
             held,
             readable,
+            kept,
             expired: paths(sent())
         }
     },
@@ -791,10 +803,12 @@ feature("the access token is cached; a 401 gets a new token and is sent once mor
         backedOffSent,
         held,
         readable,
+        kept,
         expired
     }) {
         cached == "POST /v3/token,POST /v3/card/authorize/pt-protect,POST /v3/card/authorize/pt-protect"
-        held.includes("sealed") && readable.length == 0
+        !held.includes("sealed") && readable.length == 0
+        kept == true
         backedOff.resultError == "Y" && backedOff.reasonMessage.includes("not sent again for a minute")
         backedOffSent == 0
         renewal == "POST /v3/card/authorize/pt-protect,POST /v3/token,POST /v3/card/authorize/pt-protect"

@@ -577,13 +577,50 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
-    <service verb="get" noun="PublishedCalendarEvents" authenticate="anonymous-view">
-        <description>The events of a published calendar for anyone with its link (the public route): the publish token
-            (and its password, when it has one) is checked before anything is read, then get#FullCalendarData gives the
-            events of that calendar only, as Busy for a free/busy link.</description>
+    <service verb="open" noun="PublishedCalendar" authenticate="anonymous-view">
+        <description>Opens a published calendar's link that has a password (the public route): the publish token is checked, then
+            the password, once, for a grant (ec.resource.makeGrant, an hour, keyed by the share and its password hash) that
+            get#PublishedCalendarEvents takes in its place, as a shared file link's open#PublicShare does. Only a wrong password
+            counts: at most 10 a link and 30 a requester in ten minutes, past which the answer is "too many tries" with no check
+            (SEC-BOS-102); a right one is never counted, so viewers who know it never lock the link. The share's row is held for
+            update through the check, so one link's tries run one at a time and parallel wrong tries cannot all pass the limit.
+            A link with no password needs no grant (grant empty).</description>
         <in-parameters>
             <parameter name="publishToken" required="true"/>
-            <parameter name="password"/>
+            <parameter name="password" allow-html="any"/>
+        </in-parameters>
+        <out-parameters><parameter name="grant"/></out-parameters>
+        <actions><script><![CDATA[
+            grant = null
+            // the share's row held for update to the end of the check, so tries of one link's password run one at a time: each
+            // sees the wrong ones counted before it (a peek and then a count would let parallel tries all pass the peek)
+            const share = ec.entity.find('mantle.work.calendar.CalendarShare').condition('publishToken', String(publishToken))
+                    .condition(ec.entity.conditionFactory.makeConditionDate('fromDate', 'thruDate', null)).forUpdate(true).disableAuthz().one()
+            if (share == null || share.userId || share.userGroupId || share.partyId) { ec.message.addError('This calendar link is not valid'); return }
+            if (!share.passwordHash) return
+            if (!password) { ec.message.addError(ec.l10n.localize('This calendar needs its password')); return }
+            // a wrong try is counted, by the link and by the requester; past the limit nothing is checked, before the hash
+            const attempt = (key, limit, peek) => ec.service.sync().throwOnError(true).name('org.moqui.public.AccountServices.record#Attempt')
+                    .parameters({input: {key, limit, windowMillis: 600000, peek}}).requireNewTransaction(true).disableAuthz().call().result.allowed
+            const requester = ec.resource.script('component://framework/service/org/moqui/public/Account.js').requesterKey()
+            const keys = [['calendar-password:share:' + share.calendarShareId, 10], ['calendar-password:ip:' + requester, 30]]
+            if (!keys.every(([key, limit]) => attempt(key, limit, true))) {
+                ec.message.addError(ec.l10n.localize('Too many tries of the password; wait a few minutes and try again')); return }
+            if (!ec.user.passwordsMatch(String(password), share.passwordHash)) {
+                for (const [key, limit] of keys) attempt(key, limit, false)
+                ec.message.addError(ec.l10n.localize('The password is not right')); return
+            }
+            grant = ec.resource.makeGrant(`${share.calendarShareId}\n${share.passwordHash}`, `calendar:${share.calendarShareId}`, 3600)
+        ]]></script></actions>
+    </service>
+
+    <service verb="get" noun="PublishedCalendarEvents" authenticate="anonymous-view">
+        <description>The events of a published calendar for anyone with its link (the public route): the publish token, and for a
+            link with a password the grant open#PublishedCalendar gave, are checked before anything is read (no password is
+            hashed here), then get#FullCalendarData gives the events of that calendar only, as Busy for a free/busy link.</description>
+        <in-parameters>
+            <parameter name="publishToken" required="true"/>
+            <parameter name="grant"/>
             <parameter name="start" required="true"/>
             <parameter name="end" required="true"/>
         </in-parameters>
@@ -596,14 +633,14 @@ along with this software (see the LICENSE.md file). If not, see
             eventList = []
             const share = ec.entity.find('mantle.work.calendar.CalendarShare').condition('publishToken', String(publishToken))
                     .condition(ec.entity.conditionFactory.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().one()
-            const valid = share != null && !share.userId && !share.userGroupId && !share.partyId
-                    && (!share.passwordHash || (password && ec.user.passwordsMatch(String(password), share.passwordHash)))
-            if (!valid) { ec.message.addError('This calendar link is not valid'); return }
+            if (share == null || share.userId || share.userGroupId || share.partyId) { ec.message.addError('This calendar link is not valid'); return }
+            if (share.passwordHash && !(grant && ec.resource.checkGrant(`${share.calendarShareId}\n${share.passwordHash}`, `calendar:${share.calendarShareId}`, String(grant)))) {
+                ec.message.addError(ec.l10n.localize('This calendar needs its password')); return }
             const calendar = ec.entity.find('mantle.work.calendar.Calendar').condition('calendarId', share.calendarId).disableAuthz().one()
             calendarName = calendar?.calendarName ?? null
             color = calendar?.color ?? null
             eventList = ec.service.sync().name('mantle.work.EventServices.get#FullCalendarData').parameters({publishToken: publishToken,
-                publishPassword: password, start: start, end: end, titleGString: '${workEffort.workEffortName || "Event"}'})
+                publishGrant: grant || null, start: start, end: end, titleGString: '${workEffort.workEffortName || "Event"}'})
                     .disableAuthz().call()?.eventList || []
         ]]></script></actions>
     </service>
@@ -897,7 +934,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="fetch" noun="CalendarSubscription" authenticate="anonymous-all">
         <description>One subscription of the fetch job: GET its URL (webcal as https; any other scheme refused) and read
-            what it answered with store#CalendarFeedText. The GET refuses a host that is or resolves to an internal
+            what it answered with store#CalendarFeedText, a feed over mantle@calendar-feed-max-bytes refused unparsed
+            (SEC-FIL-82). The GET refuses a host that is or resolves to an internal
             address, redirects included (denyInternal). A failed GET's error is a fixed text, not the answer's status or
             the connection's error, which are logged. Errors are the caller's to record. With authorization on, only for a calendar the user
             owns or manages (check#CalendarAccess CalpManage).</description>
@@ -932,6 +970,13 @@ along with this software (see the LICENSE.md file). If not, see
             if (status < 200 || status >= 300) {
                 ec.logger.warn(`Calendar subscription ${calendarId} answered ${status} ${response.getReasonPhrase() || ''}`)
                 ec.message.addError('The feed could not be read'); return
+            }
+            // a feed over mantle@calendar-feed-max-bytes is not parsed (SEC-FIL-82): the parse of a large file is the costly part
+            const maxBytes = ec.resource.script('component://mr-mantle/service/mantle/other/Limits.js').limit('calendar-feed-max-bytes')
+            const feedSize = response.bytes().length
+            if (feedSize > maxBytes) {
+                ec.logger.warn(`Calendar subscription ${calendarId} answered ${feedSize} bytes, over the ${maxBytes} it is read from`)
+                ec.message.addError(`The feed is larger than the ${maxBytes} bytes a subscription is read from`); return
             }
             const feedText = response.text()
             if (!feedText || !String(feedText).trim()) { ec.message.addError('The feed answered with no calendar'); return }

@@ -123,7 +123,7 @@ function activeLabel(routeSeg, returnLabels = false) {
     return has && blank(routeSeg.gatewayRefundStatus)
 }
 // The gateway that serves the shipment's segment, in Mantle's lookup order (get#ShipmentGatewayDetails: the store's for the
-// segment's carrier, the segment's, the shipper's DefaultShipmentGatewayConfigId setting, the preference), worked out from the
+// segment's carrier, the segment's, the shipper's DefaultShipmentGatewayConfigId setting), worked out from the
 // segment as the caller holds it, in the caller's transaction (P13 review A1: a lookup in a transaction of its own read the
 // committed segment, not the carrier just chosen), and writing nothing; or null.
 function gatewayFor(shipment, segment) {
@@ -140,8 +140,51 @@ function gatewayFor(shipment, segment) {
             partyId: shipment.fromPartyId,
             partySettingTypeId: "DefaultShipmentGatewayConfigId"
         }).settingValue
-    if (!gatewayId) gatewayId = ec.user.getPreference("DefaultShipmentGatewayConfigId")
+    // never the user's own preference, which any user sets (/apps/setPreference): a gateway is the store's, the segment's or
+    // the shipper's (SEC-BAP-101)
     return gatewayId ? one(GATEWAY, {shippingGatewayConfigId: gatewayId}) : null
+}
+// The gateways a caller may name for the shipment's segment (SEC-BAP-101): the store's bindings, the segment's own, the
+// shipper's DefaultShipmentGatewayConfigId, the ones the lookup and the rates offer; never the user's own preference. A
+// ShippingGatewayConfig has no organization, so a gateway outside these (another organization's carrier account) is refused.
+function offeredGateways(shipment, segment) {
+    const ids = new Set()
+    if (shipment?.productStoreId)
+        for (const row of rows("mantle.product.store.ProductStoreShippingGateway", {productStoreId: shipment.productStoreId}))
+            if (row.shippingGatewayConfigId) ids.add(row.shippingGatewayConfigId)
+    if (segment?.shippingGatewayConfigId) ids.add(segment.shippingGatewayConfigId)
+    if (shipment?.fromPartyId) {
+        const shipperDefault = call("mantle.party.PartyServices.get#PartySettingValue", {
+            partyId: shipment.fromPartyId,
+            partySettingTypeId: "DefaultShipmentGatewayConfigId"
+        }).settingValue
+        if (shipperDefault) ids.add(shipperDefault)
+    }
+    return ids
+}
+// The organizations that use a gateway: the organizations of the stores that bind it and of the parties whose
+// DefaultShipmentGatewayConfigId names it. A ShippingGatewayConfig has no organization of its own, so its carrier accounts
+// are changed only by a user whose organizations hold every one of those uses, or by a system administrator; a gateway no
+// organization uses is the system administrator's (SEC-BAP-101).
+function gatewayOrganizations(shippingGatewayConfigId) {
+    const ids = new Set()
+    for (const row of rows("mantle.product.store.ProductStoreShippingGateway", {shippingGatewayConfigId})) {
+        const store = one("mantle.product.store.ProductStore", {productStoreId: row.productStoreId})
+        if (store?.organizationPartyId) ids.add(store.organizationPartyId)
+    }
+    for (const row of rows("mantle.party.PartySetting", {partySettingTypeId: "DefaultShipmentGatewayConfigId", settingValue: shippingGatewayConfigId}))
+        if (row.partyId) ids.add(row.partyId)
+    return Array.from(ids)
+}
+function gatewayManaged(shippingGatewayConfigId, userScope = facilityScope.scope()) {
+    if (userScope.systemAdmin) return true
+    const organizations = gatewayOrganizations(shippingGatewayConfigId)
+    return organizations.length > 0 && organizations.every(partyId => facilityScope.owns(userScope, partyId))
+}
+function requireOffered(shipment, segment, shippingGatewayConfigId) {
+    if (blank(shippingGatewayConfigId)) return
+    if (!offeredGateways(shipment, segment).has(shippingGatewayConfigId))
+        denied("GATEWAY_INVALID", "Shipping gateway " + shippingGatewayConfigId + " is not one this shipment may use")
 }
 function gatewayOf(shipmentId, shipmentRouteSegmentSeqId) {
     const shipment = one(SHIPMENT, {shipmentId})
@@ -253,8 +296,10 @@ function rates(p) {
     const storeGateways = sh.shipment.productStoreId
         ? rows("mantle.product.store.ProductStoreShippingGateway", {productStoreId: sh.shipment.productStoreId})
         : []
-    if (!blank(p.shippingGatewayConfigId)) addGateway(p.shippingGatewayConfigId)
-    else {
+    if (!blank(p.shippingGatewayConfigId)) {
+        requireOffered(sh.shipment, segment, p.shippingGatewayConfigId)
+        addGateway(p.shippingGatewayConfigId)
+    } else {
         storeGateways.forEach(row => addGateway(row.shippingGatewayConfigId))
         addGateway(segment.shippingGatewayConfigId)
         addGateway(gatewayOf(sh.shipmentId, segment.shipmentRouteSegmentSeqId)?.shippingGatewayConfigId)
@@ -432,6 +477,7 @@ function recordRequests(p) {
             denied("METHOD_INVALID", "Carrier " + carrierPartyId + " has no method " + shipmentMethodEnumId)
         if (!blank(p.shippingGatewayConfigId) && !one(GATEWAY, {shippingGatewayConfigId: p.shippingGatewayConfigId}))
             denied("GATEWAY_INVALID", "There is no shipping gateway " + p.shippingGatewayConfigId)
+        requireOffered(sh.shipment, segment, p.shippingGatewayConfigId)
         const changed =
             carrierPartyId !== segment.carrierPartyId ||
             shipmentMethodEnumId !== segment.shipmentMethodEnumId ||
@@ -1311,6 +1357,15 @@ const operations = {
     planPackage,
     gatewayFor,
     gatewayOf,
+    // a gateway's carrier accounts are changed and shown only to a user whose organizations hold its every use (SEC-BAP-101)
+    gatewayManaged: id => {
+        const was = ec.artifactExecution.disableAuthz()
+        try {
+            return gatewayManaged(id)
+        } finally {
+            if (!was) ec.artifactExecution.enableAuthz()
+        }
+    },
     servesCarrier,
     testGatewayAllowed,
     gatewayView,

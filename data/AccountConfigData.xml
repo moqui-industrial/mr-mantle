@@ -12,6 +12,9 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
+<!-- The local test gateways, on every instance: on a production one (instance@purpose) Mantle's gateway dispatch refuses
+    their operations and store#PaymentGatewayOrganization permits them for no organization, unless mantle@allow-test-gateways
+    is true (account/TestGateways.js, SEC-BOS-129) -->
 <entity-facade-xml type="install">
     <mantle.account.method.PaymentGatewayConfig paymentGatewayConfigId="TEST_APPROVE" paymentGatewayTypeEnumId="PgtTest"
             description="Local Test: Always Approves"

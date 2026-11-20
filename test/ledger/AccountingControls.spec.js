@@ -1787,3 +1787,59 @@ feature("draft documents, journal previews, corrections and deletes go through t
         templateLinesLeft == 0
     },
 })
+// SEC-BOS-122: a posting lock holds with the organization's posting guard off: post#AcctgTrans of a locked date is refused, the
+// same transaction posts once the lock is gone, and unpost#AcctgTrans of it is refused once a lock covers its date again
+feature("a posting lock holds while the posting guard is off", {
+    when() {
+        const off = "FIN_CONTROL_OFF_ORG"
+        lib().call("create#mantle.party.Party", {partyId: off, partyTypeEnumId: "PtyOrganization"})
+        lib().call("create#mantle.party.Organization", {partyId: off, organizationName: "Guard off organization"})
+        lib().call("create#mantle.party.PartyRole", {partyId: off, roleTypeId: "OrgInternal"})
+        native("LedgerServices.init#PartyAccountingConfiguration", {
+            sourcePartyId: "DefaultSettings",
+            organizationPartyId: off,
+            baseCurrencyUomId: "USD",
+        })
+        const guard = lib().one("mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: off}).postingGuardEnabled
+        const accounts = lib()
+            .rows("mantle.ledger.account.GlAccountAndOrganization", {organizationPartyId: off})
+            .filter((r) => r.disallowPosting !== "Y")
+        const tx = lib().call("create#mantle.ledger.transaction.AcctgTrans", {
+            organizationPartyId: off,
+            acctgTransTypeEnumId: "AttInternal",
+            transactionDate: ec.user.nowTimestamp,
+            amountUomId: "USD",
+            isPosted: "N",
+        }).acctgTransId
+        for (const [seq, glAccountId, debitCreditFlag] of [["01", accounts[0].glAccountId, "D"], ["02", accounts[1].glAccountId, "C"]])
+            lib().call("create#mantle.ledger.transaction.AcctgTransEntry", {acctgTransId: tx, acctgTransEntrySeqId: seq, glAccountId, debitCreditFlag, amount: "40"})
+        const lock = native("CloseServices.store#Lock", {
+            organizationPartyId: off,
+            lockScope: "all",
+            lockThroughDate: ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd"),
+            changeReason: "Year end",
+        })
+        const refused = rejected("LedgerServices.post#AcctgTrans", {acctgTransId: tx})
+        const posted = () => lib().one("mantle.ledger.transaction.AcctgTrans", {acctgTransId: tx}).isPosted
+        const after = posted()
+        lib().call("delete#mantle.ledger.config.AccountingLock", {accountingLockId: lock.accountingLockId})
+        const postedUnlocked = rejected("LedgerServices.post#AcctgTrans", {acctgTransId: tx})
+        const afterUnlock = posted()
+        native("CloseServices.store#Lock", {
+            organizationPartyId: off,
+            lockScope: "all",
+            lockThroughDate: ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd"),
+            changeReason: "Year end again",
+        })
+        const unpost = rejected("LedgerServices.unpost#AcctgTrans", {acctgTransId: tx})
+        return {guard, lock: lock.accountingLockId, refused, after, postedUnlocked, afterUnlock, unpost, afterUnpost: posted()}
+    },
+    then({guard, lock, refused, after, postedUnlocked, afterUnlock, unpost, afterUnpost}) {
+        guard != "Y"
+        !!lock
+        refused.includes("SOFT_LOCK")
+        after != "Y"
+        postedUnlocked == "" && afterUnlock == "Y"
+        unpost.includes("SOFT_LOCK") && afterUnpost == "Y"
+    },
+})

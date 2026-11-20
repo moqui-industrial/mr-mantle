@@ -568,11 +568,14 @@ function getMember(p) {
 }
 
 // ===== request#Subscriptions =====
-// The party a request may name: a party that exists, is not merged or disabled and is not another user's personal contact.
-function requestableParty(partyId) {
+// The party a request may name: a party that exists, is not merged or disabled and is not another user's personal contact; for
+// an organization's list or segment (organizationPartyId), shared or that organization's and not an internal organization
+// (MarketingAccess.js organizationParty, SEC-BAP-88).
+function requestableParty(partyId, organizationPartyId = null) {
     const party = partyId ? one("mantle.party.Party", {partyId}) : null
     if (!party || party.disabled === "Y" || party.mergedToPartyId) return null
     if (party.privateOwnerUserId && party.privateOwnerUserId !== ec.user.userId) return null
+    if (organizationPartyId && !marketingAccess.organizationParty(party, organizationPartyId)) return null
     return party
 }
 // P6 (the user's call, Nov 14, P4's review): a request files a directory contact only, as the audience import does: a list's
@@ -634,7 +637,8 @@ function salesContacts(kind, recordId) {
 // renewed by it (F120) and the consent is recorded by the internal record#PartyConsent, the link or account deciding, not whoever
 // is signed in (P3 review R1).
 function fileOne(list, policy, request, partyId) {
-    const party = requestableParty(partyId)
+    // staff name a party of the list's organization's audience only; a person's own act (byPerson) names themselves
+    const party = requestableParty(partyId, request.byPerson ? null : list.ownerPartyId)
     if (!party) return {partyId, outcome: "refused", reasonCode: "RECORD_UNAVAILABLE"}
     if (personalContact(party)) return {partyId, outcome: "refused", reasonCode: "PERSONAL_CONTACT"}
     const channel = list.contactMechTypeEnumId || "CmtEmailAddress"
@@ -895,7 +899,8 @@ function requestSubscriptions(p) {
             results.push(Object.assign({recordId, kind: item.kind}, fileApart(list, policy, request, partyId)))
         }
     }
-    const names = lib.partyNames(results.map(result => result.partyId).filter(Boolean))
+    // a refused party is named by its id only (SEC-BAP-88)
+    const names = lib.partyNames(results.filter(result => result.outcome !== "refused").map(result => result.partyId).filter(Boolean))
     for (const result of results) result.partyName = result.partyId ? names[result.partyId] || result.partyId : ""
     const count = outcome => results.filter(result => result.outcome === outcome).length
     return {

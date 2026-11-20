@@ -526,3 +526,27 @@ feature("a user who only edits receivables cannot change a supplier's identifica
         ap == ""
     }
 })
+
+// SEC-BOS-126: a bill one approver repriced is approved by another; the importer is one who changed it too
+feature("an approver who repriced an imported bill is refused its approval, naming the change; another approver approves it", {
+    when() {
+        login("john.doe")
+        user("repricer", ["PAYABLE_EDIT", "PAYABLE_VIEW", "ACCOUNTING_VIEW", "INVOICE_APPROVE"])
+        const imported = bill("REPRICE-1", "40")
+        const importer = one("mantle.account.invoice.Invoice", {invoiceId: imported.invoiceId}).draftChangedByUserIds
+        const line = rows("mantle.account.invoice.InvoiceItem", {invoiceId: imported.invoiceId})[0]
+        login(users.repricer)
+        native("store#InvoiceDraftItem", {invoiceId: imported.invoiceId, invoiceItemSeqId: line.invoiceItemSeqId,
+            lastUpdatedStamp: line.lastUpdatedStamp, amount: "4000"})
+        const stamp = () => one("mantle.account.invoice.Invoice", {invoiceId: imported.invoiceId}).lastUpdatedStamp
+        const repricer = refused("mantle.account.InvoiceServices.approve#Payable", {invoiceId: imported.invoiceId, lastUpdatedStamp: stamp()})
+        login(users.approver)
+        const approved = native("approve#Payable", {invoiceId: imported.invoiceId, lastUpdatedStamp: stamp()})
+        return {importer, repricer, approved}
+    },
+    then({importer, repricer, approved}) {
+        String(importer).includes(users.ap)
+        repricer.includes("SELF_APPROVAL_DENIED") && repricer.includes("You changed this invoice")
+        approved.statusId == "InvoiceApproved" && approved.isSelfApproved == "N"
+    }
+})

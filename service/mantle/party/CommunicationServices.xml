@@ -97,6 +97,14 @@ along with this software (see the LICENSE.md file). If not, see
             ]]></script>
         </actions>
     </service>
+    <service verb="clean" noun="AppHtml" allow-remote="false">
+        <description>Internal (SEC-CLI-82): HTML as an allow-html="app" parameter keeps it (the safe set, and an image only from
+            this server), for create#Message's internal Message body.</description>
+        <in-parameters><parameter name="html" allow-html="app"/></in-parameters>
+        <out-parameters><parameter name="html"/></out-parameters>
+        <actions><script>html = html || ''</script></actions>
+    </service>
+
     <service verb="create" noun="Message">
         <description>
             A communication event, by default an internal Message from the current user's party. Each recipient gets a
@@ -119,7 +127,9 @@ along with this software (see the LICENSE.md file). If not, see
         </description>
         <in-parameters>
             <auto-parameters entity-name="mantle.party.communication.CommunicationEvent" include="nonpk"/>
-            <parameter name="body" allow-html="safe"/>
+            <parameter name="body" allow-html="any"><description>Cleaned here by the event's kind (SEC-CLI-82): an internal Message
+                as allow-html="app" (only this server's images: it is read only by signed-in users), anything else (a Comment, a
+                post to a mailbox bound to a forum) as allow-html="safe"</description></parameter>
             <parameter name="fromPartyId" default="ec.user.userAccount.partyId"/>
             <parameter name="communicationEventTypeId" default-value="Message"/>
             <parameter name="statusId" default-value="CeReceived"/>
@@ -144,6 +154,15 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <script><![CDATA[
+                // the body cleaned by the event's kind (SEC-CLI-82): an internal Message is read only by signed-in users, so it keeps
+                // only this server's images (clean#AppHtml, allow-html="app"); a Comment or a post through a forum stays safe
+                if (body != null && body !== '') {
+                    const forumBound = communicationEventTypeId === 'Message' && contactListId
+                            && ec.entity.find('mantle.forum.ForumCategory').condition('contactListId', contactListId).disableAuthz().count() > 0
+                    body = communicationEventTypeId === 'Message' && !forumBound
+                            ? ec.service.sync().name('mantle.party.CommunicationServices.clean#AppHtml').parameter('html', String(body)).call()?.html ?? ''
+                            : StringUtilities.cleanHtml(String(body))
+                }
                 const asList = (value) => (value == null ? [] : (typeof value === 'string' ? value.split(',') : Array.from(value)))
                         .map((id) => String(id).trim()).filter((id) => id)
                 recipientList = []
@@ -162,11 +181,21 @@ along with this software (see the LICENSE.md file). If not, see
                     if (missing.length) { ec.message.addError(`Party ${missing.join(', ')} not found`); return }
                     // an internal message reaches only parties the sender may (filter#VisibleParties: the app's filters, and
                     // another organization's staff only with that organization; SEC-BOS-98); internal work with authorization
-                    // off is not asked. Any other is not found, as one that does not exist.
+                    // off is not asked. Any other is not found, as one that does not exist. A reply keeps its thread's people:
+                    // when the sender is one of them, the thread's existing participants are not asked again, so a reply all
+                    // still reaches each of them (get#ThreadParticipants); only the recipients the sender adds are.
                     if (communicationEventTypeId === 'Message') {
-                        const reachable = new Set(Array.from(ec.service.sync().name('mantle.party.PartyServices.filter#VisibleParties')
-                                .parameters({partyIdList: named, includeDisabled: true}).call()?.visiblePartyIdList || []))
-                        const unreached = named.filter((id) => !reachable.has(id))
+                        let kept = new Set()
+                        const threadEventId = parentCommEventId || rootCommEventId
+                        if (threadEventId) {
+                            const participants = Array.from(ec.service.sync().name('mantle.party.CommunicationServices.get#ThreadParticipants')
+                                    .parameter('communicationEventId', threadEventId).call()?.partyIdList || [])
+                            if (participants.includes(fromPartyId)) kept = new Set(participants)
+                        }
+                        const asked = named.filter((id) => !kept.has(id))
+                        const reachable = new Set(asked.length ? Array.from(ec.service.sync().name('mantle.party.PartyServices.filter#VisibleParties')
+                                .parameters({partyIdList: asked, includeDisabled: true}).call()?.visiblePartyIdList || []) : [])
+                        const unreached = asked.filter((id) => !reachable.has(id))
                         if (unreached.length) { ec.message.addError(`Party ${unreached.join(', ')} not found`); return }
                     }
                 }
@@ -296,6 +325,37 @@ along with this software (see the LICENSE.md file). If not, see
             ]]></script>
         </actions>
     </service>
+    <service verb="get" noun="ThreadParticipants" allow-remote="false">
+        <description>Internal (SEC-BOS-98): the parties of a thread, that of communicationEventId (its root, or itself when it is
+            one): the from and to party of each of its events and each CommunicationEventParty row's party. create#Message
+            keeps them as a reply's recipients when the sender is one of them. Read as the system.</description>
+        <in-parameters><parameter name="communicationEventId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="rootCommEventId"/>
+            <parameter name="partyIdList" type="List"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            partyIdList = []
+            rootCommEventId = null
+            const wasDisabled = ec.artifactExecution.disableAuthz()
+            try {
+                const cf = ec.entity.conditionFactory
+                const event = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId).one()
+                if (event == null) return
+                rootCommEventId = event.rootCommEventId || event.communicationEventId
+                const events = Array.from(ec.entity.find('mantle.party.communication.CommunicationEvent').condition(cf.makeCondition([
+                        cf.makeCondition('communicationEventId', 'equals', rootCommEventId), cf.makeCondition('rootCommEventId', 'equals', rootCommEventId)], 'or'))
+                        .selectField('communicationEventId').selectField('fromPartyId').selectField('toPartyId').list())
+                const ids = new Set()
+                for (const row of events) { if (row.fromPartyId) ids.add(row.fromPartyId); if (row.toPartyId) ids.add(row.toPartyId) }
+                const eventIds = events.map((row) => row.communicationEventId)
+                if (eventIds.length) for (const row of ec.entity.find('mantle.party.communication.CommunicationEventParty')
+                        .condition('communicationEventId', 'in', eventIds).selectField('partyId').list()) if (row.partyId) ids.add(row.partyId)
+                partyIdList = Array.from(ids)
+            } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+        ]]></script></actions>
+    </service>
+
     <service verb="reply" noun="CommunicationEvent">
         <description>
             A reply to a communication event (parentCommEventId) in its thread (rootCommEventId), through create#Message.
@@ -311,7 +371,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="parentCommEventId" required="true" default="communicationEventId"/>
             <parameter name="communicationEventId"/>
             <parameter name="subject"/>
-            <parameter name="body" allow-html="safe"/>
+            <parameter name="body" allow-html="any"><description>Cleaned by create#Message by the reply's kind: a Message as
+                allow-html="app", a Comment as allow-html="safe" (SEC-CLI-82)</description></parameter>
             <parameter name="contentType" default-value="text/plain"/>
             <parameter name="fromPartyId" default="ec.user.userAccount.partyId"/>
             <parameter name="statusId" default-value="CeReceived"/>
@@ -1976,7 +2037,7 @@ along with this software (see the LICENSE.md file). If not, see
                     if (wanted.length) {
                         for (const id of wanted) requestSeen.set(id, false)
                         const rows = Array.from(ec.entity.find('mantle.request.Request').condition('requestId', 'in', wanted)
-                                .selectField('requestId').selectField('filedByPartyId').selectField('rootWorkEffortId').list())
+                                .selectField('requestId').selectField('filedByPartyId').selectField('rootWorkEffortId').selectField('senderVerified').list())
                         const inProject = rows.filter((row) => row.filedByPartyId !== me && projects.has(row.rootWorkEffortId)).map((row) => row.requestId)
                         const byParty = new Set(inProject.length && orgSide.size ? Array.from(ec.entity.find('mantle.request.RequestParty')
                                 .condition('requestId', 'in', inProject).condition('partyId', 'in', Array.from(orgSide))
@@ -1985,7 +2046,9 @@ along with this software (see the LICENSE.md file). If not, see
                         // app (impl-customer-service P2, F68); a project's case stays its client's, in Projects (F-P2-3)
                         const cases = new Set(Array.from(ec.entity.find('mantle.request.support.CaseProfile').condition('requestId', 'in', wanted)
                                 .selectField('requestId').list()).map((row) => row.requestId))
-                        for (const row of rows) requestSeen.set(row.requestId, !(cases.has(row.requestId) && !row.rootWorkEffortId) && (row.filedByPartyId === me
+                        // a public form's request whose typed address is not confirmed (senderVerified N, SEC-BOS-103) is staff's
+                        // alone, as the Support portal keeps such a case from the matched customer (SEC-PSS-87)
+                        for (const row of rows) requestSeen.set(row.requestId, row.senderVerified !== 'N' && !(cases.has(row.requestId) && !row.rootWorkEffortId) && (row.filedByPartyId === me
                                 || (projects.has(row.rootWorkEffortId) && (orgSide.has(row.filedByPartyId) || byParty.has(row.requestId)))))
                     }
                     return ids.filter((id) => requestSeen.get(id))
@@ -2034,6 +2097,17 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
+    <service verb="check" noun="RecordTypeVisible" type="interface">
+        <description>The visibility service a record type's registration names (RecordLinkType visibleService, SEC-BOS-87): whether the
+            current user may see the record, by the host app's own rule; called by get#RecordLinkInfo with authorization disabled.
+            Never an error: a record the user may not see, or a failure, answers false.</description>
+        <in-parameters>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="recordVisible" type="Boolean"/></out-parameters>
+    </service>
+
     <service verb="get" noun="RecordLinkInfo">
         <description>
             What the record link and timeline services know about a record type: the full entity name and its single
@@ -2046,8 +2120,18 @@ along with this software (see the LICENSE.md file). If not, see
             not found). With checkOnly the answer is recordVisible, true or false, and no error, so the caller's
             transaction is not marked rollback-only by a record the user may not see; notVisibleReason says why, for a log.
 
+            Only a registered record type is a record (SEC-BOS-87): a mantle.party.communication.RecordLinkType row, which
+            Mantle seeds for the types of its joins and rules below and an app for the records its screens host, each with its
+            visibility rule (an app's service, a parent record, or the record's organization; the entity's description). Any
+            other entity, every moqui.* entity but those registered among them, is refused as not a record type, with
+            checkRecord false too; an audit row of an unregistered type is not seen.
+
             A record the user may see is found under the user's entity filters, and is never someone else's personal
-            contact (Party.privateOwnerUserId). A work effort, a request, a communication event and an order (whose filter
+            contact (Party.privateOwnerUserId). Because an ALWAYS MANTLE_ACTIVE_ORG grant applies no filter while no
+            organization is active, a shipment (its from or to party), a facility (its owner), a return (its vendor or
+            customer), an asset maintenance (its asset's owner) and a party some organization owns (shared, the user's own,
+            an internal organization itself, else its owner) are also held to the user's organizations, every one for a
+            system administrator (SEC-BAP-89). A work effort, a request, a communication event and an order (whose filter
             is on OrderPart, not OrderHeader) have no entity filter of their own, so under an organization filter they
             follow per-user rules, those of search#Universal (IronStone R4, R5). The
             organization filter is the MANTLE_USER_ORG or MANTLE_ACTIVE_ORG filter set of the authorization: its
@@ -2302,6 +2386,12 @@ along with this software (see the LICENSE.md file). If not, see
             catch (err) { refuse(`The record type ${recordEntityName} is not an entity`); return }
             recordEntityName = recordValue.getEntityName()
             recordTypeName = recordValue.getEntityNamePretty()
+            // SEC-BOS-87: only a registered record type (mantle.party.communication.RecordLinkType, the components' registrations)
+            const registrations = {}
+            for (const row of ec.entity.find('mantle.party.communication.RecordLinkType').useCache(true).disableAuthz().list())
+                if (row.disabled !== 'Y') registrations[row.recordEntityName] = row
+            const registeredTypes = new Set(Object.keys(registrations))
+            if (!registeredTypes.has(recordEntityName)) { refuse(`The record type ${recordEntityName} is not a record type`); return }
             const keyNames = Object.keys(recordValue.getPrimaryKeys())
             if (keyNames.length !== 1) {
                 refuse(`The record type ${recordEntityName} has ${keyNames.length} primary key fields, a record link needs one`)
@@ -2445,7 +2535,10 @@ along with this software (see the LICENSE.md file). If not, see
                 if (!calendarIds.length) return false
                 const access = ec.service.sync().name('mantle.work.CalendarServices.check#CalendarAccess')
                         .parameters({calendarIdList: calendarIds}).disableAuthz().call()
-                return calendarIds.some((id) => ['CalpView', 'CalpEdit', 'CalpManage'].includes(access?.permissionMap?.[id]))
+                // an event only the people on it see: through a calendar only for its editors (check#EventAccess, SEC-BOS-107)
+                const levels = ['WevRestricted', 'WevConfidential'].includes(workEffort.visibilityEnumId) ? ['CalpEdit', 'CalpManage']
+                        : ['CalpView', 'CalpEdit', 'CalpManage']
+                return calendarIds.some((id) => levels.includes(access?.permissionMap?.[id]))
             }
             const requestVisible = (request, s) => {
                 if (s.userPartyId && request.filedByPartyId === s.userPartyId) return true
@@ -2633,7 +2726,16 @@ along with this software (see the LICENSE.md file). If not, see
                     return ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js')
                             .hiddenTaskIds([id], ec.user.userId ? ec.user.userAccount?.partyId || null : null).length === 0
                 if (isClientUser()) return clientVisible(entityName, id)
-                if (entityName === PARTY) return !value.privateOwnerUserId || value.privateOwnerUserId === ec.user.userId
+                if (entityName === PARTY) {
+                    if (value.privateOwnerUserId && value.privateOwnerUserId !== ec.user.userId) return false
+                    // a party some organization owns is that organization's users' (as the MANTLE_USER_ORG Party filter, which an
+                    // ALWAYS MANTLE_ACTIVE_ORG grant does not apply with no organization active; SEC-BAP-89): shared (_NA_ or no
+                    // owner), one of the user's organizations', the user's own party, or an internal organization itself
+                    if (!authzOn || !value.ownerPartyId || value.ownerPartyId === '_NA_' || value.privateOwnerUserId) return true
+                    if (value.partyId === ec.user.userAccount?.partyId) return true
+                    const orgIds = userOrganizationIds()
+                    return orgIds == null || orgIds.includes(value.ownerPartyId) || orgIds.includes(value.partyId)
+                }
                 // An account's or a security group's notes (Admin's "Log as note", impl-admin F75): neither record has an
                 // organization of its own. An account is found through mantle.party.UserAccountOrganization (the account with
                 // each internal organization its party works for) under the user's organization filters, Mantle's identity
@@ -2870,6 +2972,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // A raw audit row carries its source's visibility, including the independent financial grant.
                 if (entityName === 'moqui.entity.EntityAuditLog') {
                     if (depth > 5 || !value.changedEntityName || !value.pkPrimaryValue) return false
+                    if (!registeredTypes.has(value.changedEntityName)) return false
                     const sourceKeys = Object.keys(ec.entity.makeValue(value.changedEntityName).getPrimaryKeys())
                     if (sourceKeys.length !== 1 || !visible(value.changedEntityName,sourceKeys[0],value.pkPrimaryValue,depth+1)) return false
                     // an asset's cost and book fields: its book's reader for an asset Accounting keeps a book of, else its
@@ -2897,6 +3000,55 @@ along with this software (see the LICENSE.md file). If not, see
                 if (entityName === WORK_EFFORT && ['WepRouting','WepRoutingTask'].includes(value.purposeEnumId)) return !!ec.service.sync()
                         .name('mantle.work.RoutingServices.get#RoutingAccess').parameters({workEffortId:id}).disableAuthz().call()?.recordVisible
                 if (!authzOn) return true
+                // an organization's shipments, facilities, returns and maintenance records are its users' (SEC-BAP-89): their
+                // entity filters, under an ALWAYS MANTLE_ACTIVE_ORG grant, apply nothing with no organization active, so an app
+                // administrator would read every organization's through a record panel. A system administrator reads all.
+                const orgRecord = {
+                    'mantle.shipment.Shipment': (row) => [row.fromPartyId, row.toPartyId],
+                    'mantle.facility.Facility': (row) => [row.ownerPartyId],
+                    'mantle.order.return.ReturnHeader': (row) => [row.vendorPartyId, row.customerPartyId],
+                    'mantle.product.maintenance.AssetMaintenance': (row) => [row.assetId
+                        ? ec.entity.find('mantle.product.asset.Asset').condition('assetId', row.assetId).disableAuthz().one()?.ownerPartyId : null]
+                }
+                if (Object.hasOwn(orgRecord, entityName)) {
+                    const orgIds = userOrganizationIds()
+                    if (orgIds != null && !orgRecord[entityName](value).some((partyId) => !!partyId && orgIds.includes(partyId))) return false
+                }
+                // a registration's own rule (RecordLinkType, SEC-BOS-87): the host app's service, the parent record, or the organization;
+                // never for a type get#RecordLinkInfo rules itself, whose rule below no registration replaces (logged)
+                const linkTypes = ec.resource.script('component://mr-mantle/service/mantle/party/RecordLinkTypes.js')
+                let registration = registrations[entityName]
+                if (registration && linkTypes.overridesCode(registration)) {
+                    ec.logger.error(`Record type ${entityName}: its registration's visibility rule is ignored; get#RecordLinkInfo rules it itself`)
+                    registration = null
+                }
+                // in a transaction of its own, so an app check that refuses inside it cannot mark the caller's rollback-only
+                if (registration?.visibleService) return ec.service.sync().name(registration.visibleService)
+                        .parameters({recordEntityName: entityName, recordId: id}).requireNewTransaction(true).disableAuthz().call()?.recordVisible === true
+                if (registration?.parentEntityName && registration?.parentField) {
+                    const parentId = value[registration.parentField]
+                    // with no parent, the record's own organization when the registration names its field (a tracking link of
+                    // no campaign), else a system administrator's
+                    if (!parentId && registration.organizationField) {
+                        const orgIds = userOrganizationIds()
+                        const organizationPartyId = value[registration.organizationField]
+                        return orgIds == null || (!!organizationPartyId && orgIds.includes(organizationPartyId))
+                    }
+                    if (!parentId) return userOrganizationIds() == null
+                    const parentKeys = Object.keys(ec.entity.makeValue(registration.parentEntityName).getPrimaryKeys())
+                    return parentKeys.length === 1 && registeredTypes.has(registration.parentEntityName) && depth < 5
+                            && visible(registration.parentEntityName, parentKeys[0], parentId, depth + 1)
+                }
+                if (registration?.organizationField) {
+                    const orgIds = userOrganizationIds()
+                    const organizationPartyId = value[registration.organizationField]
+                    return orgIds == null || (!!organizationPartyId && orgIds.includes(organizationPartyId))
+                }
+                // a registration with no rule of its own that does not say why (Mantle's codeRule, public content's publicRead)
+                // is a system administrator's: the entity filters alone would open it to every user (SEC-BOS-87)
+                // codeRule holds only for the types get#RecordLinkInfo rules itself (RecordLinkTypes.js codeRuled)
+                if (registration && !ec.resource.script('component://mr-mantle/service/mantle/party/RecordLinkTypes.js').codeRuleHolds(registration)
+                        && registration.publicRead !== 'Y') return userOrganizationIds() == null
                 if (entityName === COMM_EVENT) return commEventVisible(value, depth)
                 if (entityName === WIKI_PAGE) return wikiPageVisible(value)
                 // a merge request or a repository: whoever may view the repository (org.moqui.git.GitServices)
@@ -3576,7 +3728,9 @@ along with this software (see the LICENSE.md file). If not, see
             or a party to (find#PartyCommunicationEvents, mailbox posts left out unless includeListPosts); its *Note rows
             as notes (PartyNote, WorkEffortNote, RequestNote, OrderNote, FacilityNote); its done activities (work efforts
             with the purpose WepPhoneCall, WepEmail, WepToDo or WepMeeting through RequestWorkEffort, WikiPageWorkEffort
-            or WorkEffortRecord); its changes from the entity audit log; its files (the *Content rows); and the messages of
+            or WorkEffortRecord); its changes from the entity audit log, never of a field its entity marks ai-opt-out or
+            encrypted or names as a password, secret or token (SEC-BAP-94), nor of an ownership field such as ownerPartyId or
+            privateOwnerUserId (SEC-BAP-141); its files (the *Content rows); and the messages of
             the chat room bound to it (org.moqui.chat.ChatServices.get#Timeline by the record: none when there is no room,
             the user may not read it or the room is end-to-end encrypted, as the server has no text for it). The open activities come apart in plannedActivities, soonest due first, with the
             assignee.
@@ -3831,10 +3985,22 @@ along with this software (see the LICENSE.md file). If not, see
                     } catch (error) { return false }
                     finally { ec.message.clearErrors(); ec.message.popErrors() }
                 }
+                // a field its entity keeps from readers is never shown (SEC-BAP-94): an ai-opt-out field (a job offer's pay, a
+                // wage), an encrypted one, one named as a secret, and one the entity no longer has; nor an ownership field
+                // (ownerPartyId, privateOwnerUserId and any other named for an owner), whose old value says whose private
+                // contact a party was or which organization held a record, which the record's own screens show no reader
+                // (SEC-BAP-141)
+                const definition = ec.entity.getEntityDefinition(recordEntityName)
+                const marked = (flag) => flag === true || flag === 'true' || flag === 'Y'
+                const fieldShown = (name) => {
+                    const field = definition?.getFieldInfo(name || '')
+                    return !!field && !marked(field.aiOptOut) && !marked(field.encrypt) && !/password|secret|token|owner/i.test(name)
+                }
                 for (const value of find.list()) {
                     const change = value.getMap()
                     const isStatus = /statusId$/i.test(change.changedFieldName || '')
                     if (clientMode && change.changedFieldName !== 'statusId') continue
+                    if (!fieldShown(change.changedFieldName)) continue
                     if (!fieldVisible(change)) continue
                     const oldDescription = isStatus ? statusDescription(change.oldValueText) : null
                     const newDescription = isStatus ? statusDescription(change.newValueText) : null
@@ -3974,7 +4140,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
             <parameter name="recordId" required="true"/>
-            <parameter name="body" required="true" allow-html="safe"/>
+            <parameter name="body" required="true" allow-html="app"/>
             <parameter name="subject"/>
             <parameter name="contentType" default-value="text/plain"/>
             <parameter name="parentCommEventId"><description>The note or message this answers</description></parameter>
@@ -4114,7 +4280,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="recordEntityName" required="true"/>
             <parameter name="recordId" required="true"/>
             <parameter name="communicationEventId" required="true"/>
-            <parameter name="body" required="true" allow-html="safe"/>
+            <parameter name="body" required="true" allow-html="app"/>
             <parameter name="subject"><description>Empty keeps the subject</description></parameter>
             <parameter name="contentType"><description>Empty keeps the content type</description></parameter>
             <parameter name="mentionUserIds" type="List"><description>The users the new body mentions</description></parameter>

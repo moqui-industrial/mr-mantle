@@ -20,7 +20,10 @@ along with this software (see the LICENSE.md file). If not, see
         ProductStorePaymentGateway (paymentInstrumentEnumId PiCreditCard, paymentGatewayConfigId AuthorizeNetDemo). For a
         sale instead of authorize then capture, set authorizeServiceName to
         mantle.ext.account.gateway.AuthorizeNetServices.authorizeAndCapture#Payment and leave captureServiceName empty. -->
-    <moqui.service.message.SystemMessageRemote systemMessageRemoteId="AuthorizeNetSandbox" description="Authorize.Net sandbox" sendUrl="https://apitest.authorize.net/xml/v1/request.api" usageCode="T" messageAuthEnumId="SmatHmacSha512" authHeaderName="X-ANET-Signature"/>
+    <!-- the remote takes only its webhook type (SEC-RTE-86); the type is the setup file's, given here too because this
+        file loads before it (data files load in name order) -->
+    <moqui.service.message.SystemMessageType systemMessageTypeId="AuthorizeNetWebhook" description="Authorize.Net webhook notification" contentType="application/json" receiveServiceName="mantle.ext.account.gateway.AuthorizeNetServices.receive#Webhook" consumeServiceName="mantle.ext.account.gateway.AuthorizeNetServices.consume#Webhook"/>
+    <moqui.service.message.SystemMessageRemote systemMessageRemoteId="AuthorizeNetSandbox" systemMessageTypeId="AuthorizeNetWebhook" description="Authorize.Net sandbox" sendUrl="https://apitest.authorize.net/xml/v1/request.api" usageCode="T" messageAuthEnumId="SmatHmacSha512" authHeaderName="X-ANET-Signature"/>
     <mantle.account.method.PaymentGatewayConfig paymentGatewayConfigId="AuthorizeNetDemo" paymentGatewayTypeEnumId="PgtAuthorizeNet" description="Authorize.Net sandbox" systemMessageRemoteId="AuthorizeNetSandbox" authorizeServiceName="mantle.ext.account.gateway.AuthorizeNetServices.authorize#Payment" captureServiceName="mantle.ext.account.gateway.AuthorizeNetServices.capture#Payment" releaseServiceName="mantle.ext.account.gateway.AuthorizeNetServices.release#Payment" refundServiceName="mantle.ext.account.gateway.AuthorizeNetServices.refund#Payment" detailsServiceName="mantle.ext.account.gateway.AuthorizeNetServices.get#PaymentGatewayDetails"/>
     <mantle.account.method.PaymentGatewayAuthorizeNet paymentGatewayConfigId="AuthorizeNetDemo" validationMode="none" lookupGraceSeconds="300"/>
 </entity-facade-xml>

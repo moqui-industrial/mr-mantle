@@ -21,6 +21,10 @@ along with this software (see the LICENSE.md file). If not, see
             <description>Y: repost#AssetReceipt posts a dated delta (ReceiptAdjustments.js) and leaves the posted history, as
                 forwardIssuanceRepostEnabled does for issuances (impl-manufacturing F32)</description></field>
         <field name="allowAccountingSelfApproval" type="text-indicator" default="'N'" enable-audit-log="update"/>
+        <field name="writeOffToleranceAmount" type="currency-amount" enable-audit-log="update"><description>The largest
+            amount, in the base currency, a user without INVOICE_APPROVE writes off on a settlement or credits against an issued
+            invoice without an approver (SEC-BOS-127); empty or 0: every write-off and linked customer credit needs an
+            approver</description></field>
         <field name="invoiceDocumentTemplate" type="text-medium" enable-audit-log="update"/>
         <field name="paymentDocumentTemplate" type="text-medium" enable-audit-log="update"/>
         <field name="documentLocale" type="text-medium" enable-audit-log="update"/>

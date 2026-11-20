@@ -46,7 +46,7 @@ along with this software (see the LICENSE.md file). If not, see
         </index>
     </extend-entity>
     <extend-entity entity-name="PaymentMethod" package="mantle.account.method">
-        <field name="gatewayCustomerId" type="text-short" enable-audit-log="update"><description>The provider's customer
+        <field name="gatewayCustomerId" type="text-short" ai-opt-out="true" enable-audit-log="update"><description>The provider's customer
             (profile) reference that gatewayCimId, the reusable payment profile, belongs to at the gateway in
             paymentGatewayConfigId. Kept on the method, not the Party, so two gateways' profiles of one party do not
             collide; a new method of the same party and gateway reuses it.</description></field>
@@ -112,6 +112,17 @@ along with this software (see the LICENSE.md file). If not, see
         <seed-data>
             <moqui.basic.Enumeration description="PayTrace" enumId="PgtPayTrace" enumTypeId="PaymentGatewayType"/>
         </seed-data>
+    </entity>
+    <entity entity-name="PaymentGatewayAccessToken" package="mantle.account.method" cache="never">
+        <description>A payment gateway connection's OAuth access token (PayTrace's client-credentials token), kept between
+            requests until shortly before it expires. The token is in an encrypted field, under the instance's key, never
+            in a cache entry and never sealed with a key derived from the remote's password, so whoever reads the cache or
+            this row's stored bytes cannot test password guesses offline (SEC-BAP-136).</description>
+        <field name="accessTokenKey" type="id" is-pk="true"><description>A hash of the connection (remote, endpoint and
+            API user), never of a secret.</description></field>
+        <field name="systemMessageRemoteId" type="id"/>
+        <field name="accessToken" type="text-medium" encrypt="true"/>
+        <field name="expiresAt" type="number-integer"><description>When the token expires, in milliseconds.</description></field>
     </entity>
     <view-entity entity-name="PaymentGatewayResponseFinance" package="mantle.account.method" cache="never">
         <description>Gateway responses with the parties of their payment, for organization and privacy conditions.</description>

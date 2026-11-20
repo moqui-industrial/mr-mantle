@@ -890,6 +890,29 @@ const access = () => ec.resource.script("component://mr-mantle/service/mantle/pa
 const RESERVATION = "mantle.work.registration.EventReservation"
 const REG_POLICY = "mantle.work.registration.EventRegistrationPolicy"
 const regLimits = {client: 10, site: 500, address: 5, payloadChars: 65536}
+// SEC-PSS-88: an offer's places a day for one requester (a verified signed-in account counted as itself, not as its network
+// address) and for one buyer address, and the tickets (one a place) a day for one attendee address, from Mantle's conf
+// (mantle@marketing-reservations-per-offer, -tickets-per-address; other/Limits.js, 0 for no limit)
+const confLimit = name => ec.resource.script("component://mr-mantle/service/mantle/other/Limits.js").limit(name)
+const confirmedAddress = () => ec.resource.script("component://mr-mantle/service/mantle/public/ConfirmedAddress.js")
+// n uses of a limit's bucket, each counted while it is within the limit; in the caller's transaction when inTransaction, so a
+// failure after it spends none
+function allowedTimes(key, limit, windowMillis, n, inTransaction = false) {
+    if (limit === Infinity) return true
+    for (let index = 0; index < n; index++) {
+        const allowed = ec.service
+            .sync()
+            .throwOnError(true)
+            .name("org.moqui.public.AccountServices.record#Attempt")
+            .parameters({input: {key, limit, windowMillis}})
+            .requireNewTransaction(!inTransaction)
+            .call().result.allowed
+        if (!allowed) return false
+    }
+    return true
+}
+// The signed-in account, when it verified its address: who it is is known without the network address.
+const verifiedAccount = () => (ec.user.userId && confirmedAddress().currentVerified() ? ec.user.userId : null)
 // A refusal of the registration services answered as the page's kind: what the visitor can fix (a value, the hold, the places
 // left, changed terms) with its own words; anything about another record the one NotFound.
 function asPage(work) {
@@ -952,6 +975,8 @@ function reach(p, scope = "RegistrationView") {
         reservationId = row.reservationId
         via = "return"
     } else if (!blank(p.reservationId) && ec.user.userAccount) {
+        // the signed-in buyer's calls count against the requester as a capability's do (SEC-PSS-89): each may ask the gateway
+        throttleLookup()
         claimOn(text(p.reservationId), p.siteId, organizationPartyId)
         try {
             reservationId = access().check({
@@ -988,7 +1013,11 @@ function registrationView(reservation, policy, via, extra = {}) {
             {
                 confirmed: "Confirmed",
                 pending: "Payment received, awaiting the organizer's confirmation",
-                held: state.completed ? "Held: payment due" : "Held: complete your registration",
+                held: state.addressToConfirm
+                    ? "Held: confirm it with the link we emailed you"
+                    : state.completed
+                      ? "Held: payment due"
+                      : "Held: complete your registration",
                 waitlisted: "On the waitlist",
                 review: "Payment received after the hold ended: the organizer will refund it or offer a place",
                 cancelled: "Cancelled",
@@ -1105,16 +1134,27 @@ function reserveRegistration(p) {
     const buyer = asPage(() => placesOf().personInput({name: p.buyerName, email: p.buyerEmail}, "buyer", true))
     const policyId = String(p.registrationPolicyId)
     const earlier = one(RESERVATION, {registrationPolicyId: policyId, requestKey: operationId})
+    const lines = jsonOf(p.lines)
+    if (!Array.isArray(lines)) fail("Unprocessable", "VALUE_INVALID[lines]: Choose at least one place")
     if (!earlier) {
+        // a verified signed-in account is counted as itself, so an office behind one network address is not one requester
+        const account = verifiedAccount()
+        const who = account ? "account:" + account : requester()
         if (
-            !allowed("mkt-reg-client:" + requester(), regLimits.client, MINUTES_10) ||
+            !allowed("mkt-reg-client:" + who, regLimits.client, MINUTES_10) ||
             !allowed("mkt-reg-site:" + p.siteId, regLimits.site, HOUR) ||
             !allowed("mkt-reg-address:" + addressKey(buyer.address), regLimits.address, HOUR)
         )
             fail("Tarpit", "RATE_LIMITED: Too many registrations from here. Wait a few minutes and try again.")
+        // the places asked (the reservation's own validation bounds them), each counted
+        const places = lines.reduce((sum, line) => sum + Math.max(0, Math.min(Number(line?.quantity) || 0, 100)), 0)
+        const perOffer = confLimit("marketing-reservations-per-offer")
+        if (
+            !allowedTimes("mkt-reg-offer:" + policyId + ":" + who, perOffer, DAY, places) ||
+            !allowedTimes("mkt-reg-offer-address:" + policyId + ":" + addressKey(buyer.address), perOffer, DAY, places)
+        )
+            fail("Tarpit", "RATE_LIMITED: You have reserved as many places for this event as one person may today.")
     }
-    const lines = jsonOf(p.lines)
-    if (!Array.isArray(lines)) fail("Unprocessable", "VALUE_INVALID[lines]: Choose at least one place")
     const party = earlier
         ? {partyId: earlier.buyerPartyId, contactMechId: earlier.emailContactMechId}
         : apart("Error making the buyer", () => buyerOf(buyer.address, buyer.name))
@@ -1153,6 +1193,21 @@ function completeRegistration(p) {
     const answers = jsonOf(p.answers)
     if ((p.attendees != null && !Array.isArray(attendees)) || (p.answers != null && !Array.isArray(answers)))
         fail("Unprocessable", "Reload the page and try again")
+    // each typed attendee address is mailed a ticket for each of its places: a bounded number a day for one address (SEC-PSS-88),
+    // counted when the reservation is completed, in this call's transaction, so a completion that fails spends none
+    if (!reservation.completedDate) {
+        const perAddress = confLimit("marketing-tickets-per-address")
+        const tickets = new Map()
+        for (const attendee of attendees || []) {
+            const address = String(attendee?.email || "").trim().toLowerCase()
+            if (address) tickets.set(address, (tickets.get(address) || 0) + 1)
+        }
+        for (const [address, count] of tickets)
+            if (!allowedTimes("mkt-reg-ticket:" + addressKey(address), perAddress, DAY, count, true))
+                fail("Tarpit", "RATE_LIMITED: An attendee's address has been sent as many tickets as it may today.")
+    }
+    // a free place is confirmed at once only for a buyer whose address is known, a verified account's own party; anyone else's
+    // is held until the receipt's link, mailed to the buyer's address, confirms it (EventRegistrationPlaces.js, SEC-PSS-88)
     asPage(() =>
         placesOf().complete(reservation, {
             attendees: attendees || [],
@@ -1196,8 +1251,27 @@ function getRegistrationPaymentForm(p) {
 // fresh operationId) shows one confirmed place's entry code with its QR: the code of its current revision, the same each time
 // (follow-up 1), the showing recorded.
 function getRegistration(p) {
-    const {reservation, policy, via} = reach(p)
-    if (reservation.paymentId) payments().refresh(reservation.reservationId, yes(p.returned) ? "return" : "page")
+    const {reservation, policy, via, organizationPartyId} = reach(p)
+    // the provider's return (returned) looks the payment up at once the first time only; after that it is paced as a page's
+    // read (SEC-PSS-89), as Shop's return is
+    if (reservation.paymentId) {
+        const looked = Number(one("mantle.account.payment.PortalPaymentAttempt", {paymentId: reservation.paymentId})?.checkCount || 0)
+        payments().refresh(reservation.reservationId, yes(p.returned) && looked === 0 ? "return" : "page")
+    }
+    // the receipt's link of a free registration held for its buyer's address (RegistrationConfirm, mailed only there) lets its
+    // reader confirm it, by an explicit confirm the page posts ("Confirm my places"), never by opening it: a mail scanner that
+    // follows links confirms nothing (SEC-PSS-88)
+    let mayConfirm = false
+    if (via === "token" && reservation.completedDate && !reservation.paymentId) {
+        try {
+            access().check({token: p.token, scope: "RegistrationConfirm", recordType: "EventRegistration", organizationPartyId})
+            mayConfirm = true
+        } catch (error) {
+            if (error?.moquiErrorKind !== "NotFound") throw error
+            ec.message.clearErrors()
+        }
+        if (mayConfirm && yes(p.confirm)) asPage(() => placesOf().confirmFree(reservation.reservationId))
+    }
     const fresh = one(RESERVATION, {reservationId: reservation.reservationId})
     let ticket = null
     if (!blank(p.showTicket) && via !== "return") {
@@ -1220,7 +1294,8 @@ function getRegistration(p) {
                 qrSvg: ec.resource.barcodeSvg("QR", issued.code, {moduleWidth: 1.2}) || ""
             }
     }
-    return {registration: registrationView(fresh, policy, via, ticket ? {ticket} : {})}
+    const canConfirm = mayConfirm && !!placesOf().stateOfReservation(fresh, policy).addressToConfirm
+    return {registration: registrationView(fresh, policy, via, Object.assign({canConfirm}, ticket ? {ticket} : {}))}
 }
 // cancelRegistration: the buyer's cancellation of the reservation's live places (or the ones named) before the occurrence starts,
 // confirmed and with PASS's request key, as the cancellation rule of the accepted terms allows (follow-up 1): a confirmed place until

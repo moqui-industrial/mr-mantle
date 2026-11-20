@@ -165,7 +165,40 @@ function routeAddress(address) {
         .filter(Boolean)
     if (!domains.includes(m[2]))
         invalid('The route domain is not registered for this deployment')
+    if (ownedMailAddress(value))
+        invalid("That address is a person's or an organization's mail address, not a route")
     return value
+}
+/* Whether an address is someone's own (SEC-PFS-85): a user account's address, or the address or an identity of a mail account
+   a user or an organization owns (a person's hosted mailbox, an organization's shared one), unless the account is one of the
+   forum's own inbound accounts (mantle@forum-inbound-accounts, Forum.js forumAccount). A route takes the mail of its address
+   into the site's forum, so a site owner may name only an address of such an account. */
+function ownedMailAddress(address) {
+    const same = (field) =>
+        ec.entity.conditionFactory
+            .makeCondition(field, 'equals', address)
+            .ignoreCase()
+    if (find('moqui.security.UserAccount').condition(same('emailAddress')).count() > 0)
+        return true
+    // the forum's own inbound accounts (mantle@forum-inbound-accounts) hold route addresses whoever made them
+    const forumAccounts = String(ec.factory.getConfValue('mantle@forum-inbound-accounts') || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+    const owned = (emailAccountId) => {
+        if (forumAccounts.includes(String(emailAccountId))) return false
+        const account = one('moqui.basic.email.EmailAccount', { emailAccountId })
+        return !!account && !!(account.ownerUserId || account.ownerPartyId)
+    }
+    for (const account of Array.from(
+        find('moqui.basic.email.EmailAccount').condition(same('emailAddress')).limit(20).list(),
+    ))
+        if (owned(account.emailAccountId)) return true
+    for (const identity of Array.from(
+        find('moqui.basic.email.EmailIdentity').condition(same('emailAddress')).limit(20).list(),
+    ))
+        if (owned(identity.emailAccountId)) return true
+    return false
 }
 
 function listMember(contactListId, partyId) {
@@ -324,6 +357,8 @@ function evaluateCategoryAccess(contactListId, actor, seen) {
         // moderates only as an Owner of the scope the category is bound to: not the site's or the category's staff,
         // so what is the site's (a member's activity across it) is not theirs to read
         scopeOwnerOnly: moderate && !staffModerate,
+        // moderates as the site's staff (an owner or moderator of the site, or the operator), not only the category's
+        siteStaff: moderate && (staff || (actor === me() && isOperator())),
         canInvite: owner || categoryStaff,
     }
 }
@@ -342,6 +377,12 @@ function category(id, siteId) {
 function articleReadable(siteId, wikiPageId, partyId) {
     const page = one('moqui.resource.wiki.WikiPage', { wikiPageId })
     if (!page?.publishedVersionName) return false
+    // an article of the site's own publishing space; a page of any other space is no reader's here
+    if (
+        page.wikiSpaceId !==
+        one(S + 'PublicSite', { siteId })?.publishingWikiSpaceId
+    )
+        return false
     if (
         !one(S + 'PublicSubscriptionBinding', {
             siteId,
@@ -421,7 +462,11 @@ function postVisible(state, event, a) {
     return (
         state.visibility === 'approved' ||
         event.fromPartyId === me() ||
-        a.canModerate
+        a.canModerate ||
+        // a private conversation's message held as spam is its participants' to see and release (Forum.js)
+        (state.visibility === 'pending' &&
+            a.category?.visibility === 'private' &&
+            !!a.canRead)
     )
 }
 const trustLevel = (siteId, partyId = me()) =>
@@ -747,6 +792,127 @@ function internalMemberIds(contactListId) {
             .map((v) => v.partyId),
     )
 }
+/* A member's HTML (a post, a bio) cleaned, with an image kept only when it is one of the site's own attachment downloads:
+   a relative path under one of the site's forum mounts (its pathPrefix), of plain segments (no empty, '.' or '..' one, so
+   no '//host' and no step out of the mount), ending in /download?attachmentId=<id>. A reader's browser then loads no
+   other image, so no same-site route (a write transition, reached with the reader's cookie) and no outside tracker is
+   fetched by showing it (SEC-PSF-81). Any other image is a link to its outside address, or its alt text for a relative
+   one. In mail (mail true) every image is a link or its text: there no page policy applies, and a mail client that loads
+   images tells the sender who read when. With no site every image goes. */
+const ATTACHMENT_PATH =
+    /^((?:\/[A-Za-z0-9_~-][A-Za-z0-9._~-]*)*)\/download\?attachmentId=[A-Za-z0-9_-]{1,64}(?:&amp;variant=thumbnail)?$/
+const forumMounts = new Map()
+function forumPrefixes(siteId) {
+    if (!forumMounts.has(siteId))
+        forumMounts.set(
+            siteId,
+            rows(S + 'PublicSiteApp', { siteId, app: 'forum' }, 20)
+                .filter((row) => row.enabled === 'Y')
+                .map((row) => String(row.pathPrefix || '').replace(/\/+$/, '')),
+        )
+    return forumMounts.get(siteId)
+}
+function siteAttachment(src, siteId) {
+    const path = ATTACHMENT_PATH.exec(src)
+    if (!siteId || !path) return false
+    return forumPrefixes(siteId).some(
+        (prefix) => path[1] === prefix || path[1].startsWith(prefix + '/'),
+    )
+}
+function memberHtml(html, siteId, mail = false) {
+    const cleaned = StringUtilities.cleanHtml(html || '')
+    if (!/<img\b/i.test(cleaned)) return cleaned
+    const attribute = (tag, name) =>
+        (new RegExp('\\s' + name + '="([^"]*)"', 'i').exec(tag) || [])[1] || ''
+    return StringUtilities.cleanHtml(
+        cleaned.replace(/<img\b[^>]*>/gi, (tag) => {
+            const src = attribute(tag, 'src'),
+                alt = WebUtilities.encodeHtml(
+                    attribute(tag, 'alt')
+                        .replace(/&quot;/g, '"')
+                        .replace(/&amp;/g, '&'),
+                )
+            if (!mail && siteAttachment(src, siteId)) return tag
+            if (/^https?:\/\//i.test(src))
+                return '<a href="' + src + '">' + (alt || 'image') + '</a>'
+            return alt
+        }),
+    )
+}
+/* Whether a registered sender serves a site (SEC-PFS-99): its domain is exactly one of the site's host names, or the
+   operator names the site for it in mantle@forum-sender-sites ("address=SITE_A;SITE_B, ..."). The registered senders
+   (pass@sender-addresses) are the deployment's, so a site's mail never goes out as another site's. */
+function senderServes(siteId, address) {
+    const sender = String(address || '').trim().toLowerCase()
+    const domain = sender.includes('@') ? sender.split('@').pop() : ''
+    if (!domain) return false
+    if (
+        rows(S + 'PublicSiteHost', { siteId }, 100).some(
+            (h) => String(h.hostname || '').toLowerCase() === domain,
+        )
+    )
+        return true
+    return String(ec.factory.getConfValue('mantle@forum-sender-sites') || '')
+        .split(',')
+        .map((entry) => entry.trim().split('='))
+        .some(
+            ([named, sites]) =>
+                String(named || '').trim().toLowerCase() === sender &&
+                String(sites || '')
+                    .split(';')
+                    .map((s) => s.trim())
+                    .includes(siteId),
+        )
+}
+/* Why the operator's registration refuses a sender and template for a site, or null: the sender of pass@sender-addresses
+   that serves the site, and a template of pass@mail-template-ids from that sender. */
+function mailSettingsRefusal(siteId, senderAddress, templateId) {
+    const listed = (selector) =>
+        String(ec.factory.getConfValue(selector) || '')
+            .split(',')
+            .map((x) => x.trim())
+    if (!listed('pass@sender-addresses').includes(senderAddress))
+        return 'Sender must be registered by the operator'
+    if (!senderServes(siteId, senderAddress))
+        return "That sender is not this site's: its domain is none of the site's host names; ask the operator to register it for this site"
+    const template = one('moqui.basic.email.EmailTemplate', {
+        emailTemplateId: templateId,
+    })
+    if (
+        !template ||
+        template.fromAddress !== senderAddress ||
+        !listed('pass@mail-template-ids').includes(templateId)
+    )
+        return 'Template and sender must be registered together'
+    return null
+}
+/* A site's mail settings to send with, checked again against the registration at send time; null when the operator's
+   registration no longer holds them. The refusal is logged once for the site (a ForumImportMap row keeps the last one, in
+   a transaction of its own), not once for each delivery, and again only when it changes or after it held again. */
+function mailSettings(siteId) {
+    const settings = one(F + 'ForumMailSettings', { siteId })
+    if (!settings) return null
+    const refusal = mailSettingsRefusal(siteId, settings.senderAddress, settings.templateId)
+    const key = { siteId, sourceType: 'mail-refusal', sourceId: siteId.slice(0, 40) }
+    const logged = one(F + 'ForumImportMap', key)
+    if (!refusal) {
+        if (logged)
+            ec.transaction.runRequireNew(null, 'Error clearing a mail refusal', () =>
+                find(F + 'ForumImportMap', key).deleteAll(),
+            )
+        return settings
+    }
+    if (logged?.payload !== refusal) {
+        ec.logger.error('Forum mail of site ' + siteId + ' is not sent: ' + refusal)
+        ec.transaction.runRequireNew(null, 'Error keeping a mail refusal', () => {
+            const row = one(F + 'ForumImportMap', key, true)
+            row
+                ? update(row, { payload: refusal })
+                : create(F + 'ForumImportMap', { ...key, state: 'index', payload: refusal })
+        })
+    }
+    return null
+}
 /* Sanitized HTML as plain text; templates escape it once. */
 function plainText(html) {
     return StringUtilities.cleanHtml(html || '')
@@ -815,6 +981,149 @@ function nameShowsOtherAddress(name, address) {
     return (String(name || '').normalize('NFKC').match(ADDRESS_TOKEN) || []).some(
         (token) => token.replace(/^[.]+|[.]+$/g, '').toLowerCase() !== own,
     )
+}
+/* The tokens of an Authentication-Results field (RFC 8601 section 2.2) in its parts between semicolons: comments
+   (nested, with quoted pairs) are dropped, a quoted string is one token {quoted}, '=' is a token, and anything else up
+   to white space, '=', ';' or a quote is a word ("header.from", "dkim"; a property's "header . d" is joined). */
+function authResultParts(text) {
+    const parts = [[]]
+    const source = String(text || '')
+    let word = ''
+    const end = () => {
+        if (word) parts[parts.length - 1].push(word)
+        word = ''
+    }
+    for (let i = 0; i < source.length; i++) {
+        const ch = source[i]
+        if (ch === '(') {
+            end()
+            let depth = 1
+            for (i++; i < source.length && depth; i++) {
+                if (source[i] === '\\') i++
+                else if (source[i] === '(') depth++
+                else if (source[i] === ')') depth--
+            }
+            i--
+        } else if (ch === '"') {
+            end()
+            let quoted = ''
+            for (i++; i < source.length && source[i] !== '"'; i++)
+                quoted += source[i] === '\\' ? source[++i] || '' : source[i]
+            parts[parts.length - 1].push({ quoted })
+        } else if (ch === ';') {
+            end()
+            parts.push([])
+        } else if (ch === '=') {
+            end()
+            parts[parts.length - 1].push('=')
+        } else if (/\s/.test(ch)) end()
+        else word += ch
+    }
+    end()
+    // a property's name may have white space around its dot
+    return parts.map((tokens) => {
+        const out = []
+        for (const token of tokens) {
+            const last = out[out.length - 1]
+            if (
+                typeof token === 'string' &&
+                typeof last === 'string' &&
+                token !== '=' &&
+                last !== '=' &&
+                (token.startsWith('.') || last.endsWith('.'))
+            )
+                out[out.length - 1] = last + token
+            else out.push(token)
+        }
+        return out
+    })
+}
+const tokenText = (token) =>
+    token == null ? '' : typeof token === 'string' ? token : token.quoted
+/* An Authentication-Results field read (RFC 8601): {authservId, results: method -> {result, props}}, the first result
+   of each method only (a later one of the same method, which a sender can add, counts for nothing); null for no field. */
+function readAuthResults(text) {
+    const parts = authResultParts(text)
+    const authservId = tokenText(parts[0][0]).toLowerCase()
+    if (!authservId) return null
+    const results = {}
+    for (const tokens of parts.slice(1)) {
+        if (tokens[1] !== '=' || typeof tokens[0] !== 'string') continue
+        const method = tokens[0].toLowerCase().split('/')[0]
+        if (!method || method === 'none' || results[method]) continue
+        const props = {}
+        for (let k = 3; k + 2 < tokens.length; k++) {
+            if (tokens[k + 1] !== '=' || typeof tokens[k] !== 'string') continue
+            const name = tokens[k].toLowerCase()
+            if (!(name in props)) props[name] = tokenText(tokens[k + 2])
+            k += 2
+        }
+        results[method] = {
+            result: tokenText(tokens[2]).toLowerCase(),
+            props,
+        }
+    }
+    return { authservId, results }
+}
+/* The authserv-id the mail listener writes its Authentication-Results under, or keeps the gateway's under
+   (crates/moqui-mail/src/delivery.rs listener_options): smtp-server@authserv-id, else, on a listener that verifies mail
+   itself (smtp-server@internet, or an edge node), its hostname (smtp-server@hostname, else the webroot's http-host, else
+   localhost, as crates/moqui-mail/src/mx.rs hostname). A listener behind a gateway with no id keeps every field as it came,
+   so none is trusted. Lower case; empty for none. */
+function listenerAuthservIds() {
+    const conf = (selector) => String(ec.factory.getConfValue(selector) ?? '').trim()
+    const named = conf('smtp-server@authserv-id').toLowerCase()
+    if (named) return [named]
+    const verifies =
+        conf('smtp-server@internet').toLowerCase() === 'true' ||
+        ['front', 'front_edge', 'edge'].includes(conf('instance@node-role').toLowerCase())
+    if (!verifies) return []
+    return [(conf('smtp-server@hostname') || conf('webapp-list/webapp[webroot]@http-host') || 'localhost').toLowerCase()]
+}
+/* The authserv-ids of the providers a synced (IMAP or POP) mailbox's mail comes from, whose topmost Authentication-Results
+   field is trusted for that mail (mantle@mail-provider-authserv-ids, comma separated; SEC-BAP-84). */
+const providerAuthservIds = () =>
+    String(ec.factory.getConfValue('mantle@mail-provider-authserv-ids') || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+const trustedAuthservIds = listenerAuthservIds
+/* Whether the mail gateway authenticated a sender's domain: in the topmost Authentication-Results field, which the
+   receiving server wrote last, under a trusted authserv-id (the listener's own by default; trusted, a list, for a synced
+   mailbox's provider), DMARC passed for the From domain, or a DKIM signature passed for that very domain (strict
+   alignment). A lower field of a trusted id is no proof: a sender can write one (SEC-BAP-84). A parent's signature is not
+   the subdomain's (d=host.example for team.host.example, SEC-PFS-64): relaxed alignment needs the organizational domain,
+   which the gateway's DMARC finds by the public suffix list and this code does not. Another domain's pass, another
+   server's field and a later result of a method count for nothing. Every path that trusts "authenticated by the gateway"
+   asks this: a post by mail, a held message's sender, a report filed as an account, a service queue's mail. */
+function gatewayAuthenticated(values, sender, trusted = trustedAuthservIds()) {
+    const domain = String(sender || '')
+        .split('@')
+        .pop()
+        .toLowerCase()
+    if (!trusted.length || !domain || !String(sender || '').includes('@'))
+        return false
+    const aligned = (d) => {
+        const signer = String(d || '')
+            .replace(/^.*@/, '')
+            .toLowerCase()
+        return !!signer && domain === signer
+    }
+    return Array.from(values || []).slice(0, 1).some((value) => {
+        const read = readAuthResults(value)
+        if (!read || !trusted.includes(read.authservId)) return false
+        const dmarc = read.results.dmarc
+        if (
+            dmarc?.result === 'pass' &&
+            String(dmarc.props['header.from'] || '').toLowerCase() === domain
+        )
+            return true
+        const dkim = read.results.dkim
+        return (
+            dkim?.result === 'pass' &&
+            aligned(dkim.props['header.d'] || dkim.props['header.i'])
+        )
+    })
 }
 function clearAnswer(t, a, postId, reason) {
     if (!postId || t.acceptedAnswerId !== postId) return
@@ -1454,11 +1763,12 @@ function sourceFormatOf(value) {
 }
 /* A revision's source as the cleaned HTML that is stored and shown: Markdown is rendered (CommonMark, fenced code as
    code) and then cleaned exactly as rich text is. */
-const renderSource = (format, text) =>
-    StringUtilities.cleanHtml(
+const renderSource = (format, text, siteId) =>
+    memberHtml(
         format === 'markdown'
             ? ec.resource.markdownHtml(String(text || ''))
             : text,
+        siteId,
     )
 function confirmedParty(partyId) {
     const confirmed = ec.resource.script(
@@ -1765,6 +2075,20 @@ function gateRefuse(result) {
         fail(result.refusal.kind, result.refusal.message)
     return result
 }
+/* The types a post's file may have, all inert (no script or style a page could load), and the name it is kept by: an
+   upload's (stageAttachment) and an imported one's (ForumImport) alike, so no file is served as anything else. */
+const ATTACHMENT_TYPES = [
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+    'application/pdf',
+    'text/plain',
+]
+const attachmentName = (name) =>
+    String(name || 'attachment')
+        .replace(/[^a-zA-Z0-9._ -]/g, '_')
+        .slice(0, 100)
 function privateTopic(t) {
     const event = one(E + 'CommunicationEvent', {
         communicationEventId: t.rootCommEventId,
@@ -1780,6 +2104,10 @@ function privateTopic(t) {
     fieldMailbox,
     fieldAddressCount,
     nameShowsOtherAddress,
+    readAuthResults,
+    gatewayAuthenticated,
+    listenerAuthservIds,
+    providerAuthservIds,
     now,
     millis,
     dayKey,
@@ -1805,6 +2133,7 @@ function privateTopic(t) {
     revision,
     bump,
     sanctioned,
+    memberHtml,
     categoryChain,
     categorySubtree,
     routeAddress,
@@ -1817,6 +2146,10 @@ function privateTopic(t) {
     scopeChanged,
     scopeAnswer,
     heldMail,
+    ATTACHMENT_TYPES,
+    attachmentName,
+    mailSettings,
+    mailSettingsRefusal,
     reviewScoped,
     TARGET_TYPES,
     listMember,

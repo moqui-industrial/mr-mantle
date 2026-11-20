@@ -596,6 +596,14 @@ function linesFrom(p, kind) {
         }
     })
 }
+// The users who saved an order change's proposal (its filing and each re-save).
+const savedBy = request =>
+    String(request?.changeSavedByUserIds || "")
+        .split(",")
+        .filter(Boolean)
+// Whether the user filed or re-saved the proposal, so decides it only where the policy allows self-approval (SEC-BAP-111).
+const proposedBy = (request, partyId) =>
+    (!!partyId && partyId === request.filedByPartyId) || (!!ec.user.userId && savedBy(request).includes(ec.user.userId))
 function save(p) {
     const existing = blank(p.requestId) ? null : changeOf(p.requestId, {lock: true, scoped: hasAny(readPermissions)})
     const orderId = existing ? existing.so.orderId : text(p.orderId)
@@ -653,6 +661,10 @@ function save(p) {
         orderPartSeqId: ownerFields.orderPartSeqId
     }
     const filer = ec.user.userAccount?.partyId || null
+    // each user who saved the proposal is recorded: none of them decides it (savedBy, SEC-BAP-111)
+    const savers = savedBy(existing?.request)
+    if (ec.user.userId && !savers.includes(ec.user.userId)) savers.push(ec.user.userId)
+    values.changeSavedByUserIds = savers.join(",") || null
     let requestId
     if (existing) {
         requestId = existing.requestId
@@ -831,8 +843,8 @@ function decide(p) {
         )
     const policy = cases().policyOf(ch.so.organizationPartyId)
     const partyId = ec.user.userAccount?.partyId || null
-    if (policy?.orderChangeSelfApproval !== "Y" && partyId && partyId === ch.request.filedByPartyId)
-        denied("SELF_APPROVAL", "Another approver decides a change you proposed")
+    if (policy?.orderChangeSelfApproval !== "Y" && proposedBy(ch.request, partyId))
+        denied("SELF_APPROVAL", "Another approver decides a change you proposed or changed")
     if (decision === "refuse" && blank(p.reason)) denied("REASON_REQUIRED", "Give the reason for the refusal")
     const days = number(policy?.orderChangeApprovalDays) || defaultApprovalDays
     const now = ec.user.nowTimestamp
@@ -1229,7 +1241,7 @@ function actionsOf(ch, state, revision) {
     const open = openStatuses.includes(ch.request.statusId)
     const partyId = ec.user.userAccount?.partyId || null
     const policy = cases().policyOf(ch.so.organizationPartyId)
-    const selfBlocked = policy?.orderChangeSelfApproval !== "Y" && partyId && partyId === ch.request.filedByPartyId
+    const selfBlocked = policy?.orderChangeSelfApproval !== "Y" && proposedBy(ch.request, partyId)
     const why = (ok, reason) => ({allowed: !!ok, reason: ok ? null : reason})
     return {
         save: why(open && has("ORDER_CHANGE_REQUEST"), open ? "ORDER_CHANGE_REQUEST is required" : "The change is closed"),

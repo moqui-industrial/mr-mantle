@@ -239,6 +239,47 @@ function sameValue(field, oldValue, newValue) {
     if (dateFields.includes(field)) return lib.dateText(oldValue) === lib.dateText(newValue)
     return String(oldValue) === String(newValue)
 }
+// Whether an address is the buying organization's to ship to (SEC-BAP-92): a current address of the organization or of one of its
+// facilities, or for a drop-ship order its customer's (dropShipCustomerAddress). Any other (another organization's, an
+// employee's, a private contact's) is refused and never read out.
+function organizationAddress(organizationPartyId, contactMechId) {
+    if (blank(contactMechId) || blank(organizationPartyId)) return false
+    const now = ec.user.nowTimestamp
+    if (
+        find("mantle.party.contact.PartyContactMech", {partyId: organizationPartyId, contactMechId})
+            .conditionDate("fromDate", "thruDate", now)
+            .count()
+    )
+        return true
+    return Array.from(
+        find("mantle.facility.FacilityContactMech", {contactMechId}).conditionDate("fromDate", "thruDate", now).list()
+    ).some(row => one("mantle.facility.Facility", {facilityId: row.facilityId})?.ownerPartyId === organizationPartyId)
+}
+// Whether an address is a drop-ship purchase order's customer's (SEC-BAP-92 review): a line of the order bought for a sales line
+// (OrderItem.salesOrderId), whose sales part ships to it or whose customer has it as a current address.
+function dropShipCustomerAddress(orderId, contactMechId) {
+    if (blank(contactMechId)) return false
+    const salesOrderIds = Array.from(
+        new Set(
+            rows("mantle.order.OrderItem", {orderId})
+                .map(row => row.salesOrderId)
+                .filter(Boolean)
+        )
+    )
+    const now = ec.user.nowTimestamp
+    for (const salesOrderId of salesOrderIds)
+        for (const part of rows("mantle.order.OrderPart", {orderId: salesOrderId})) {
+            if (part.postalContactMechId === contactMechId) return true
+            if (
+                part.customerPartyId &&
+                find("mantle.party.contact.PartyContactMech", {partyId: part.customerPartyId, contactMechId})
+                    .conditionDate("fromDate", "thruDate", now)
+                    .count()
+            )
+                return true
+        }
+    return false
+}
 // A value as text for the change rows (names for parties, terms and products; amounts as given, the screen withholds them).
 function valueText(field, value, currencyUomId) {
     if (blank(value)) return ""
@@ -280,7 +321,8 @@ function proposed(po, facts, p) {
             oldValue: oldValue == null ? null : String(oldValue),
             newValue: newValue == null ? null : String(newValue),
             fromText: valueText(field, oldValue, currency),
-            toText: valueText(field, newValue, currency),
+            // a refused address is named by its id only (SEC-BAP-92)
+            toText: field === "postalContactMechId" && refusal ? String(newValue) : valueText(field, newValue, currency),
             refusalCode: refusal ? refusal[0] : null,
             refusalText: refusal ? refusal[1] : ""
         })
@@ -415,8 +457,14 @@ function proposed(po, facts, p) {
             if (one("moqui.basic.Enumeration", {enumId: newValue})?.parentEnumId !== "TtInco")
                 refusal = ["TERM_INVALID", "Choose an incoterm"]
         } else if (field === "postalContactMechId" && newValue) {
-            if (!one("mantle.party.contact.PostalAddress", {contactMechId: newValue}))
-                refusal = ["ADDRESS_INVALID", "Choose a postal address"]
+            if (
+                !one("mantle.party.contact.PostalAddress", {contactMechId: newValue}) ||
+                (!organizationAddress(po.organizationPartyId, newValue) && !dropShipCustomerAddress(po.orderId, newValue))
+            )
+                refusal = [
+                    "ADDRESS_INVALID",
+                    "Choose a postal address of " + partyName(po.organizationPartyId) + " or of its facilities"
+                ]
         }
         row(field === "currencyUomId" ? ORDER : PART, null, field, oldValue, newValue, refusal)
     }
@@ -620,7 +668,16 @@ function apply(p) {
     call("mantle.order.OrderServices.increment#OrderRevision", {orderId: po.orderId, revisionKind: "commercial"})
     const revision = revisionOf(one(ORDER, {orderId: po.orderId}))
     // the hold now waits for the approval of this revision (revisionState)
-    call("update#" + HOLD, {orderHoldReasonId: reviewed.current.hold.orderHoldReasonId, appliedRevision: revision})
+    // who applied it is recorded on the hold: none of them approves the revision (SEC-BAP-110)
+    const changers = String(reviewed.current.hold.changedByUserIds || "")
+        .split(",")
+        .filter(Boolean)
+    if (!changers.includes(ec.user.userId)) changers.push(ec.user.userId)
+    call("update#" + HOLD, {
+        orderHoldReasonId: reviewed.current.hold.orderHoldReasonId,
+        appliedRevision: revision,
+        changedByUserIds: changers.join(",")
+    })
     const quantityChanged = changeRows.some(row => row.entity === ITEM && row.field === "quantity")
 
     // the open receipts to the new remainders (Warehouse's contract, in this transaction)

@@ -125,7 +125,7 @@ function caseOf(requestId) {
     const profile = blank(requestId) ? null : one(PROFILE, {requestId})
     if (!profile) unavailable()
     const organization = rows("mantle.request.RequestParty", {requestId, roleTypeId: "OrgInternal"}).find(row => lib.active(row))
-    if (!organization || !facilityScope.owns(facilityScope.scope(), organization.partyId)) unavailable()
+    if (!organization || !facilityScope.owns(facilityScope.requestScope(), organization.partyId)) unavailable()
     return profile
 }
 // get#CaseTemplateValues: a case's values as submitted, with the form as it was at the response date (its labels and

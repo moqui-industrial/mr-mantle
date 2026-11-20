@@ -290,6 +290,62 @@ feature(
     }
 )
 
+// SEC-BOS-117: an HR editor grants no leave to their own employment, by an allocation or an assignment of a policy, and their own
+// run of the accrual leaves their employment out; the same terms reach another employee
+feature("an HR editor's own employment is refused a grant and a policy, and is left out of their accrual run; another employee's is not", {
+    when() {
+        const calHr = user("CALHR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [], state.cal)
+        const outcomes = out => (out.error ? code(out) : out.rows.map(row => row.personName + ":" + (row.reasonCode || row.outcome)).join(","))
+        const grant = run(calHr, L + "preview#Allocation", {
+            leavePolicyId: state.policy,
+            partyRelationshipIds: [state.calEmp, state.benEmp],
+            amount: "3",
+            periodFromDate: "2026-04-01",
+            periodThruDate: "2026-06-30",
+            reason: "Second quarter"
+        })
+        // a policy of another type, so the two are under no other then
+        const sick = run(state.hr, L + "store#Policy", {
+            organizationPartyId: orgA,
+            policyName: "Sick leave",
+            leaveTypeEnumId: "PltSick",
+            unitEnumId: "LuDays",
+            accrualFrequencyEnumId: "LafMonthly",
+            fromDate: "2025-01-01"
+        }).leavePolicyId
+        const assign = openingAmount =>
+            outcomes(
+                run(calHr, L + "assign#Policy", {
+                    leavePolicyId: sick,
+                    partyRelationshipIds: [state.calEmp, state.benEmp],
+                    fromDate: "2026-01-01",
+                    openingAmount,
+                    reason: "Spec",
+                    preview: true
+                })
+            )
+        const opening = assign("5"),
+            noOpening = assign(null)
+        // round 2: a policy put on the editor by another HR editor accrues, but not in the editor's own run of the accrual
+        run(state.hr, L + "store#AccrualRule", {leavePolicyId: sick, expectedRevision: revisionOf(sick), fromDate: "2025-01-01",
+            serviceMonthsFrom: 0, amount: "1"})
+        run(state.hr, L + "assign#Policy", {leavePolicyId: sick, partyRelationshipIds: [state.calEmp, state.benEmp],
+            fromDate: "2025-01-01", reason: "Spec"})
+        const sickEntries = partyRelationshipId => entries({partyRelationshipId, leavePolicyId: sick}).length
+        run(calHr, L + "run#Accrual", {leavePolicyId: sick})
+        const ownRun = {cal: sickEntries(state.calEmp), ben: sickEntries(state.benEmp)}
+        run(state.hr, L + "run#Accrual", {leavePolicyId: sick})
+        const otherRun = sickEntries(state.calEmp)
+        return {grant: outcomes(grant), opening, noOpening, ownRun, otherRun}
+    },
+    then({grant, opening, noOpening, ownRun, otherRun}) {
+        grant === "Leave BEN:ready,Leave CAL:SELF_APPROVAL" || grant === "Leave CAL:SELF_APPROVAL,Leave BEN:ready"
+        opening === "Leave BEN:ready,Leave CAL:SELF_APPROVAL" || opening === "Leave CAL:SELF_APPROVAL,Leave BEN:ready"
+        noOpening === "Leave BEN:ready,Leave CAL:SELF_APPROVAL" || noOpening === "Leave CAL:SELF_APPROVAL,Leave BEN:ready"
+        ownRun.cal === 0 && ownRun.ben > 0 && otherRun > 0
+    }
+})
+
 feature(
     "The accrual run twice posts once: one employment that fails is logged while the others post; a year's carry-over and a grant's expiry post once; the steps by service, the part rounding and the cap",
     {

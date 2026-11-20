@@ -863,6 +863,15 @@ kit => {
     }
     methods.transferRepository = p => {
         const {r, repo, partyId, access} = repositoryFor(p, "SmrOwner", true)
+        // a hidden repository (itself, a group above it or the repository it forks) stays where it was hidden: moved out of
+        // a hidden group it would be shown again, so only the site's staff move it; the answer says who hid it
+        if (r.hidden && !r.access.staff)
+            fail(
+                "Conflict",
+                (core.hiddenByStaff("repository", r.repo) || r.chain.some(group => !!group.hiddenAt && core.hiddenByStaff("group", group))
+                    ? "repositoryHidden: The site's staff hid this repository or a group above it; ask them to move it"
+                    : "repositoryHidden: This repository or a group above it is hidden; show it again before moving it")
+            )
         const before = revisionOf(repo)
         fresh(before, p.expectedRevision)
         const s = core.settings(p.siteId)

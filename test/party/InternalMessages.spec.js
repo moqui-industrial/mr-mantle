@@ -412,3 +412,21 @@ feature("a party's timeline has the messages it is from, to or a recipient of", 
         ids == [msg.benReply, msg.lunch, msg.plan]
     },
 })
+
+// SEC-CLI-82: an internal Message is read only by signed-in users, so its body keeps only this server's images (an outside
+// one would tell its host who read it and when); a Comment's body is cleaned to the safe set, its images kept
+feature("an internal Message keeps only this server's images; a Comment keeps an outside one", {
+    when() {
+        at(90)
+        const images = '<p>See <img src="https://tracker.example/pixel.png" alt="t"><img src="/rest/s1/static/plan.png" alt="plan"></p>'
+        const message = send("Ada", { subject: "Images", body: images, contentType: "text/html", toPartyIdList: [party.Ben] })
+        const comment = send("Ada", { communicationEventTypeId: "Comment", subject: "Images", body: images, contentType: "text/html",
+                toPartyId: party.Ben })
+        return { message: eventOf(message.communicationEventId), comment: eventOf(comment.communicationEventId) }
+    },
+    then({ message, comment }) {
+        !message.body.includes("tracker.example")
+        message.body.includes("/rest/s1/static/plan.png")
+        comment.body.includes("https://tracker.example/pixel.png")
+    },
+})

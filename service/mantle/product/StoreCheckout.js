@@ -62,6 +62,10 @@ const choiceTexts = {
 const gatewayCapabilities = {
     // Shop P6: a hosted test gateway also keeps a payer's card and sets one up on its hosted setup page (a test card)
     PgtTest: config => {
+        // a test gateway takes no payment on a production instance unless the operator allows them (TestGateways.js refusal,
+        // SEC-BOS-129): its hosted form, profile, setup and off-session services are offered to no checkout, card or relay
+        if (ec.resource.script("component://mr-mantle/service/mantle/account/TestGateways.js").refusal(config))
+            return {hostedCheckout: false, savedMethods: false, offSession: false}
         const hosted = String(config.authorizeServiceName || "").includes("hostedPending")
         // Shop P7: hostedPendingOrApprove charges a kept card off-session (approves a payment that names its method)
         const offSession = String(config.authorizeServiceName || "").includes("hostedPendingOrApprove")

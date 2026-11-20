@@ -1819,6 +1819,9 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.PaymentServices.make#GatewayIdempotencyKey" out-map="keyOut"
                     in-map="{payment:payment, paymentGatewayConfigId:paymentGatewayConfigId, operation:'authorize',
                         amount:payment.amount, operationKey:operationKey}"/>
+            <!-- a test gateway takes no payment on a production instance (TestGateways.js, SEC-BOS-129) -->
+            <set field="testGatewayRefusal" from="ec.resource.script('component://mr-mantle/service/mantle/account/TestGateways.js').refusal(paymentGatewayConfig)"/>
+            <if condition="testGatewayRefusal"><return error="true" message="${testGatewayRefusal}"/></if>
             <service-call name="${paymentGatewayConfig.authorizeServiceName}" out-map="authOut"
                     in-map="{paymentId:payment.paymentId, cardSecurityCode:cardSecurityCode, returnUrl:returnUrl,
                         paymentGatewayConfigId:paymentGatewayConfig.paymentGatewayConfigId, operationKey:operationKey,
@@ -2062,6 +2065,9 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- check if auth expired and do an auth now -->
             <!-- NOTE: maybe determine if auth is expired (based on configured days per CC type...)? -->
             <if condition="!justDidAuthorize &amp;&amp; paymentGatewayConfig.detailsServiceName">
+                <!-- a test gateway takes no payment on a production instance (TestGateways.js, SEC-BOS-129) -->
+                <set field="testGatewayRefusal" from="ec.resource.script('component://mr-mantle/service/mantle/account/TestGateways.js').refusal(paymentGatewayConfig)"/>
+                <if condition="testGatewayRefusal"><return error="true" message="${testGatewayRefusal}"/></if>
                 <service-call name="${paymentGatewayConfig.detailsServiceName}" out-map="detailOut"
                         in-map="{paymentId:paymentId, payment:payment, paymentGatewayConfigId:paymentGatewayConfigId}"/>
                 <if condition="detailOut.gatewayStatusId == 'PmntPromised'"><then>
@@ -2098,6 +2104,9 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.PaymentServices.make#GatewayIdempotencyKey" out-map="keyOut"
                     in-map="{payment:payment, paymentGatewayConfigId:paymentGatewayConfigId, operation:'capture',
                         amount:amount, operationKey:operationKey}"/>
+            <!-- a test gateway takes no payment on a production instance (TestGateways.js, SEC-BOS-129) -->
+            <set field="testGatewayRefusal" from="ec.resource.script('component://mr-mantle/service/mantle/account/TestGateways.js').refusal(paymentGatewayConfig)"/>
+            <if condition="testGatewayRefusal"><return error="true" message="${testGatewayRefusal}"/></if>
             <service-call name="${paymentGatewayConfig.captureServiceName}" out-map="captOut"
                     in-map="{paymentId:payment.paymentId, amount:amount, paymentGatewayConfigId:paymentGatewayConfig.paymentGatewayConfigId,
                         operationKey:operationKey, idempotencyKey:keyOut.idempotencyKey}"/>
@@ -2206,6 +2215,9 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.PaymentServices.make#GatewayIdempotencyKey" out-map="keyOut"
                     in-map="{payment:payment, paymentGatewayConfigId:paymentGatewayConfigId, operation:'release',
                         operationKey:operationKey}"/>
+            <!-- a test gateway takes no payment on a production instance (TestGateways.js, SEC-BOS-129) -->
+            <set field="testGatewayRefusal" from="ec.resource.script('component://mr-mantle/service/mantle/account/TestGateways.js').refusal(paymentGatewayConfig)"/>
+            <if condition="testGatewayRefusal"><return error="true" message="${testGatewayRefusal}"/></if>
             <service-call name="${paymentGatewayConfig.releaseServiceName}" out-map="releaseOut"
                     in-map="{paymentId:payment.paymentId, paymentGatewayConfigId:paymentGatewayConfig.paymentGatewayConfigId,
                         operationKey:operationKey, idempotencyKey:keyOut.idempotencyKey}"/>
@@ -2364,6 +2376,9 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.PaymentServices.make#GatewayIdempotencyKey" out-map="keyOut"
                     in-map="{payment:payment, paymentGatewayConfigId:paymentGatewayConfigId, operation:'refund',
                         amount:amount, operationKey:operationKey}"/>
+            <!-- a test gateway takes no payment on a production instance (TestGateways.js, SEC-BOS-129) -->
+            <set field="testGatewayRefusal" from="ec.resource.script('component://mr-mantle/service/mantle/account/TestGateways.js').refusal(paymentGatewayConfig)"/>
+            <if condition="testGatewayRefusal"><return error="true" message="${testGatewayRefusal}"/></if>
             <service-call name="${paymentGatewayConfig.refundServiceName}" out-map="refundOut"
                     in-map="{paymentId:payment.paymentId, amount:amount, paymentGatewayConfigId:paymentGatewayConfig.paymentGatewayConfigId,
                         operationKey:operationKey, idempotencyKey:keyOut.idempotencyKey, refundPaymentId:refundPaymentId}"/>
@@ -2519,6 +2534,9 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
 
             <!-- call the configured service -->
+            <!-- a test gateway takes no payment on a production instance (TestGateways.js, SEC-BOS-129) -->
+            <set field="testGatewayRefusal" from="ec.resource.script('component://mr-mantle/service/mantle/account/TestGateways.js').refusal(paymentGatewayConfig)"/>
+            <if condition="testGatewayRefusal"><return error="true" message="${testGatewayRefusal}"/></if>
             <service-call name="${paymentGatewayConfig.detailsServiceName}" out-map="detailOut"
                     in-map="{paymentId:payment.paymentId, paymentGatewayConfigId:paymentGatewayConfig.paymentGatewayConfigId,
                         operationKey:unknownResponse?.operationKey, idempotencyKey:unknownResponse?.idempotencyKey,
@@ -5362,7 +5380,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="find" noun="DepositReceipts" allow-remote="false">
         <description>The receipts that can go on a deposit slip of the bank account, a page at a time: delivered or
             confirmed payments to its organization into this bank account in its currency, from another party, not
-            reconciled and not on a deposit already. Needs payment edit and payment view authority in the
+            reconciled and not on a deposit already; a payroll-origin receipt (an employee's repayment, PayrollOrigin.js) only
+            for a reader of payroll's (PAYROLL_VIEW, SEC-BOS-93). Needs payment edit and payment view authority in the
             organization.</description>
         <implements service="mantle.account.PaymentServices.define#DepositReceiptConditions"/>
         <in-parameters>
@@ -5381,8 +5400,10 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.account.method.PaymentMethod" value-field="method" disable-authz="true"/>
             <set field="searchLike" from="'%' + String(text || '').trim().slice(0, 200) + '%'"/>
             <set field="selectedIdList" from="[...new Set(Array.from(selectedIdList || []).map(String))].slice(0, 200)"/>
+            <set field="payrollReader" from="ec.user.hasPermission('PAYROLL_VIEW')"/>
             <entity-find entity-name="mantle.account.payment.Payment" list="receiptList" disable-authz="true"
                     offset="pageIndex * pageSize" limit="pageSize">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="toPartyId" from="access.organizationPartyId"/>
                 <econdition field-name="fromPartyId" operator="not-equals" from="access.organizationPartyId"/>
                 <econdition field-name="toPaymentMethodId" from="paymentMethodId"/>
@@ -5398,6 +5419,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <order-by field-name="effectiveDate,paymentId"/>
             </entity-find>
             <entity-find-count entity-name="mantle.account.payment.Payment" count-field="recordCount" disable-authz="true">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="toPartyId" from="access.organizationPartyId"/>
                 <econdition field-name="fromPartyId" operator="not-equals" from="access.organizationPartyId"/>
                 <econdition field-name="toPaymentMethodId" from="paymentMethodId"/>
@@ -5477,8 +5499,10 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="totalAmount" from="toDecimal(0)"/>
             <iterate list="paymentIdList" entry="receiptId">
                 <set field="receipt" from="receiptList.find((row) =&gt; row.paymentId === receiptId)"/>
+                <!-- a payroll-origin receipt is one find#DepositReceipts offers a payroll reader only (SEC-BOS-93) -->
                 <if condition="receipt == null || receipt.toPartyId != access.organizationPartyId
-                        || receipt.fromPartyId == access.organizationPartyId || receipt.toPaymentMethodId != paymentMethodId">
+                        || receipt.fromPartyId == access.organizationPartyId || receipt.toPaymentMethodId != paymentMethodId
+                        || (receipt.payrollOrigin == 'Y' &amp;&amp; !ec.user.hasPermission('PAYROLL_VIEW'))">
                     <return error="true"
                             message="RECEIPT_INVALID: Payment ${receiptId} is not a receipt into ${paymentMethodId}"/>
                 </if>

@@ -3,7 +3,8 @@
  * its own address (a ForumMailRoute of the category). Forum.js calls this with the shared core, its methods map and the
  * operations module (the run dispatcher).
  * - listHeaders: a list category's own List-Id, List-Post and List-Archive, by its address.
- * - importMbox: a list's archive (an mbox file the operator put in the import directory) becomes topics and posts with
+ * - importMbox: a list's archive (an mbox file the operator put in the site's own directory under the import directory,
+ *   <pass@import-dir>/<siteId>/) becomes topics and posts with
  *   their dates, threaded by Message-ID, In-Reply-To and References; a checkpointed run, resumable and safe to run
  *   twice (ForumImportMap rows keyed by the category and the Message-ID). An author is a profile with no account, by
  *   the hash of the address (the address is never stored); the person's posts become theirs when an account verifies
@@ -50,6 +51,7 @@
         nameShowsOtherAddress
     } = core
     const MAP = F + "ForumImportMap"
+    const limits = () => ec.resource.script("component://mr-mantle/service/mantle/other/Limits.js")
     const HELD = F + "ForumHeldMail"
     const LIST = "mantle.marketing.contact."
     const publicApps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
@@ -345,7 +347,7 @@
     }
     const MAX_BODY = 200000
     /* One message of an mbox (its lines after the "From " line) as what the import keeps of it. */
-    function readMessage(lines) {
+    function readMessage(lines, siteId) {
         const head = headerFields(lines, 0)
         const field = name => head.fields[name]?.[0] || ""
         const found = {plain: null, html: null, attachments: 0, parts: 0, unknownCharset: false}
@@ -357,9 +359,10 @@
             0
         )
         const ids = text => String(text || "").match(/<[^<>\s]+@[^<>\s]+>/g) || []
-        let html = found.plain != null ? textHtml(found.plain) : found.html != null ? StringUtilities.cleanHtml(found.html) : ""
+        let html =
+            found.plain != null ? textHtml(found.plain) : found.html != null ? core.memberHtml(found.html, siteId) : ""
         const tooLong = html.length > MAX_BODY
-        if (tooLong) html = StringUtilities.cleanHtml(html.slice(0, MAX_BODY))
+        if (tooLong) html = core.memberHtml(html.slice(0, MAX_BODY), siteId)
         const from = field("from")
         const author = authorAddress(head.fields.from || [])
         return {
@@ -454,6 +457,31 @@
         if (!imp || imp.siteId !== siteId || !String(imp.stage).startsWith("mbox-")) missing()
         return imp
     }
+    /* An archive's SHA-256, read once for a file's size and time: a ForumImportMap row by the site and the file's name
+       keeps the last one, so a wrong checksum tried again reads nothing; each read of a file is counted against the site's
+       day (mantle@forum-archive-reads-per-day, Tarpit past it), so the staff of a site do not make the server read its
+       archives without end. */
+    function archiveDigest(siteId, name, ref, location) {
+        const stamp = String(ref.getSize()) + "|" + String(ref.getLastModified())
+        const key = {siteId, sourceType: "mbox-digest", sourceId: String(hash(name)).slice(0, 40)}
+        const known = json(one(MAP, key)?.payload, {})
+        if (known.stamp === stamp && known.sha256) return known.sha256
+        const most = limits().limit("forum-archive-reads-per-day")
+        // the count and the digest are kept in a transaction of their own, so a refused checksum keeps them too
+        return ec.transaction.runRequireNew(null, "Error reading an archive's checksum", () => {
+            const dayKey = {siteId, sourceType: "mbox-read-day", sourceId: (siteId + "|" + core.dayKey()).slice(0, 40)}
+            const day = one(MAP, dayKey, true)
+            const used = Number(json(day?.payload, {}).count || 0)
+            if (used >= most) return null
+            const count = JSON.stringify({count: used + 1})
+            day ? update(day, {payload: count}) : create(MAP, {...dayKey, state: "index", payload: count})
+            const sha256 = ec.resource.digest(location, "sha256")
+            const payload = JSON.stringify({stamp, sha256})
+            const cached = one(MAP, key, true)
+            cached ? update(cached, {payload}) : create(MAP, {...key, state: "index", payload})
+            return sha256
+        }) ?? fail("Tarpit", "limitReached: This site's archives were read as often as a day allows; try tomorrow")
+    }
     methods.importMbox = p => {
         site(p.siteId)
         listStaff(p)
@@ -462,10 +490,16 @@
         const name = String(p.archiveName || "")
         if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$/.test(name) || name.includes(".."))
             invalid("Name an mbox file in the import directory")
-        const location = importDir() + "/" + name
-        if (!ec.resource.getLocationReference(location).exists) missing()
-        const checksum = ec.resource.digest(location, "sha256")
-        if (checksum !== lower(p.checksum)) fail("Conflict", "The archive checksum does not match")
+        // a site's archives are in its own directory under the import directory, where the operator puts them, so the
+        // staff of one site name no other site's file; a missing file and a wrong checksum get the one answer, and the
+        // file is read only when its checksum is the one given
+        const location = importDir() + "/" + p.siteId + "/" + name
+        const notThere = () => fail("Conflict", "No archive of that name and checksum is in this site's import directory")
+        if (!/^[0-9a-f]{64}$/.test(lower(p.checksum))) notThere()
+        const ref = ec.resource.getLocationReference(location)
+        if (!ref.exists) notThere()
+        const checksum = archiveDigest(p.siteId, name, ref, location)
+        if (checksum !== lower(p.checksum)) notThere()
         // the same archive into the same category again is the same import, run again: what it has is not made twice
         one(S + "PublicSite", {siteId: p.siteId}, true)
         let imp =
@@ -547,7 +581,7 @@
     function stageMessage(run, config, lines, counts) {
         let message
         try {
-            message = readMessage(lines)
+            message = readMessage(lines, run.siteId)
         } catch (error) {
             ec.logger.error("Mbox import " + config.importId + ": a message could not be read: " + firstLine(error))
             bump(counts, "unreadable")
@@ -929,7 +963,7 @@
     /* A plain notice by the site's mail settings: whether it was sent; never throws, and never fails the caller's work.
        body: cleaned HTML for the template's body, when the notice has more to say than its title. */
     function notify(siteId, toAddress, title, url, body) {
-        const settings = one(F + "ForumMailSettings", {siteId})
+        const settings = core.mailSettings(siteId)
         if (!settings) return false
         try {
             const out = ec.service
@@ -968,6 +1002,22 @@
             }
         }
     }
+    /* The day's list invitations of a site's owners, all lists together, up to mantle@forum-owner-invitations-per-day: a
+       ForumImportMap row by the site and the day, locked. {left, take(n)}. */
+    function ownerDaily(siteId) {
+        const most = limits().limit("forum-owner-invitations-per-day")
+        const key = {siteId, sourceType: "site-invite-day", sourceId: (siteId + "|" + core.dayKey()).slice(0, 60)}
+        const row = one(MAP, key, true)
+        const used = Number(json(row?.payload, {}).count || 0)
+        return {
+            left: Math.max(0, most - used),
+            take(n) {
+                if (!n) return
+                const payload = JSON.stringify({count: used + n})
+                row ? update(row, {payload}) : create(MAP, {...key, state: "index", payload})
+            }
+        }
+    }
     methods.inviteListMembers = p =>
         receipt(p, "inviteListMembers", () => {
             site(p.siteId)
@@ -988,9 +1038,9 @@
                 "</strong>" +
                 (siteName ? " of " + WebUtilities.encodeHtml(siteName) : "") +
                 ". Confirm to receive its mail; nothing is sent to you unless you do.</p>"
-            // the site's owners and operators run a list's cutover; anyone else invites a day's allowance by trust level,
-            // as the inviter and for the list
-            const unlimited = isOperator() || !!a.isOwner
+            // operators run a list's cutover; the site's owners invite up to the site's day's cap, all lists together
+            // (SEC-PFS-94); anyone else a day's allowance by trust level, as the inviter and for the list
+            const unlimited = isOperator()
             const counts = {invited: 0, alreadyInvited: 0, invalidCount: 0, unsent: 0, limitedCount: 0}
             const fresh = []
             const seen = new Set()
@@ -1019,7 +1069,11 @@
                 else fresh.push({emailAddress, emailHash})
             }
             let allowed = fresh.length
-            if (!unlimited && allowed) {
+            if (!unlimited && a.isOwner && allowed) {
+                const forSite = ownerDaily(p.siteId)
+                allowed = Math.min(allowed, forSite.left)
+                forSite.take(allowed)
+            } else if (!unlimited && allowed) {
                 const forList = listDaily(p.siteId, p.contactListId, inviter)
                 allowed = core.takeDaily(p.siteId, inviter, "invitation", Math.min(allowed, forList.left))
                 forList.take(allowed)

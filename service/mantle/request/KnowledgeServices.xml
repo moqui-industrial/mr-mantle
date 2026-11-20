@@ -138,7 +138,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="wikiPageId" required="true"/>
             <parameter name="versionName"/>
             <parameter name="helpful"/>
-            <parameter name="comment" allow-html="safe"/>
+            <parameter name="comment" allow-html="app"/>
             <parameter name="requestId"/>
         </in-parameters>
         <out-parameters><parameter name="articleFeedbackId"/></out-parameters>
@@ -157,7 +157,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="articleFeedbackIds" type="List" required="true"/>
             <parameter name="decisionEnumId" default-value="AfdImprove"/>
-            <parameter name="reviewNote" allow-html="safe"/>
+            <parameter name="reviewNote" allow-html="app"/>
             <parameter name="assigneePartyId"/>
             <parameter name="dueDate" type="Timestamp"/>
             <parameter name="workEffortId"/>
@@ -187,7 +187,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="articleFeedbackId" required="true"/>
             <parameter name="articleFeedbackIds" type="List"/>
             <parameter name="decisionEnumId" required="true"/>
-            <parameter name="reviewNote" allow-html="safe"/>
+            <parameter name="reviewNote" allow-html="app"/>
             <parameter name="assigneePartyId"/>
             <parameter name="dueDate" type="Timestamp"/>
             <parameter name="workEffortId"/>
@@ -223,7 +223,7 @@ along with this software (see the LICENSE.md file). If not, see
             (ARTICLE_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="wikiPageId" required="true"/>
-            <parameter name="note" allow-html="safe"/>
+            <parameter name="note" allow-html="app"/>
             <parameter name="requestId"/>
         </in-parameters>
         <out-parameters><parameter name="workEffortId"/></out-parameters>

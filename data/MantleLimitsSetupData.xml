@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Mantle's count limits in System > Operations > Health (service/mantle/other/Limits.js): a setting that is not a whole
+    number fails every call it bounds, so it shows here, named, before those calls do. The service checks
+    ADMIN_OVERVIEW_VIEW itself; the grant lets any user call it, as the registry calls it as the viewer. -->
+<entity-facade-xml type="seed">
+    <moqui.server.ReadinessProvider providerKey="mantle.limits" version="1" ownerApp="Mantle" title="Mantle's count limits"
+            healthGroupEnumId="AdmHgBusiness" scopeEnumId="AdmScInstance" serviceName="mantle.other.LimitsServices.check#Limits"
+            requiredPermission="ADMIN_OVERVIEW_VIEW" sequenceNum="900"/>
+    <moqui.security.ArtifactGroup artifactGroupId="MantleLimitsServices" description="Mantle's count limits readiness service"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleLimitsServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            artifactName="mantle.other.LimitsServices.check#Limits"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleLimitsServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleLimitsServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+</entity-facade-xml>

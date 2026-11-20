@@ -1111,7 +1111,7 @@
                         : all
                 },
             )
-        return StringUtilities.cleanHtml(ec.resource.markdownHtml(text))
+        return core.memberHtml(ec.resource.markdownHtml(text), siteId)
     }
     function uploadBySha1(siteId, sha1) {
         const uploadId = target(siteId, 'upload_sha1', sha1)
@@ -1547,9 +1547,13 @@
                 ) +
                 '/' +
                 fileId
-            const mimeType =
-                ec.resource.contentTypeOf(upload?.original_filename || '') ||
-                'application/octet-stream'
+            // held to an upload's rules: one of its inert types (anything else is kept as application/octet-stream), its
+            // file name rule, and the size of the file itself, not the dump's
+            const named =
+                ec.resource.contentTypeOf(upload?.original_filename || '') || ''
+            const mimeType = core.ATTACHMENT_TYPES.includes(named)
+                ? named
+                : 'application/octet-stream'
             const attachmentId = id()
             const event = one(E + 'CommunicationEvent', {
                 communicationEventId: postId,
@@ -1561,9 +1565,11 @@
                 ownerPartyId: event?.fromPartyId,
                 communicationEventId: postId,
                 location,
-                filename: upload?.original_filename || fileId,
+                filename: core.attachmentName(upload?.original_filename || fileId),
                 mimeType,
-                byteSize: Number(upload?.filesize || 0),
+                byteSize: Number(
+                    ec.resource.getLocationReference(location).size ?? 0,
+                ),
                 scanState: 'pending',
             })
             let clean = false

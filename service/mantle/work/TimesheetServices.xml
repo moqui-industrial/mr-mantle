@@ -148,7 +148,8 @@ along with this software (see the LICENSE.md file). If not, see
             ProjWorkTypes, a JSON object whose offered is a comma list of WorkType enumIds; with no setting (or one that does not
             read) the services work types Development, Design, Testing, Meeting, Support, Project Management, Consulting and
             Travel. offeredList: [{enumId, label}] of those that exist; typeList: every WorkType with its label, whether it is
-            offered and its place (sequence).</description>
+            offered and its place (sequence), and isOwn for one the organization made (WktpOrg, the organization in enumCode). A
+            work type another organization made is in neither list.</description>
         <in-parameters>
             <parameter name="partyId"><description>The person; default the user's party</description></parameter>
             <parameter name="organizationPartyId"/>
@@ -177,14 +178,18 @@ along with this software (see the LICENSE.md file). If not, see
                     }
                 }
                 if (!offered || !offered.length) offered = defaults
+                // a work type an organization made (WktpOrg, its organization in enumCode) is that organization's alone: another's is
+                // neither listed nor offered here (SEC-BOS-131)
+                const othersOwn = (type) => String(type.enumId).startsWith('WktpOrg') && type.enumCode !== (organizationPartyId || null)
                 const types = Array.from(ec.entity.find('moqui.basic.Enumeration').condition('enumTypeId', 'WorkType').useCache(true).list())
+                        .filter((type) => !othersOwn(type))
                 const labels = {}
                 for (const type of types) labels[type.enumId] = type.description || type.enumId
                 offeredList = offered.filter((id) => labels[id]).map((id) => ({enumId: id, label: labels[id]}))
                 typeList = types.map((type) => {
                     const at = offered.indexOf(type.enumId)
                     return {enumId: type.enumId, label: labels[type.enumId], offered: at >= 0, sequence: at >= 0 ? at + 1 : null,
-                        isOwn: String(type.enumId).startsWith('WktpOrg')}
+                        isOwn: String(type.enumId).startsWith('WktpOrg') && type.enumCode === organizationPartyId}
                 })
                 typeList.sort((a, b) => (a.offered === b.offered ? 0 : a.offered ? -1 : 1) || (a.sequence ?? 0) - (b.sequence ?? 0) || String(a.label).localeCompare(String(b.label)))
             } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
@@ -376,7 +381,8 @@ const days = Array.from(dayList || []).map(String)
             or partyId with fromDate and thruDate for a week with no timesheet yet. projectIds: the projects the week's time is on
             (else the open projects the person is on), whose ProjectManager and Manager parties approve under the project rule.
             The person is never one of their approvers. anyPermission: the policy is any, so every holder of TIMESHEET_APPROVE
-            approves (approverPartyIds lists up to 200 of them).</description>
+            who works for the policy's organization (organizationPartyId; get#PartyInternalOrgIds, its child organizations
+            included) approves, never another organization's (SEC-BOS-97; approverPartyIds lists up to 200 of them).</description>
         <in-parameters>
             <parameter name="timesheetId"/>
             <parameter name="partyId"/>
@@ -388,9 +394,10 @@ const days = Array.from(dayList || []).map(String)
             <parameter name="projectIds" type="List"/>
             <parameter name="anyPermission" type="Boolean"/>
             <parameter name="policy" type="Map"/>
+            <parameter name="organizationPartyId"><description>The organization whose policy applies (get#TimesheetPolicy)</description></parameter>
         </out-parameters>
         <actions><script><![CDATA[
-            approverPartyIds = []; projectIds = []; anyPermission = false
+            approverPartyIds = []; projectIds = []; anyPermission = false; organizationPartyId = null
             const wasDisabled = ec.artifactExecution.disableAuthz()
             try {
                 let person = partyId, from = fromDate, thru = thruDate
@@ -400,7 +407,9 @@ const days = Array.from(dayList || []).map(String)
                     person = sheet.partyId; from = sheet.fromDate; thru = sheet.thruDate
                 }
                 if (!person) return
-                policy = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetPolicy').parameters({partyId: person}).call()?.policy || {}
+                const policyOut = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetPolicy').parameters({partyId: person}).call() || {}
+                policy = policyOut.policy || {}
+                organizationPartyId = policyOut.organizationPartyId || null
                 const cf = ec.entity.conditionFactory
                 const found = new Set()
                 const projectsOfWeek = () => {
@@ -430,8 +439,12 @@ const days = Array.from(dayList || []).map(String)
                             .conditionDate('fromDate', 'thruDate', null).list()).map((row) => row.userGroupId)
                     const userIds = groupIds.length ? Array.from(new Set(Array.from(ec.entity.find('moqui.security.UserGroupMember').condition('userGroupId', 'in', groupIds)
                             .conditionDate('fromDate', 'thruDate', null).list()).map((row) => row.userId))) : []
-                    if (userIds.length) for (const account of ec.entity.find('moqui.security.UserAccount').condition('userId', 'in', userIds).limit(200).list())
-                        if (account.partyId) found.add(account.partyId)
+                    // only those who work for the policy's organization (SEC-BOS-97), filtered in the find: another organization's Time
+                    // managers are no approvers
+                    const staff = organizationPartyId ? Array.from(ec.service.sync().name('mantle.work.TimesheetServices.get#AnyApproverScope')
+                            .parameters({organizationPartyId: organizationPartyId}).call()?.approverStaffPartyIds || []) : []
+                    if (userIds.length && staff.length) for (const account of ec.entity.find('moqui.security.UserAccount').condition('userId', 'in', userIds)
+                            .condition('partyId', 'in', staff).limit(200).list()) found.add(account.partyId)
                 } else if (policy.approvers === 'line') {
                     for (const row of ec.entity.find('mantle.party.PartyRelationship').condition('relationshipTypeEnumId', 'PrtManager')
                             .condition('toPartyId', person).conditionDate('fromDate', 'thruDate', null).list()) found.add(row.fromPartyId)
@@ -440,6 +453,28 @@ const days = Array.from(dayList || []).map(String)
                 found.delete(person)
                 approverPartyIds = Array.from(found).sort()
             } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+        ]]></script></actions>
+    </service>
+
+    <service verb="get" noun="AnyApproverScope" allow-remote="false">
+        <description>Under the timesheet approver policy any of an organization (SEC-BOS-97): workerPartyIds, the people whose time is
+            the organization's (a current agent, employee or member relationship to it), whom its holders of TIMESHEET_APPROVE approve
+            and read; approverStaffPartyIds, the people who may be those approvers: who work for it or for an organization it rolls up
+            to (PrtOrgRollup, as get#PartyInternalOrgIds counts an employer's child organizations). Reads only.</description>
+        <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="workerPartyIds" type="List"/>
+            <parameter name="approverStaffPartyIds" type="List"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const members = (orgIds) => Array.from(new Set(Array.from(ec.entity.find('mantle.party.PartyRelationship')
+                    .condition('toPartyId', 'in', orgIds).condition('relationshipTypeEnumId', 'in', ['PrtAgent', 'PrtEmployee', 'PrtMember'])
+                    .conditionDate('fromDate', 'thruDate', null).selectField('fromPartyId').disableAuthz().list()).map((row) => row.fromPartyId)))
+            const parents = Array.from(ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', organizationPartyId)
+                    .condition('relationshipTypeEnumId', 'PrtOrgRollup').conditionDate('fromDate', 'thruDate', null).selectField('toPartyId')
+                    .disableAuthz().list()).map((row) => row.toPartyId)
+            workerPartyIds = members([organizationPartyId])
+            approverStaffPartyIds = parents.length ? members([organizationPartyId].concat(parents)) : workerPartyIds
         ]]></script></actions>
     </service>
 
@@ -508,7 +543,11 @@ const days = Array.from(dayList || []).map(String)
                 policy = approverOut.policy || {}
                 approverPartyIds = Array.from(approverOut.approverPartyIds || [])
                 isOwner = !!me && me === person
-                isApprover = !isOwner && !!me && (isAdmin || approverPartyIds.includes(me) || (!!approverOut.anyPermission && ec.user.hasPermission('TIMESHEET_APPROVE')))
+                // with the policy any, a holder of TIMESHEET_APPROVE of the policy's organization (SEC-BOS-97)
+                const anyApprover = !!approverOut.anyPermission && !!me && !!approverOut.organizationPartyId && ec.user.hasPermission('TIMESHEET_APPROVE')
+                        && Array.from(ec.service.sync().name('mantle.work.TimesheetServices.get#AnyApproverScope').parameters({organizationPartyId:
+                            approverOut.organizationPartyId}).call()?.approverStaffPartyIds || []).includes(me)
+                isApprover = !isOwner && !!me && (isAdmin || approverPartyIds.includes(me) || anyApprover)
                 canView = isOwner || isApprover || isAdmin
                 locked = policy.lock !== false && (statusId === 'TmshCompleted' || statusId === 'TmshApproved')
                 canEdit = (isOwner || isApprover || isAdmin) && !locked

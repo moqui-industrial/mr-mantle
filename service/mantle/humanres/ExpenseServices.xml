@@ -30,6 +30,14 @@ along with this software (see the LICENSE.md file). If not, see
     (People.js) and the People permissions itself, then reads and writes with authorization off, and names no application group. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
+    <service verb="check" noun="ClaimRecordVisible" allow-remote="false">
+        <description>Whether the user sees an expense claim as a record (its card and panels; the RecordLinkType visibility service,
+            SEC-BOS-87): its claimant, an approver of it or an expense manager of its employer, as the claim's own read.</description>
+        <implements service="mantle.party.CommunicationServices.check#RecordTypeVisible"/>
+        <actions>
+            <set field="recordVisible" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('claimRecordAccess', context).recordVisible"/>
+        </actions>
+    </service>
     <service verb="find" noun="Claims" allow-remote="false">
         <description>The expense claims the caller reads: their own (PEOPLE_SELF_SERVICE; mine for those alone), their live reports'
             at the line's employers (PEOPLE_TEAM_VIEW), the employers' of a holder of PEOPLE_EXPENSE_MANAGE; with toDecide, the claims whose step waiting the caller decides now (PEOPLE_REQUEST_APPROVE). Narrowed to a

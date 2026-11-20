@@ -261,7 +261,13 @@ along with this software (see the LICENSE.md file). If not, see
             </then><else>
                 <entity-find entity-name="mantle.product.store.ProductStorePromoCode" list="storePromoCodeList">
                     <econdition field-name="promoCode" ignore-case="true"/></entity-find>
-                <set field="storePromoCode" from="storePromoCodeList[0]"/>
+                <!-- a text is unique only within a store's organization (SEC-BAP-108): the order's store's code -->
+                <entity-find-one entity-name="mantle.order.OrderHeader" value-field="codeOrder"/>
+                <set field="storePromoCode" from="codeOrder?.productStoreId ? (Array.from(storePromoCodeList).find((row) =&gt;
+                        row.storePromotion?.productStoreId == codeOrder.productStoreId) || null) : (Array.from(storePromoCodeList).length == 1 ? Array.from(storePromoCodeList)[0] : null)"/>
+                <!-- an order of no store and a text several stores' codes share: which code is meant is not guessed -->
+                <if condition="storePromoCode == null &amp;&amp; !codeOrder?.productStoreId &amp;&amp; Array.from(storePromoCodeList).length &gt; 1">
+                    <return error="true" message="PROMO_CODE_AMBIGUOUS: Promotion code ${promoCode} is used by more than one store; apply it on an order of its store"/></if>
             </else></if>
             <if condition="storePromoCode == null &amp;&amp; !promoCodeId">
                 <entity-find-one entity-name="mantle.product.store.ProductStorePromoCode" value-field="storePromoCode">
