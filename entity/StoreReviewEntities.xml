@@ -6,7 +6,7 @@
     reply audit-logged with the status; a moderation decision is a status change whose reason is in the audit log, with no
     decision record (impl-commerce §4). A review's images are ProductReviewImage rows: a scanned PNG or JPEG kept under the
     store's content root, served by its digest only while the review is approved. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
   <extend-entity entity-name="ProductReview" package="mantle.product">
     <field name="orderId" type="id" enable-audit-log="true">
       <description>The purchase proof: the author's own order (impl-commerce F19), found by Shop from the signed-in account's

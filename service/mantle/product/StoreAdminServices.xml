@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     COMMERCE_STORE_EDIT to change, and the store's organization (the user's own, get#PartyOrganizationInfo); a user with a
     current StoreStaff ProductStoreParty row works only those stores. A missing store and one outside the scope are refused
     alike (RECORD_UNAVAILABLE). Refusals start with their reason code. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="define" noun="DatedParameters" type="interface">
         <description>The parameters of a dated child save: from (now when empty) and through; end set ends the row in effect at
             thruDate (now when empty), or withdraws one that starts later named by its fromDate.</description>

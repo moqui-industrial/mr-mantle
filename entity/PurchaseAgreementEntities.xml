@@ -23,7 +23,7 @@ along with this software (see the LICENSE.md file). If not, see
     approvedRevision and stores the agreement's PDF as AgreementContent (AcntApprovedVersion); a release needs the agreement
     Active at its approved revision. Signers and other parties are AgreementParty rows (AgreementSigner). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <extend-entity entity-name="Agreement" package="mantle.party.agreement">
         <!-- the key fields Mantle logged with "update" (its first value left out, F57) are logged on create as well -->
         <field name="otherPartyId" type="id" enable-audit-log="true"/>

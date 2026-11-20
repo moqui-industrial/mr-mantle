@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     person's time stays the Projects TimeEntry (TimesheetServices' timers); the labor and machine cost events are
     ProductionCostEvent rows written by record#ProductionCostEvent. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <!-- An operation's start override (override#ProductionOperationStart, design §13's skill and acknowledgment decision):
         a supervisor's reason that lets the operation start without the required skills or acknowledgment, audit-logged;
         and what its completion reported (complete#ProductionOperation): the good and the lost quantity of the operation,

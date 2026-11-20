@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     MARKETING_AUDIENCE_VIEW, _EDIT or MARKETING_CONSENT_EDIT and the list's organization itself (mantle/marketing/MarketingAccess.js);
     a mailbox is never a Marketing list. Consent is never implied: a request is pending until confirmed or accepted by the audited
     evidence path, and never clears a withdrawal or a suppression. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- ===== lists (design §4 Lists, ListDetail) ===== -->
     <service verb="find" noun="Lists" allow-remote="false" read-only="true">
         <description>The Marketing lists of the caller's scope (design §4 ContactLists): not mailboxes, owned by an organization of the scope, filtered in the query by text (id, name or description, ignoring case), organization, type, channel, campaign and archived (N, the default; Y; all); paged (contactListList with its page fields; pageNoLimit for an export, up to 1,000). Each row: name, type, channel, organization, campaign, single use, state, the policy's public offer, confirmation and purpose, subscribed and pending counts and revision. Needs MARKETING_AUDIENCE_VIEW (PERMISSION_DENIED); refuses an organization outside the scope (ORGANIZATION_DENIED).</description>

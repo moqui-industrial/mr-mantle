@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     and assignment (MaintenanceAccess.js) and, for stock, Warehouse's posting guard (StockPosting.js: STOCK_ISSUE, the operation key,
     the stock in the user's facilities, the period), as Production's issue and return do (impl-maintenance F71). The issuance and
     the return's receipt post through Accounting's maintenance expense routing (AC-24, MaintenanceCostRouting.js). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="MaintenanceMaterials" allow-remote="false">
         <description>A work order's parts (MAINTENANCE_VIEW, or the assigned technician's MAINTENANCE_ASSIGNED_VIEW; RECORD_UNAVAILABLE,
             NOT_ASSIGNED): its planned lines with their step, quantity, unit, required date and source facility, and what was issued,

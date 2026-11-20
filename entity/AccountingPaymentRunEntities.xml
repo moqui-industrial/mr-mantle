@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     keeps from its term when it is issued, and the supplier payment runs that pay due bills
     (mantle.ledger.SetupServices.store#SettlementTerm, mantle.account.PaymentRunServices). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="SettlementTermLine" package="mantle.account.invoice" cache="never">
         <description>One portion of a payment term, as effective-dated rows: a share of the invoice due a number of days
             after the invoice date, and an early-payment discount taken when paid within its days. A term without lines in

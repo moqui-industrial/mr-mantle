@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- Accounting's payroll-origin projection and payroll posting (AC-23, mantle/account/PayrollOrigin.js; impl-people P27 and its
     review): the data update an existing database needs -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="migrate" noun="PayrollOrigin" allow-remote="false">
         <description>What a database made before People P27 needs for payroll to post and stay confidential, run on every seed load
             (data/ZaaGlAccountsUpdateData.xml) and with nothing to do once done or on a new database (its install data has the

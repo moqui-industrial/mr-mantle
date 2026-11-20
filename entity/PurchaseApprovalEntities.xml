@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     audit-logged; and the decision's record of being superseded by a later revision. PurchaseApprovals.js reads and writes
     them (mantle.order.PurchaseServices store#PurchaseApprovalPolicy, preview#PurchaseApproval, decide#PurchaseApproval). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="PurchaseApprovalPolicy" package="mantle.order.purchase" cache="never">
         <description>One approval step of an organization's purchase source type (a purchase order, request, award or
             supplier), effective-dated: a source whose amount is in the band (fromAmount up to, not including, thruAmount; no

@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     SUPPORT_CASE_EDIT, SUPPORT_KNOWLEDGE_EDIT) and the organization or case, and the wiki's own view and update rules as the
     user; BOSS screens call these after ironstone.customerservice.AccessServices, and the Support app (P15) calls
     find#ArticleSuggestions and get#PublishedArticle on its customer-visible surface. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="save" noun="ServiceKnowledgeSource">
         <description>A knowledge source of an organization (design KnowledgeSources ServiceKnowledgeSources) from its date: a wiki

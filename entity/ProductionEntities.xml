@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     PUR-RECEIPT). Under the shared effective-date rule a run keeps its own lines, written at create and frozen at release,
     in place of snapshot records: they are records of their own because issuances and receipts reference them. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <!-- The run's own fields (M4), audit-logged: the revision counter, the method date its lines were read as of, its
         release time, the BOM and routing it was made from, the frozen standard cost (Products' effective-dated estimate,
         stamped at release) and its demand links. An operation child of a released run carries the routing operation it

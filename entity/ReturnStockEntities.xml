@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     P14): the link from a supplier return's item to the receipt and the stock it sends back (F32), what a quality disposition
     sent back to the supplier has shipped, and a return's files. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <extend-entity entity-name="ReturnItem" package="mantle.order.return">
         <field name="assetReceiptId" type="id" enable-audit-log="update"><description>A supplier return's source receipt
             (PUR-RETURN): the purchase receipt whose accepted stock this item sends back, so eligibility is counted per

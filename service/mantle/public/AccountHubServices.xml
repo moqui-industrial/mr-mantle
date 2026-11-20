@@ -3,7 +3,7 @@
 <!-- The PASS Account hub and email preferences (mr-pass impl-shop P6, F6; design-crosscut §5.1, X6, X15), the PASS Account
     foundation's: PASS operations through pass.Facade.call#Operation over AccountHub.js, and the cart reminders consent
     check Commerce's cart recovery reads. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="AccountHub" authenticate="anonymous-all" allow-remote="false">
         <description>getAccountHub (PASS Account/Home): the signed-in account's cards from the apps the site mounts that register one (PublicApps accountCard: Shop, Billing, Support), each asked in its own transaction (one that fails says so and the others show), and its account links. SIGN_IN_REQUIRED for a visitor.</description>
         <in-parameters>

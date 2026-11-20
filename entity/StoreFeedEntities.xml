@@ -5,7 +5,7 @@
     public catalog projection (ShopCatalog.js) at the site's publication generation, with its rows, skips and errors; the
     feed's active build is the one Shop serves at its reserved feed path (mr-pass, feeds/{feedKey}.{extension} under the
     Shop mount), checked against the current generation. StoreFeeds.js writes both; nothing else does. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="ProductStoreFeed" package="mantle.product.store">
         <description>A product feed of a store (find#StoreFeeds, store#StoreFeed): its Shop site, a registered format and
             destination (StoreFeeds.js formats, destinations), the product scope (a category and below, or the whole published

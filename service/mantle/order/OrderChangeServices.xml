@@ -22,7 +22,7 @@ along with this software (see the LICENSE.md file). If not, see
     SALES_APPROVE and applied by the owner under SALES_ORDER_CHANGE (impl-sales P14, design-sales §6; SalesOrderChanges.js). Each
     service checks its permission and the order's selling organization itself and reads and writes with artifact authorization
     off. Sales (design-sales §6) mounts the same services. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="save" noun="OrderChange" allow-remote="false">
         <description>File or change a proposed change of a sales order (ChangeProposal): its kind, reason, the order revision

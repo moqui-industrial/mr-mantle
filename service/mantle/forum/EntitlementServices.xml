@@ -3,7 +3,7 @@
 <!-- Subscription resource handlers for site and category access. store#SubscriptionBinding names them on a bound
      SubscriptionResource; the subscription lifecycle (order approval, expire#SubscriptionAccess) calls them. They write
      source-bound PublicAccessGrant rows and never add a UserGroup or a site role. Internal only: no public route. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
   <service verb="init" noun="ForumAccess" authenticate="false" allow-remote="false">
     <implements service="mantle.product.SubscriptionServices.init#SubscriptionResource"/>
     <actions>

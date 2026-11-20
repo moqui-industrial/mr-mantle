@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     the operation); the order line is kept here once converted. The dispatch, the output receipt and the service acceptance
     are their owners' records (Warehouse's subcontract Shipment, AssetReceipt, Purchasing's ServiceAcceptance). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <!-- One outside-processing agreement of an operation of a released run, by the run's organization: the supplier, the
         service product, its quantity and unit, the required date and lead time, the vendor-custody facility the components
         go to, and the quoted price basis (a note the buyer reads; the price is the purchase line's). Components stay the

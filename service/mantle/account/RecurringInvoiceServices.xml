@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     however often it is retried; the generate_RecurringInvoices job runs them. Order-based recurring billing stays on the
     order and the create_RecurringOrders job. Logic in RecurringInvoices.js. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="store" noun="Schedule" allow-remote="false">
         <description>Add a schedule from a template invoice of the organization (its customer, or its supplier for a
             recurring bill, is the schedule's party), change one, or change its state (statusId: pause, resume, end). A

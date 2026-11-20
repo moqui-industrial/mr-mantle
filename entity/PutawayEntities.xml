@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     resolves destinations by, and the storage type of a product and of a location (StorageType, data/PutawayData.xml). A
     product's ProductFacilityLocation stays its default location; a rule adds destinations for the stock it applies to. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="PutawayRule" package="mantle.facility" cache="never">
         <description>Where stock of a facility is put away (design-warehouse PutawayRules RuleList): one dated row per rule.
             It applies to stock at a source location or of a source location type (receiving, staging; a receipt counts as

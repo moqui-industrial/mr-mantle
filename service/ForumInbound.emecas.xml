@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
-<emecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/email-eca-3.xsd">
+<emecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-email-eca.xsd">
     <!-- PASS forum mail: a stored message to a registered forum route address (or its plus-tagged reply address) is
         handled by mantle.forum.DeliveryServices.process#Inbound; it leaves any other message alone. -->
     <emeca rule-name="ForumInbound">

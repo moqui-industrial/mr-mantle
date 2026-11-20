@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     mappings, workflows, defaults and teams. Each checks its permission (SUPPORT_CASE_EDIT, SUPPORT_CASE_MANAGE,
     SUPPORT_POLICY_EDIT) and the case's or setting's organization; BOSS screens call these after
     ironstone.customerservice.AccessServices. The rule services (ensure, queue, notify, guard, state) are internal. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <!-- ===== the case rule (D23, F62) ===== -->
     <service verb="get" noun="AccountCard" authenticate="anonymous-all" allow-remote="false">

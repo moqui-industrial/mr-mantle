@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     projection as text (format csv), safe from spreadsheet formulas. Restricted values (pay outside the payroll register, private
     contact, identity numbers, case existence, review notes, leave reasons) are never read. Each service checks the caller's People
     scope (People.js) and the People permissions itself, then reads with authorization off, and names no application group. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="get" noun="Options" allow-remote="false">
         <description>The People reports the caller reads, each with its id, title, description, the options it takes and whether

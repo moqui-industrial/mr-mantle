@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     acquireCost. Accounting's AC-24 (design-accounting PostingDefaults "Maintenance expense routing"): an issuance to a managed
     maintenance work order or its step posts to the expense account of the MaintenanceCostPolicy in effect for the work's
     organization, kind and facility, never to the same-owner WIP account, and its return's credit goes back the same way. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <extend-entity entity-name="WorkEffortProduct" package="mantle.work.effort">
         <field name="quantityUomId" type="id"><description>The unit of estimatedQuantity; the product's stock unit when
             empty (impl-maintenance F30)</description></field>

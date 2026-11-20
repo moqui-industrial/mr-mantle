@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     works, how many reminders and who follows a low score up; a FeedbackFollowUp is that follow-up. The rules are
     mantle.request.CaseFeedbackServices (CaseFeedback.js). Nothing here acts until an organization has a policy. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="FeedbackDeliveryPolicy" package="mantle.request.support" cache="never">
         <description>How an organization invites a resolved case's customer to give feedback (design FeedbackDeliveryPolicy),
             effective-dated with its key fields audit-logged: the case types and queues it covers (comma separated; empty: all),

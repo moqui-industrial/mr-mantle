@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     and converts to actual, and the stored PDFs of an approved budget's revisions. mantle.other.BudgetServices writes
     them. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="BudgetControlPolicy" package="mantle.other.budget" cache="never">
         <description>How an organization controls spending against its budgets, as effective-dated rows: a change ends the
             row in effect and starts the next (store#Policy). A row for a budget and account wins over one for the account,

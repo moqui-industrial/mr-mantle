@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     line at the employers that employ both. Each service checks the caller's People scope (PeopleServices get#Scope's rules,
     People.js) and the People permissions itself, then reads and writes with authorization off, and names no application group.
     Reads need a staff read of an employer; changes PEOPLE_HR_VIEW and PEOPLE_HR_EDIT. Rows are ended, never deleted. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="find" noun="Units" allow-remote="false">
         <description>The organization as a tree, a level at a time, as of asOfDate (now when empty; a date alone is the end of

@@ -12,7 +12,7 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="check" noun="Limits" allow-remote="false">
         <description>The readiness provider mantle.limits: each of Mantle's count limits (Limits.js NAMES, mantle@...) that is not a
             whole number is a failed check (LIMIT_INVALID) naming the setting, and logged; else one ready check. Changes nothing.

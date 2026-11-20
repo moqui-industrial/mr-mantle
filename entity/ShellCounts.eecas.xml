@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     of the users it touches. The condition skips an update that leaves the counted fields as they were; the service
     compares them again, finds the users and calls org.moqui.ui.ShellServices.publish#ShellCounts, which sends after the
     commit, coalesced per user. A failure there is logged and never fails the write. -->
-<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
     <!-- Today: the party's rows (assignment, decline, removal, snooze) and the work effort's status and dates -->
     <eeca id="WorkEffortPartyShellCounts" entity="mantle.work.effort.WorkEffortParty" on-create="true" on-update="true"
             on-delete="true" run-on-error="false" get-original-value="true">

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <!-- Smithy, the public git hosting app of IronStone PASS (mr-pass plan/design-smithy.md §14.2): groups, the Smithy row
         beside a hosted moqui.resource.GitRepository, and the role rows of both. Every row has its siteId. The rules are in
         service/mantle/smithy/SmithyCore.js; a visibility, role, agreement and policy is an Enumeration whose enumCode is

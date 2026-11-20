@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- The projection of work items for an audience outside the project (mr-pass plan/design-smithy.md §8.2; "Nothing
         internal leaves", impl-projects §9.2): what the public sees of an issue in Smithy, and what a client sees of a shared
         item. One place lists the fields that leave, so a field added to a task later does not leave by itself. The caller

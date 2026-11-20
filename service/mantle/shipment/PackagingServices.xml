@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     gives them no owner); a facility's box types are its owner's. Each write checks FACILITY_EDIT, and a facility's the
     organization through FacilityScope.js. A used box type is retired (thruDate), never deleted. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="store" noun="ShipmentBoxType" allow-remote="false">
         <description>Create a box type, or change one: its description, dimensions with their unit, empty weight and the most
             it carries with their unit, and retire it (retire Y sets thruDate now; retire N clears it). Requires

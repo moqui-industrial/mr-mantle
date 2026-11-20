@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     P3): Home's counters, the user's work and the teams' work, in MaintenanceWork.js; P14 the preventive compliance report, in
     MaintenancePlans.js; P11: the cost reader's costs (WorkCosts and MaintenanceCostReport), in MaintenanceCosts.js; P17 the work status
     report, in MaintenanceReports.js. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="MaintenanceHome" allow-remote="false">
         <description>Home's counts over the user's maintenance scope (a work read; with the assigned view alone, the user's own
             work), narrowed to an organization or a facility (with those inside it): open, unassigned, high priority and overdue

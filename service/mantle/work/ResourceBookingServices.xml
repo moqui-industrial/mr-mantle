@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
     EventServices' booking calls. Maintenance P16 adds the booking decisions (ResourceBookingDecisions.js): find#ResourceBookingRequests,
     decide#ResourceBooking and decide#ResourceBookings, and the ResourceBooking topic's approve and refuse services. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="record" noun="ResourceUnavailability" allow-remote="false">
         <description>Planned blocks (unavailabilityKindEnumId RukPlanned, impl-maintenance P15): a block of the resource from fromDate
             (now when empty, a future one allowed) to thruDate (required, END_REQUIRED; at most a year, INTERVAL_INVALID), with its

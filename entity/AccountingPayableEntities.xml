@@ -15,7 +15,7 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- Payables: the supplier profile's finance fields, bill holds, the receipt billing rule and the cost center of order and
     invoice lines (mantle.party.SupplierServices, the payable services of mantle.account.InvoiceServices). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="SupplierProfile" package="mantle.party.supplier" cache="never">
         <description>What an organization keeps about one of its suppliers, as effective-dated rows: a change ends the row in
             effect and starts the next (store#SupplierProfile). The finance fields are the default payment term of the

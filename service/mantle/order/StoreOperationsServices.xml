@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     the scope are refused alike (RECORD_UNAVAILABLE). Commerce takes none of the owners' actions: a Payment hold is
     Accounting's to release, a return and a case Customer Service's to work, a delivery exception MESSAGE_DELIVERY_REVIEW's
     to resolve. Refusals start with their reason code. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="find" noun="StoreOrders" allow-remote="false">
         <description>The submitted orders of the user's stores (or one store), newest first, never an open order (a cart): by number, name or external reference (term), customer, status, placed dates (fromDate, thruDate), an attention filter (paymentHold, hold, cancelRequest, notice; stuck lists the Shop placements waiting for staff, impl-shop F85, which are open orders) and a computed payment state (paid, authorized, promised, unpaid, held, none). Each row: store, channel, customer, placed date, status, total, payment and fulfillment state, holds (the Payment hold read only) and a cancellation-proposal badge. COMMERCE_ORDER_VIEW and the store scope.</description>
         <in-parameters>

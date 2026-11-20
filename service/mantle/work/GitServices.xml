@@ -28,7 +28,7 @@ along with this software (see the LICENSE.md file). If not, see
       when it merges
     Repository rights follow the project roles (check#GitRepositoryAuthz); review comments on a merge request's lines are
     CommunicationEvents with a CommunicationEventGitAnchor. The guide is docs/interfaces/Git-Hosting.md of mr-moqui. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <!-- ========== Projects and repositories ========== -->
 

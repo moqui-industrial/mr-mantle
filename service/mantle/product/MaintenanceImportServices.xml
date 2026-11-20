@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     F51; data/MaintenanceSettingsData.xml): called by the framework's org.moqui.admin.DataTransferServices for each row of a staged
     file, as the importer, in MaintenanceImport.js. Each checks MAINTENANCE_IMPORT with MAINTENANCE_RESOURCE_EDIT and the
     organization itself, and writes through Maintenance's own guarded equipment services. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="validate" noun="EquipmentImportRow" allow-remote="false">
         <implements service="org.moqui.admin.DataTransferServices.validate#TargetRow"/>
         <description>Whether a row would register or change one piece of equipment of the batch's organization (scopeKey),

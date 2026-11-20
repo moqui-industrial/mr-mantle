@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
     and WepGoal purpose with its measure. The criteria of an assessment are the questions of the step's review form (a FormResponse
     of the DbfpReview purpose, People's Forms), so the sketch's PerformanceReviewItem is not built; its rating scale is the overall
     rating. Written through mantle.humanres.ReviewServices (Reviews.js), which checks every reader. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
 
     <entity entity-name="ReviewTemplate" package="mantle.humanres.ability" cache="never">
         <description>How an employer's reviews run: the steps they ask for (the person's self assessment, the reviewer's assessment

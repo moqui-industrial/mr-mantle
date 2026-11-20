@@ -6,7 +6,7 @@
     site the facade resolved and the signed-in verified account), Commerce's store#RecurringOffer, and Mantle's own renewal
     coordinator (dispatch from create_RecurringOrders, the run_StoreRenewals job, each step in its own transaction) over
     ShopSubscriptions.js. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="Subscriptions" authenticate="anonymous-all" allow-remote="false">
         <description>getSubscriptions (SubscriptionList): the signed-in verified account's subscriptions in the site's store, newest first, each with its plan, price and term, billing state and access state apart (a cancelled renewal keeps access to the paid term), paid-through and next renewal; and the store's current offers. Refuses a visitor who is not signed in with a verified email (SIGN_IN_REQUIRED).</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>

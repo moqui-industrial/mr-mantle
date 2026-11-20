@@ -15,7 +15,7 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- External access (CX-PORTALS): capabilities over one record for an outside party, as bearer tokens or for its
     signed-in contacts, and invitations that make a public account such a contact. The logic is ExternalAccess.js. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="create" noun="AccessCapability" allow-remote="false">
         <description>A capability over one record for its outside party: an issued customer invoice (Invoice, scope
             InvoicePay; RECEIVABLE_EDIT), a purchase order (Order, scopes BillUpload and OrderAcknowledgement;

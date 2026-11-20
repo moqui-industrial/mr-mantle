@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     allocates of each cost event (P6's ProductionCostAllocation, with the account and component it posted), and the run's
     cost close (its transaction, date and the policy row it applied). Written only by mantle.ledger.ProductionCostServices. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <!-- The allocation policy of an organization from a date (CostingPolicies): the overhead basis (a rate per work-center
         hour from each center's WorkCenterRate overhead component, else the policy's own rate; a percentage of the direct
         labor; or none), the co-product method (quantity normalized to the primary output's unit, the BOM output lines' fixed

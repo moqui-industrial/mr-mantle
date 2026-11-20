@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     downtime and outages and the bookings), and P12's get#ProductionSchedule, schedule#ProductionOperation and
     store#WorkCenterOffline over ProductionSchedule.js; both read a center's time through ProductionCalendar.js. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="WorkCenterLoad" allow-remote="false">
         <description>The work centers of the user's organizations (facilityId, facilityIds, the centers of plantFacilityId, or
             those whose id or name has text, ignoring case), a page at a time, each with its parallel slots and rate capacities,

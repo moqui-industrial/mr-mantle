@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     are confirmed or cancelled once, in the same transaction as the order's change, by EventRegistrationServices; an order with no
     registration is left alone at the cost of one indexed count. -->
 <secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-eca.xsd">
     <seca id="EventRegistrationOrderStatus" service="update#mantle.order.OrderHeader" when="post-service" run-on-error="false">
         <condition><expression>statusChanged &amp;&amp; ['OrderApproved', 'OrderCancelled', 'OrderRejected'].includes(statusId)</expression></condition>
         <actions><service-call name="mantle.work.EventRegistrationServices.handle#RegistrationOrderStatus" disable-authz="true"

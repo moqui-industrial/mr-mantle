@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     map (operationKey, operationType, resultCode, alreadyApplied, postedDate and its own fields). receive#ReturnItems is
     Warehouse's contract, built with Accounting's return settlement (impl-accounting P17). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="receive" noun="ReturnItems" allow-remote="false">
         <description>Receive a customer return shipment's lines: for each return item the quantity that arrived, accepted
             and rejected (quarantined) alike, received as stock (AssetReceipt) on the item's shipment source, added to

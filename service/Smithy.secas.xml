@@ -4,7 +4,7 @@
     whose visibility is saved as public, becomes an issue where its project is a Smithy tracker's (ensure#Issue returns at
     once for any other); and a status change that closes or reopens an issue's task is a line in its conversation. Each
     fails alone: the task's own change stays. -->
-<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-eca.xsd">
     <seca id="SmithyIssueOfNewTask" service="create#mantle.work.effort.WorkEffort" when="post-service">
         <condition><expression>visibilityEnumId == 'WevGeneral' &amp;&amp; workEffortTypeEnumId == 'WetTask' &amp;&amp; workEffortId</expression></condition>
         <actions><service-call name="mantle.smithy.SmithyIssueServices.ensure#Issue" in-map="{workEffortId:workEffortId}"

@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     intake. A recruiter (PEOPLE_RECRUIT_VIEW, PEOPLE_RECRUIT_EDIT to change) of the employer in People's scope reads and changes
     them; a panel member reads the applications they interview and their own scorecard. Each service checks itself, then reads
     and writes with authorization off, and names no application group. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="check" noun="OpeningRecordVisible" allow-remote="false">
         <description>Whether the user sees a job opening as a record, its card and panels (the RecordLinkType visibility service,

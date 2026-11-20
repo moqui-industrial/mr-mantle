@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     approval, effectivity and applicability, the requirements copied after the clone, instructions resolved not copied) and leaves
     People's path as it is. clone#WorkEffort and clone#Project are not changed by it (clone#WorkEffort refuses managed work,
     impl-maintenance F110). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="store" noun="ProcessStep" allow-remote="false">
         <description>A step of a template tree (rootWorkEffortId, a WorkEffort with isTemplate Y and a process policy in effect):

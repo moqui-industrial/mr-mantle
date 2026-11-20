@@ -22,7 +22,7 @@ along with this software (see the LICENSE.md file). If not, see
     publication, approval and applicability to the first and the response kind, measurement, evidence and waiver fields to the
     second (impl-maintenance P6; MaintenanceProcedures.js writes and checks them for its policy, WppMaintenanceProcedure, whose
     policy guards execution; People's checklists leave them empty). -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="WorkEffortProcessPolicy" package="mantle.work.effort" cache="never">
         <description>The policy of a process root (a template or an execution of one) from fromDate: the policy that uses it
             (WorkProcessPolicy: People's lifecycle checklists, Maintenance's procedures once built) and whether that policy

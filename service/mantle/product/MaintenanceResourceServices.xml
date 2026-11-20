@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     facility move or close, in MaintenanceResources.js. Each checks the maintenance permission and the organization
     (mantle/work/MaintenanceAccess.js), never a group or a calling screen; a missing record and one outside the scope are refused
     alike (RECORD_UNAVAILABLE). Facility writes are FacilityServices.store#Facility's and store#FacilityFeature's (FACILITY_EDIT). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="find" noun="MaintenanceEquipment" allow-remote="false">
         <description>The equipment of the user's maintenance scope (a resource read: MAINTENANCE_VIEW, _ASSIGNED_VIEW or
             _RESOURCE_VIEW; PERMISSION_DENIED without), scoped in the query before paging: assets that are not stock, owned by

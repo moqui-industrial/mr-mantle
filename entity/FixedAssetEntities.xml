@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     asset class, and the book facts of capitalization, adjustment, disposal, reversal and acquire cost repair on
     AssetBookEvent, which Products' revaluation began. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="FixedAssetClass" package="mantle.product.asset" cache="never">
         <description>An organization's book defaults for an asset class (the AssetClass enumeration, which named classes
             before and gave no defaults), as dated versions: AssetBookServices.store#Class ends the version in effect where

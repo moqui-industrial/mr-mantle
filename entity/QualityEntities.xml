@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     creation, readings, the dispositions that move held stock (a posting each, with its own identity) and the inspection's
     files. Written only through mantle.product.QualityServices; the seed data is in data/QualityData.xml. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="InspectionTemplate" package="mantle.product.quality">
         <description>Reusable checks of an organization: the context they apply to (receipt, return, outgoing, production),
             the applicability (a product, a category, a facility; none for any), the sample policy and the state (draft,

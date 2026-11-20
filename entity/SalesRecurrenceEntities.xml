@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     the agreement it is kept under, a revision every Sales change names, the last failure, and on each generated order the occurrence
     it was made for. The worker (OrderServices.create#RecurringOrders, create#RecurringOrder) reads them; a base without them runs as
     before. clone#Order clears them on a copy. Written by mantle.order.SalesRecurrenceServices (SalesRecurrence.js). -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <extend-entity entity-name="OrderHeader" package="mantle.order">
         <field name="recurTimeZone" type="text-short" enable-audit-log="update"><description>The time zone (an IANA name) a recurring
             base's cadence (recurCronExpression) is read in; the machine's, as the job's, when empty.</description></field>

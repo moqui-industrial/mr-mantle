@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     the partitions it could not read, and returns money only with ACCOUNTING_VIEW (left out, never zero). A list a screen
     pages comes with its page fields; pageNoLimit (an export) answers every row up to 2000. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="define" noun="ReportParameters" type="interface">
         <description>The scope every production report takes: an organization of the user's (else all of them), a facility (a
             plant takes the facilities under it), the period (fromDate inclusive; thruDate exclusive, a day at midnight through

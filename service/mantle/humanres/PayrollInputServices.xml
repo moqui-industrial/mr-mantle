@@ -22,7 +22,7 @@ along with this software (see the LICENSE.md file). If not, see
     no amount, also by a manager for their reports) and changed with PAYROLL_VIEW and PAYROLL_EDIT; another employer's record is a
     missing one. Preparing, adjusting and approving change no money (design §2); the legacy payroll services and PayrollAdjustment
     rows are not read. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="Reconciliation" allow-remote="false">
         <description>A pay group's prepared period (payrollGroupId, timePeriodId), employment by employment: the employments whose
             primary pay assignment puts them in the group on a day of it, each with the group's time basis, its hours scheduled,

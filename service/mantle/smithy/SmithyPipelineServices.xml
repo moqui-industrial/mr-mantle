@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- Smithy's pipelines (mr-pass plan/design-smithy.md §10, §11 Pipelines, §15.6, DG5; SmithyPipelines.js) over the
         framework's engine (org.moqui.git.GitCiServices, docs/interfaces/Pipelines.md). Each operation takes PASS's input
         map (its fields are SmithySchema.js's, siteId among them) and answers result. A run, a job, a log or an upload the
@@ -117,7 +117,7 @@
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findDeployments", input)</script></actions>
     </service>
     <service verb="get" noun="Deployment" authenticate="anonymous-all" allow-remote="false">
-        <description>One deployment of a repository (deploymentId), for a Developer; Not Found for another repository's. capabilities, by the rules decide#Deploy and cancel#Deploy hold: canDecide (a Maintainer other than who asked, while it waits for approval), canCancel (its requester being a Developer, or a Maintainer, before its deploy step begins: requested, waiting for its pipeline or approval, or deploying with its step not started).</description>
+        <description>One deployment of a repository (deploymentId), for a Developer; Not Found for another repository's. capabilities, by the rules decide#Deploy and cancel#Deploy hold: canDecide (a Maintainer other than who asked, while it waits for approval), canCancel (its requester being a Developer, or a Maintainer, before its deploy step begins: requested, waiting for its pipeline or approval, or deploying with its step not started). lease, for a deployment whose environment's vault holds the target's token: leaseId, state (waiting, open, ended, revoked), approvedBy (a handle the caller is shown), and for a Maintainer approvers (the handles of those with the vault's approve role who decide it: Maintainers with a confirmed address other than who asked) and canApprove (the caller is one).</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getDeployment", input)</script></actions>
@@ -129,7 +129,7 @@
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("requestDeploy", input)</script></actions>
     </service>
     <service verb="decide" noun="Deploy" authenticate="anonymous-all" allow-remote="false">
-        <description>Approve or refuse (decision, reason) a deployment that waits for approval, by a Maintainer with a confirmed address who is not its requester (accessDenied). Conflict when it does not wait. Approved, it deploys. The reason is kept in Smithy's audit only; the engine is given none, so no refusal's words reach the commit's deploy/ status or the deployment's error.</description>
+        <description>Approve or refuse (decision, reason) a deployment that waits for approval, by a Maintainer with a confirmed address who is not its requester (accessDenied). Conflict when it does not wait. Approved, it deploys. A deployment with a lease waiting for its approval (its environment's vault holds the target's token) is approved by opening the lease in the framework's lease dialog: approve by an approver of the vault answers state and leaseId, the lease to approve there, and records nothing more; by another Maintainer it is Conflict, vaultApproverRequired, naming the approvers; with its lease ended, Conflict; with its lease opened by someone who does not decide it (who asked, or not such an approver), Conflict, as the engine would refuse the deployment. The reason is kept in Smithy's audit only; the engine is given none, so no refusal's words reach the commit's deploy/ status or the deployment's error.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("decideDeploy", input)</script></actions>

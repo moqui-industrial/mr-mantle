@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     written as OrderItemBilling; the organization's match policy as effective-dated rows; the re-evaluation of matches
     a source change made stale; and the legacy backfill. Logic in InvoiceMatch.js. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="evaluate" noun="InvoiceMatch" allow-remote="false">
         <description>Read only: a bill's lines and their sources, checked against the organization's match policy. With an
             applied match, its allocations checked against the sources as they are now; else the allocations given, or

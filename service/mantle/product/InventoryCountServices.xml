@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     Mantle's record#PhysicalInventoryQuantity stays an immediate posting for its callers (§2); these services never call
     it. The logic is InventoryCounts.js. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="define" noun="CountScope" type="interface">
         <description>The scope fields of a count: a location type, an area or a location of its facility, a product, a
             product category, a lot and an ABC class; empty is any.</description>

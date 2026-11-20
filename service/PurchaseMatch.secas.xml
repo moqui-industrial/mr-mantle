@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     bill, the buyers of its organization are told on the PurchaseMatchException topic (notify#MatchException). Only a match
     that placed a hold, never a replayed one, and only a re-evaluation that held the bill; nothing else changes. -->
 <secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-eca.xsd">
     <seca id="InvoiceMatchHeldPurchaseNotice" service="mantle.account.InvoiceMatchServices.apply#InvoiceMatch"
             when="post-service" run-on-error="false">
         <condition><expression>invoiceHoldId &amp;&amp; !alreadyApplied</expression></condition>

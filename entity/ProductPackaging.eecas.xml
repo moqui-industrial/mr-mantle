@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
     <eeca id="ProductStockUnitMeaning" entity="mantle.product.Product" on-update="true" run-before="true" get-entire-entity="true" get-original-value="true">
         <condition><expression>originalValue != null &amp;&amp; amountUomId !== originalValue.amountUomId</expression></condition>
         <actions><service-call name="mantle.product.ProductServices.check#ProductStockUnitChange" in-map="{productId:productId,amountUomId:amountUomId}"/></actions>

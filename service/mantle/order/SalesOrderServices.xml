@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     hold#Order, release#OrderHold, cancel#OrderItem, clone#Order) run after the guard and keep their own checks. The seller's approval
     setting itself is enforced in approve#Order and autoApprove#Order (OrderServices.xml), so a direct call meets it too. The order
     list is SalesWorkspaceServices.find#SalesOrders. All allow-remote="false". -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="create" noun="SalesOrder" allow-remote="false">
         <description>A direct sales order draft (design §6 NewSalesOrder; no quote acceptance) over create#Order: purpose
             OrpSalesOrder, one selling part of an organization of the caller's scope for a customer that is an account of it or a

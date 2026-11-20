@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     cost-review status. Evidence, not a second ledger: a material event references the AcctgTrans its stock movement's hook
     posted, and posts nothing itself. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <!-- The run's cost review (review#ProductionCosts): its status (ProductionCostReview, empty until requested), when and by
         whom it was requested, at which revision of the run, the proposed accounting date and the note, audit-logged. -->
     <extend-entity entity-name="WorkEffort" package="mantle.work.effort">

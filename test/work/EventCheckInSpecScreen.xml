@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     registered value under that name whatever the request sends); askOffer names another one directly, to check the service's own
     refusal. Authorization is not what the spec tests (the services' own checks are), so the call runs with it off, in a transaction of
     its own. -->
-<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-xml-screen.xsd"
         require-authentication="false" standalone="true" default-menu-title="Check-in spec">
     <transition name="call">
         <actions><script><![CDATA[

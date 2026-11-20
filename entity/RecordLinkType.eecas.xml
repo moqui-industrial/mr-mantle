@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- The record type registrations (mantle.party.communication.RecordLinkType, SEC-BOS-87). -->
 <eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
     <!-- A registration loaded with no rule (no visibleService, parent or organization field) that does not say why it needs none
         (codeRule, only on a type get#RecordLinkInfo rules itself: RecordLinkTypes.js codeRuled; publicRead), or that claims
         codeRule for another type, is seen by a system administrator alone (get#RecordLinkInfo); the error names it so its

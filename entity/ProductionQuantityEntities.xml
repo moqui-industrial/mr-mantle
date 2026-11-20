@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     only by mantle.work.ProductionServices' record#ProductionQuantity, record#ProductionLoss, change#ProductionQuantity and
     approve#ProductionException. A file of its own so it merges apart from the other production entities. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <!-- One quantity fact of a run's output line (M4): a good or held (pending) quantity with the output receipt it was
         received by, a process loss, scrap or rework with its ProductionLoss, a target change with the target before and
         after it, or an overproduction request a supervisor decides. Never updated but for its approval: a correction is a

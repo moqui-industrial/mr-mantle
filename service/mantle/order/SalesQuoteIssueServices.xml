@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     checks SALES_QUOTE_EDIT on a quote the caller sees (SalesAccess.js requireQuote) and send also SALES_QUOTE_SEND; every write
     names the revision read and a send, response and batch carry an operation key. propose#Quote (with P10's issue checks) stays in
     SalesQuoteServices. None is remote. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="QuoteIssues" allow-remote="false" read-only="true">
         <description>OrderDetail's Issues and responses (design §5): a quote's issues, each with its revision, state (current,
             accepted, declined, withdrawn, ended, superseded, expired), PDF, recipients and their delivery state, and its response;

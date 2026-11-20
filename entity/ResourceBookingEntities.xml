@@ -22,7 +22,7 @@ along with this software (see the LICENSE.md file). If not, see
     A row superseded by a correction is history: every read of a resource's current availability leaves it out
     (supersededByUnavailabilityId is empty on the row in force). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="ResourceUnavailability" package="mantle.work.effort" cache="never">
         <description>A time a resource cannot be used: an actual outage (RukActual) or a planned block (RukPlanned, MT-07).
             The resource is exactly one of assetId and facilityId. An open outage has no thruDate; only Maintenance's

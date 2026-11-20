@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     revision, service/SalesApproval.secas.xml). Each checks its own permission and the organization (SalesAccess.js) over
     service/mantle/order/SalesApprovals.js. The quote verbs themselves are SalesQuoteServices'; propose#Quote's approval guard is
     here and SalesQuoteServices.propose#Quote calls it. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="store" noun="SalesPolicy" allow-remote="false">
         <description>Publish an organization's Sales defaults from now or later (design §9 SalesDefaults): the row in effect then is
             ended where the new one starts, which keeps its values for each field not given; the acceptance thresholds, when given,

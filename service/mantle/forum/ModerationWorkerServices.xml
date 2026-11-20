@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
 <!-- Backend-only moderation workers. They have no public routes; each item runs in its own transaction. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
   <service verb="recompute" noun="Trust" authenticate="false" allow-remote="false">
     <description>Promote members whose measured reading and contributions meet their site's trust thresholds, checkpointed in pages.</description>
     <out-parameters>

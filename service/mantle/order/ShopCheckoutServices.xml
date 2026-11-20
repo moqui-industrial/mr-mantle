@@ -7,7 +7,7 @@
     version they saw, and an operation id) and answering a declared result (CheckoutView, the payment's result, the
     confirmation). Over Mantle's order, payment and gateway services and Accounting's payment attempts
     (ShopCheckout.js); the jobs and the capture check are Mantle's own. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="begin" noun="Checkout" transaction="cache" authenticate="anonymous-all" allow-remote="false">
         <description>beginCheckout: the cart's checkout, made when there is none (the store's checkout policy as it is now, the account's contact for a signed-in buyer), else the current one. An empty cart or a line that cannot be bought is refused (VALUE_INVALID, ITEM_UNAVAILABLE); a store that takes account checkouts only refuses a guest (SIGN_IN_REQUIRED).</description>
         <in-parameters>

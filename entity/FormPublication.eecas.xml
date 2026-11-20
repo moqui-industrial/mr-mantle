@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- Commons form invitations (FormPublicationEntities.xml; impl-customer-service P13, CS-FEEDBACK) and case feedback. -->
 <eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
     <!-- A response that answers a FormInvitation is kept as submitted: the framework's update#FormResponse and
         delete#FormResponse, and any other write of its rows, are refused (RESPONSE_LOCKED). A response with no invitation
         is not touched, so the framework services work for it as before. -->

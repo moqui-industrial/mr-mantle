@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     StoreStaff row's stores (StoreAdmin.js); a missing record, a promotion of no store and one outside the scope are refused
     alike (RECORD_UNAVAILABLE). The browser never names a service: a rule is a registered ProductStorePromotion service.
     Refusals start with their reason code. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="find" noun="Promotions" allow-remote="false">
         <description>The promotions of the user's stores (or one store), by description or id ignoring case, rule, whether a code is required (Y, N) and state (current, later, ended; all by default), a page at a time, each with its store, rule, dates, limits and placed uses. COMMERCE_VIEW and the store's scope.</description>
         <in-parameters>

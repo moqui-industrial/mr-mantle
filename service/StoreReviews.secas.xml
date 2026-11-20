@@ -3,7 +3,7 @@
 <!-- Store reviews (impl-commerce P9): the review request after delivery or download. queue#ReviewRequests acts only on a Shop
     order (a completed StoreCheckout's) of a store with a current PsetReviewRequest email, once per line on the delivery
     ledger; any other shipment or grant queues nothing. -->
-<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-eca.xsd">
     <seca id="ShipmentDeliveredRequestReviews" service="update#mantle.shipment.Shipment" when="tx-commit">
         <condition><expression>statusChanged &amp;&amp; statusId == 'ShipDelivered'</expression></condition>
         <actions><service-call name="mantle.product.StoreMerchandisingServices.queue#ReviewRequests" in-map="{shipmentId:shipmentId}"/></actions>

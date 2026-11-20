@@ -22,7 +22,7 @@ along with this software (see the LICENSE.md file). If not, see
     administrator with MANTLE_ACTIVE_ORG reads every one with no active organization and the active one with one.
     Changing: ORG_CONSTITUTION_EDIT for an organization so administered; when the call's authorization names no organization
     filter, for one the user reads as a member or with ADMIN_CONSTITUTION_GLOBAL. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="get" noun="ScopedConstitution" authenticate="false" allow-remote="false">
         <implements service="org.moqui.admin.ConstitutionServices.get#ScopedConstitution"/>

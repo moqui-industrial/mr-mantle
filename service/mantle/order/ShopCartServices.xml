@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     pass.Facade.call#Operation, each taking PASS's restricted input map (the site the facade resolved, the session's cart
     capability as token, and the shopper's product, option, quantity, line, code, revision and operation id) and answering
     a declared result (CartView). Over Mantle's order and promotion services (ShopCart.js). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="Cart" authenticate="anonymous-all" allow-remote="false">
         <description>getCart: the session's cart (input.token), or the signed-in account's own in this shop, as a CartView with its mini-cart summary; an empty cart when there is none. Nothing changes; an order id grants nothing.</description>
         <in-parameters>

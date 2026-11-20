@@ -9,7 +9,7 @@
     live part is PASS operations through pass.Facade.call#Operation (input map, result map, the site from the facade):
     the page view of a published site's Shop mount, and the active release's manifest and files for a frontend to verify
     and render. Commerce P4 appends the page and navigation part, P5 the authoring part. Refusals start with their code. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- ===== core ===== -->
     <service verb="create" noun="ThemeDraft" allow-remote="false">
         <description>A new theme of a store with its draft copied from a starter package (starter "component/name": the

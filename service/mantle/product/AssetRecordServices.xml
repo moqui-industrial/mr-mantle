@@ -15,7 +15,7 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- The stock records that are not stock movements (impl-warehouse P4): an asset's descriptive metadata, a new lot, a new
     empty container and an asset's files. Each checks its Moqui permission and the organization by party relationship
     (StockScope.js); quantity, location, status, owner and cost change only through their posting services. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="update" noun="AssetMetadata" allow-remote="false">
         <description>Change an asset's descriptive metadata, its name and comments (both audit-logged), through
             mantle.product.AssetServices.update#Asset with only those fields given (an empty one clears it): never its quantity, location, status, owner,

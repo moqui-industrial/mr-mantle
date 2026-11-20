@@ -5,7 +5,7 @@
     or a guest's order link as orderToken, and what the buyer chose) and answering a declared result, over Mantle's order,
     contact and payment method services (ShopCustomer.js). Ownership is ExternalAccess's self relationship or the
     SalesOrder capability, never a party id from the browser. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="Account" authenticate="anonymous-all" allow-remote="false">
         <description>getShopAccount (AccountOverview, the PASS Account hub's Shop card): the signed-in verified account's purchases in the site's store: recent orders, those in progress, downloads, the invoices of these orders and the account links; the guest purchases made with its verified email in this store are claimed first (merge#Parties of the anonymous guest party). An unverified account sees only that it must verify (verified false). SIGN_IN_REQUIRED for a visitor.</description>
         <in-parameters>

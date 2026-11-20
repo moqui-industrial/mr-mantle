@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     order's send and print are mantle.order.OrderServices'. P4: the approval policies, the preview, the supplier's onboarding,
     the topics' approve and refuse handlers and the revision's invalidation of a decision (PurchaseApprovals.js). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="PurchasePolicy" allow-remote="false">
         <description>The buying policy of an organization in effect at a date (design-purchasing PurchasePolicy): each value,
             the built-in default where the row in effect sets none (traceRows has the display text and the source), the

@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     AssetServices.get#AssetPools reads when it reserves. A pool belongs to an internal organization; reading takes
     membership of it and every change STOCK_POLICY_MANAGE. Members qualify between their dates; a change never reaches
     back before now, and the reservation preview names what a change leaves unqualified without moving anything. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="define" noun="PoolDetail" type="interface">
         <description>The in-parameters a pool change shares.</description>
         <in-parameters>

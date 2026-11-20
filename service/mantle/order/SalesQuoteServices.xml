@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
     needs are SalesApprovalServices' (preview#Quote, decide#Quote), get#Quote answers them, a free line follows the approval rules
     and propose#Quote is guarded by them. P12: quote templates (find#, get#, store#, publish#, end# and preview#QuoteTemplate;
     SalesQuoteTemplates.js), in a block of their own at the end; create#Quote copies one. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="find" noun="Quotes" allow-remote="false" read-only="true">
         <description>The one scoped list of quotes (design §5 QuoteList, Home and the palette): orders of purpose SalesQuote whose
             selling part is of an organization of the caller's scope, the caller's and their teams' (or the organization's every

@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     the calculation interface each registered service implements, and the one shipped localization, the synthetic,
     non-statutory demonstration, which previews and can never make a group live. The build stays generic (impl-people §4, Nov 11,
     2026): a real deployment needs a localized configuration and, in some cases, service changes. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="calculate" noun="Localization" type="interface">
         <description>The calculation a registered localization implements (its calculationServiceName): side-effect free, it takes

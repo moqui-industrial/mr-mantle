@@ -15,7 +15,7 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- X12 4010 order documents of the sample EDI profile (plan/payments-shipping-edi.md E1, docs/EdiX12.md), named by
     EdiProfileDocument.mappingServiceName. Ported from the Java Moqui mantle-edi component (1.1.5, commit 134acb6,
     order/X12OrderServices.xml); the mapping is X12Documents.js's. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="apply" noun="PurchaseOrder" allow-remote="false">
         <description>A validated 850 as one sales order of the connection's product store, for its partner:
             the ship-to from the partner's location code (EdiLocation), each line's product from its IDs through the

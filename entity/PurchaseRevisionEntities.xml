@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     time reads the part's reference, dates and terms back. The buying policy's substitution rule (F49) and a reminder's
     occurrence on the order's email (send#PurchaseReminder dedupes on revision, template and occurrence). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <extend-entity entity-name="OrderPart" package="mantle.order">
         <!-- the supplier's reference and date, the delivery promise and the terms a revision changes (F36) -->
         <field name="otherPartyOrderId" type="text-short" enable-audit-log="true"/>

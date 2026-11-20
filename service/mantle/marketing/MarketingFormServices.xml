@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     eligibility of invitations. Each service checks its permission and the organization itself (mantle/marketing/MarketingAccess.js,
     the purposes' registrations). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="FormScope" allow-remote="false" read-only="true">
         <description>The scope service of Marketing's form purposes (mantle.party.FormPurpose scopeServiceName): the organizations of
             the caller's Marketing scope (every internal one for a holder of MARKETING_ALL_ORGANIZATIONS or a system administrator),

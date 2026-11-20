@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     loss and cost services come with impl-manufacturing: the policy (P4), the lifecycle (P5a), cost evidence (P6) and
     quantities, by-products and loss (P7, ProductionQuantities.js). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- ===== the runs (P16a, part of M4) ===== -->
     <service verb="create" noun="ProductionOrder" transaction="cache" allow-remote="false">
         <description>Create a draft production run (design-manufacturing NewWorkOrder, §12.1's create#ProductionOrder

@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     impl-customer-service P3): the mail client keeps a failed send in the Outbox, where a mailbox user could edit its
     recipient and send the stored PDF outside the resend's recipient check; it is cancelled instead (ES_CANCELLED keeps its
     sendError, and OrderDetail shows the result). Acts only on a message an OrderEmailMessage names with its orderContentId. -->
-<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
     <eeca id="OrderConfirmationSendFailed" entity="moqui.basic.email.EmailMessage" on-update="true" run-on-error="false"
             get-entire-entity="true" get-original-value="true">
         <condition><expression>statusId == 'ES_READY' &amp;&amp; sendError &amp;&amp; !originalValue?.sendError</expression></condition>

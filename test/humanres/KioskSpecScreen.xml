@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     transition, which calls mantle.humanres.AttendanceServices.record#KioskPunch in the device's request, as its display account, and
     answers the result or the refusal as JSON. Authorization is not what the spec tests (the service's own checks are), so the call
     runs with it off, in a transaction of its own. -->
-<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-xml-screen.xsd"
         require-authentication="false" standalone="true" default-menu-title="Kiosk spec">
     <transition name="punch">
         <actions><script><![CDATA[

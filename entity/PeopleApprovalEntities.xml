@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     (PositionServices.decide#PositionApproval) call record#Decision. An HR vocabulary value (an Enumeration of a family People
     maintains, PeopleServices.store#Lookup) is ended, never deleted: Enumeration.thruDate. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="PeopleApprovalPolicy" package="mantle.humanres.approval" cache="never">
         <description>One approval step of an employer's kind of People approval, effective-dated. The rows in effect for a request
             are chosen in order: those naming the request's employee (employeePartyId, an override), else those of the nearest

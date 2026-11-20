@@ -23,7 +23,7 @@ along with this software (see the LICENSE.md file). If not, see
     mantle.party.FormPublicationServices.guard#FormResponse). Case feedback's delivery policy and follow-up are
     Customer Service's (SupportFeedbackEntities.xml). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="FormPublication" package="mantle.party" cache="never">
         <description>A DbForm offered for a purpose by an organization: its context record when the publication is of one
             (a campaign, an event; empty for case feedback, whose invitations carry their own), the PASS site it is answered

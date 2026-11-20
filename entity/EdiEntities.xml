@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     durable control numbers, and the envelope, group and document records of every interchange received or sent. The
     transport is the connection's SystemMessageRemote (SFTP, REST); the business records stay Mantle's orders, shipments
     and invoices. New in MR Mantle; the Java mantle-edi component kept only SystemMessage records. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="EdiProfile" package="mantle.edi" use="configuration" cache="true">
         <description>A versioned set of partner rules for X12: the version, the documents and their mapping services, the
             code crosswalks (EdiProfileCode), who acknowledges, and the packing and billing rules. A partner's changed

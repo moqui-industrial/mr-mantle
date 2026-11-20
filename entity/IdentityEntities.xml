@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     the staff invitation. Separate from PASS's PublicSiteInvitation, which is a site's public identity flow and never grants
     staff access. P6 adds the lifecycle operation and its steps. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="UserInvitation" package="mantle.party" cache="never">
         <description>A staff invitation: an address, the organization the invited person will work for (a relationship of
             relationshipTypeEnumId), the grant proposal (registered bundles, checked when it is sent and again when it is accepted)

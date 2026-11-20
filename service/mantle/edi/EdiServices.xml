@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     the Java Moqui mantle-edi component (github.com/moqui/mantle-edi, 1.1.5, commit 134acb6, EdiServices.xml); the rules are
     X12.js's, the business mappings X12Documents.js's (named by the profile: mantle.edi.order.X12OrderServices,
     mantle.edi.shipment.X12ShipmentServices, mantle.edi.account.X12InvoiceServices). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- ========== Receive and consume ========== -->
     <service verb="receive" noun="X12Interchange" allow-remote="false">
         <description>The receive service of the EdiX12 message type: keeps the bytes received on an

@@ -4,7 +4,7 @@
     (expired carts retired through the order path once nothing of their money is unresolved, F74; recent hosted references
     searched once for a later second approval, F95) and the staff resolution of a stuck placement (impl-commerce F108). Each
     job service names its business operation for the framework Monitor (docs/tools/Monitoring.md). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="run" noun="ShopOperations" authenticate="anonymous-all" allow-remote="false" transaction="ignore">
         <description>The run_ShopOperations job: retire#ExpiredCarts, then sweep#HostedReferences, each on its own; a part that
             fails is named and the next one runs. Each cart, guest party and checkout is its own transaction (each its own

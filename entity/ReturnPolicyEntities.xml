@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
     PurchaseApprovalDecision: the return and its revision, the policy row, the actor, the time and any exception. Written by
     mantle.order.ReturnPolicyServices only (ReturnPolicies.js); with no policy a return goes to manual review. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="ReturnPolicy" package="mantle.order.return" cache="never">
         <description>A return policy of an organization (design ReturnPolicies ReturnPolicyEdit), effective-dated: its
             conditions (a store, a customer group, a product category; none is the organization's default), the window from
