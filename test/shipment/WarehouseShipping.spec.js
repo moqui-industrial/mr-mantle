@@ -263,6 +263,11 @@ spec({
         ec.message.clearErrors()
         login("john.doe")
         ec.artifactExecution.enableAuthz()
+    },
+    cleanupSpec() {
+        // the timeout feature's store binds the shared test gateway: left behind, WSH_ORG would be one more organization
+        // using TEST_SHIPPING, and a later spec's demo organization would no longer manage it (SEC-BAP-101 gatewayManaged)
+        find("mantle.product.store.ProductStoreShippingGateway", {productStoreId: "WSH_STORE"}).deleteAll()
     }
 })
 
