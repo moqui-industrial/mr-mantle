@@ -559,16 +559,21 @@ feature("a deployment with a lease is approved in the lease dialog by an approve
         // approved in the dialog (as approve#VaultLease leaves it): the page says so
         lib.set("moqui.security.vault.VaultLease", {leaseId: "SDP_LEASE"}, {statusId: "VlsOpen", approvedByUserId: "SDP_OWNER"})
         const open = read("SDP_DEV")
+        // opened by who asked for it, which the engine refuses the deployment for: Smithy does not approve it
+        lib.set("moqui.security.vault.VaultLease", {leaseId: "SDP_LEASE"}, {approvedByUserId: "SDP_DEV"})
+        const byRequester = approve("SDP_OWNER")
         lib.set("moqui.security.vault.VaultLease", {leaseId: "SDP_LEASE"}, {statusId: "VlsEnded"})
         const ended = approve("SDP_OWNER")
         op("SDP_OWNER", "cancelDeploy", {deploymentId})
-        return {waiting, notApprover, approver, row, open, ended}
+        return {waiting, notApprover, approver, row, open, byRequester, ended}
     },
-    then({waiting, notApprover, approver, row, open, ended}) {
+    then({waiting, notApprover, approver, row, open, byRequester, ended}) {
         waiting.developer.leaseId == "SDP_LEASE"
         waiting.developer.state == "waiting"
-        waiting.developer.approvers.join() == "sdpowner"
+        // who approves it is a Maintainer's to read
+        waiting.developer.approvers == null
         waiting.developer.canApprove == false
+        waiting.owner.approvers.join() == "sdpowner"
         waiting.owner.canApprove == true
         notApprover.kind == "Conflict"
         notApprover.reason == "vaultApproverRequired"
@@ -581,6 +586,8 @@ feature("a deployment with a lease is approved in the lease dialog by an approve
         row.approvedByUserId == null
         open.state == "open"
         open.approvedBy == "sdpowner"
+        byRequester.kind == "Conflict"
+        byRequester.message.includes("does not decide this deployment")
         ended.kind == "Conflict"
         ended.message.includes("has ended")
     }

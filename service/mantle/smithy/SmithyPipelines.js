@@ -1147,11 +1147,11 @@ kit => {
     const mine = d => !!ec.user.userId && d.requestedByUserId === ec.user.userId
     /* A deployment's lease (plans/Vault-Instances.md §4.6 of mr-moqui): its environment's vault holds the target's token,
        which its deploy step opens under a lease asked for once its pipeline passed. Approving the lease in the framework's
-       lease dialog (System › Vaults › Lease, in the approver's browser) is the deployment's approval, when its approver
-       decides it here: a Maintainer other than who asked (the engine's decide_by_lease ends the lease and refuses the
-       deployment otherwise). {leaseId, state (waiting, open, ended, revoked), approvedBy, approvers (the handles of those
-       who may approve it: the vault's approve role at its current key version, Maintainers, not who asked), canApprove
-       (the caller is one)}, or null for a deployment with no lease. */
+       lease dialog (System › Vaults › Lease, in the approver's browser) is the deployment's approval when its approver
+       decides it, as the engine holds it (decide_by_lease, and decide for a lease opened before the decision): not who
+       asked, and a Maintainer with a confirmed address (check#GitRepositoryAuthz's delete right, Smithy's rights). The
+       lease as read: {leaseId, state (waiting, open, ended, revoked), approvedByUserId, approverIds (the vault's approve
+       role at its current key version who so decide it)}, or null for a deployment with no lease. */
     const LEASE_STATES = {VlsRequested: "waiting", VlsOpen: "open", VlsEnded: "ended", VlsRevoked: "revoked"}
     function leaseOf(r, d) {
         if (!d.leaseId) return null
@@ -1166,14 +1166,29 @@ kit => {
                       .list()
               ).map(row => row.userId)
             : []
-        const deciders = new Set(core.maintainerUserIds(r.repo.repositoryId, [d.requestedByUserId]))
-        const approvers = vaultApprovers.filter((userId, at, all) => deciders.has(userId) && all.indexOf(userId) === at)
+        const decides = userId => {
+            if (!userId || userId === d.requestedByUserId) return false
+            const held = core.rights(r.repo.repositoryId, userId)
+            return held.rank >= RANK.SmrMaintainer && held.confirmed
+        }
         return {
             leaseId: lease.leaseId,
             state: LEASE_STATES[lease.statusId] || "ended",
+            approvedByUserId: lease.approvedByUserId || null,
+            approverIds: vaultApprovers.filter((userId, at, all) => all.indexOf(userId) === at && decides(userId)).slice(0, 50)
+        }
+    }
+    /* The lease as getDeployment answers it: its state and who approved it (a handle the caller is shown) to whoever reads
+       the deployment; who approves it (handles) and whether the caller is one to a Maintainer. */
+    function leaseView(r, lease) {
+        if (!lease) return null
+        const maintainer = canWrite(r, RANK.SmrMaintainer)
+        return {
+            leaseId: lease.leaseId,
+            state: lease.state,
             approvedBy: handleOfUser(r, lease.approvedByUserId),
-            approvers: approvers.map(userId => handleOfUser(r, userId)).filter(Boolean),
-            canApprove: !!ec.user.userId && approvers.includes(ec.user.userId)
+            approvers: maintainer ? lease.approverIds.map(userId => handleOfUser(r, userId)).filter(Boolean) : null,
+            canApprove: maintainer && !!ec.user.userId && lease.approverIds.includes(ec.user.userId)
         }
     }
     /* The states a deployment is cancelled in, as the engine cancels: before its deploy step begins. */
@@ -1209,7 +1224,7 @@ kit => {
         const own = mine(deployment)
         return {
             deployment: deploymentView(r, deployment),
-            lease: leaseOf(r, deployment),
+            lease: leaseView(r, leaseOf(r, deployment)),
             // Smithy's own rules, as decideDeploy and cancelDeploy hold them: a Maintainer decides one waiting for approval,
             // never the requester; a Developer cancels their own, a Maintainer any, before its deploy step begins
             capabilities: {
@@ -1286,6 +1301,21 @@ kit => {
         // a deployment with a lease is approved by opening the lease, in the approver's browser (the lease dialog): a
         // Maintainer who approves for the vault goes on to it; anyone else is told who approves it
         const lease = p.decision === "approve" ? leaseOf(r, deployment) : null
+        const approvers = () =>
+            lease.approverIds.length
+                ? lease.approverIds
+                      .map(userId => handleOfUser(r, userId))
+                      .filter(Boolean)
+                      .map(handle => "@" + handle)
+                      .join(", ") || "a Maintainer whose profile you are not shown"
+                : "none of this repository's Maintainers other than who asked is one; a manager of the vault adds one"
+        // a lease opened already by someone who does not decide it (who asked, or not such a Maintainer) approves nothing:
+        // the engine would refuse the deployment for it
+        if (lease && lease.state === "open" && !lease.approverIds.includes(lease.approvedByUserId))
+            fail(
+                "Conflict",
+                "The lease of its target's token was approved by someone who does not decide this deployment: refuse it, and deploy again"
+            )
         if (lease && lease.state !== "open") {
             if (lease.state !== "waiting")
                 fail(
@@ -1294,15 +1324,17 @@ kit => {
                         lease.state +
                         ": the deployment fails, and deploying it takes a new request"
                 )
-            if (!lease.canApprove)
+            if (!ec.user.userId || !lease.approverIds.includes(ec.user.userId))
                 fail(
                     "Conflict",
                     "vaultApproverRequired: The deployment is approved by opening the lease of its target's token, which an approver of the environment's vault does: " +
-                        (lease.approvers.length
-                            ? lease.approvers.map(handle => "@" + handle).join(", ")
-                            : "none of this repository's Maintainers other than who asked is one; a manager of the vault adds one")
+                        approvers()
                 )
-            kit.maintainerAudit(p, "decideDeploy", "approve " + deployment.deploymentId + " by its lease " + lease.leaseId)
+            kit.maintainerAudit(
+                p,
+                "decideDeploy",
+                "sent to the lease dialog: " + deployment.deploymentId + ", lease " + lease.leaseId
+            )
             return {state: deployment.statusId, leaseId: lease.leaseId}
         }
         kit.maintainerAudit(p, "decideDeploy", p.decision + " " + deployment.deploymentId + (reason ? ": " + reason : ""))
