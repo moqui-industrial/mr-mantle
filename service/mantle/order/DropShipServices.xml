@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     "Drop-ship from supplier" on a customer line, the send of an approved drop-ship purchase order after its approval
     commits, an order's drop-ship state for the screens, and a supplier's drop-ship facility. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="route" noun="OrderItemToDropShip" allow-remote="false">
         <description>"Drop-ship from supplier": a customer order line moved to the supplier's drop-ship facility (its part, or

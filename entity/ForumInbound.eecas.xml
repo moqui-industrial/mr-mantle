@@ -7,7 +7,7 @@
     - An account that verifies an address gets what waited for that address: the posts of list archives whose author had
       it, and the list messages held for it (claim#VerifiedAddress).
     Each runs after the commit of the write, in a transaction of its own, and never fails it. -->
-<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
     <eeca id="ForumJunkInbound" entity="moqui.basic.email.EmailMessage" on-create="true" run-on-error="false">
         <condition><expression>statusId == 'ES_RECEIVED' &amp;&amp; emailFolderId != null &amp;&amp; emailFolderId != ''</expression></condition>
         <actions><service-call name="mantle.forum.DeliveryServices.handle#StoredEmail"

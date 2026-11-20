@@ -5,7 +5,7 @@
     host (impl-commerce F54) serves only the preview render of a draft, framed by the configured BOSS origins. A preview is a
     short-lived capability for one site, Shop mount, theme draft and actor, carried in the preview URL (never a cookie): the
     row keeps only the token's digest. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
   <extend-entity entity-name="PublicSiteHost" package="mantle.public">
     <field name="hostKindEnumId" type="id"><description>PshkLive (or empty) serves the site; PshkPreview serves only the theme
       preview render and is never the canonical host.</description></field>

@@ -15,7 +15,7 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- Bank statements and their reconciliation (mantle.account.ReconciliationServices): the statement imports, the
     statement sessions over the bank lines (PaymentMethodTrans), the match rules and the deposits of receipts. The bank
     lines stay the one record of what the bank reported; a session links them, it does not copy them. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="StatementImport" package="mantle.account.method" cache="never">
         <description>One statement file read for a bank account: review#StatementImport parses it and classifies each row as
             new, a duplicate of a line already imported (by its identity, the bank's FIT id or the source-row key) or

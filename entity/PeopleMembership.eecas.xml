@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     Lifecycle's offboarding, an import), so the rule is on the record: OrganizationServices.end#AgentMemberships, which never
     refuses (a membership that cannot be ended is logged and the agency's end stands). Narrow: only an update of a PrtAgent row that
     sets or changes its thruDate. -->
-<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
     <eeca id="AgentEndsMemberships" entity="mantle.party.PartyRelationship" on-update="true"
             get-entire-entity="true" get-original-value="true">
         <condition><expression>relationshipTypeEnumId == 'PrtAgent' &amp;&amp; thruDate &amp;&amp;

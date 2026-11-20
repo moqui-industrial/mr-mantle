@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     and a message of an account that becomes sent runs file#SentEmail (the records send#EmailDraft kept for it, and the
     party match of an account that files every match). Both run after the commit of the write, in a transaction of their
     own, so they never fail or slow the store or the send. A deleted message's kept records go. -->
-<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
     <eeca id="EmailMessageFiling" entity="moqui.basic.email.EmailMessage" on-create="true" on-update="true" on-delete="true"
             run-on-error="false" get-entire-entity="true" get-original-value="true">
         <condition><expression>eecaOperation == 'delete' || (emailAccountId != null &amp;&amp; emailAccountId != '' &amp;&amp;

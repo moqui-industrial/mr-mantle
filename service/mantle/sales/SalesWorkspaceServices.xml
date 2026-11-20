@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     and Customer360's Sales summary (service/mantle/sales/SalesAccounts.js over SalesAccess.js); later phases add theirs (P5: the My accounts address book; P6: Home, the
     pipeline dataset's row filter and the lifecycle participant, SalesWorkspace.js). Each reads the caller's scope, refuses a caller who reads nothing of Sales (PERMISSION_DENIED) and an organization
     outside the scope (ORGANIZATION_DENIED), and leaves out what the caller may not read. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- ===== P2: the setup readiness (design §9 Settings SalesReadiness) ===== -->
     <service verb="get" noun="SalesReadiness" allow-remote="false" read-only="true">
         <description>Sales' setup readiness, answering the framework's readiness contract (moqui.server.ReadinessProvider

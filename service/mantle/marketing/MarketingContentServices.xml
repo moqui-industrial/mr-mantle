@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     the organization itself (mantle/marketing/MarketingAccess.js) and, for a post, the wiki's own rule (get#WikiPageAccess). A link
     publishes nothing; a post's body and its publication are the wiki's. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="find" noun="CampaignContent" allow-remote="false" read-only="true">
         <description>The current content links of the campaigns of the caller's organizations (or one campaign), by kind, source and
             use, a page at a time, each with its source's title and its owner's publication state read only (a post's publish date and

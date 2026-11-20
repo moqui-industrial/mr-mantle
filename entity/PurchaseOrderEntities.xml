@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     (mantle.order.OrderServices.get#PurchaseOrderPrint), the buying policy's commercial revision flag, and the content type
     of an issued purchase order's PDF (send#PurchaseOrder). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="PurchaseApprovalDecision" package="mantle.order.purchase" cache="never">
         <description>One approval decision on a purchase source (a purchase order now; requests, awards and agreements in
             later phases) at a revision: who decided, what, when and why, and the policy rows it was evaluated against.

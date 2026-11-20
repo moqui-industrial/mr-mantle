@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     TrackingServices.handle#OrderPlaced, after the placement commits, in a transaction of its own, so a failure never undoes or holds
     the placement (it is logged). P11 files the automation admission event; P20 adds the attribution. -->
 <secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-eca.xsd">
     <seca id="OrderPlacedRecordAttribution" service="update#mantle.order.OrderHeader" when="tx-commit">
         <condition><expression>statusChanged &amp;&amp; statusId == 'OrderPlaced'</expression></condition>
         <actions><service-call name="mantle.marketing.TrackingServices.handle#OrderPlaced" in-map="{orderId:orderId}"

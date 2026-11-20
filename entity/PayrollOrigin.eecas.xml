@@ -15,7 +15,7 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- Accounting's payroll-origin projection (AC-23, mantle/account/PayrollOrigin.js; the People P27 review): the payrollOrigin mark
     kept on payments and ledger transactions as they are written, so a payment made by hand and applied to a payroll invoice is
     hidden as a payment run's PtPayrollPayment is -->
-<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
     <eeca id="PaymentPayrollOrigin" entity="mantle.account.payment.Payment" on-create="true" on-update="true"
             run-on-error="false" run-before="true" get-entire-entity="true">
         <condition><expression>paymentTypeEnumId == 'PtPayrollPayment'</expression></condition>

@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     people are RequestParty rows: the employee who filed it (Reporter) and the case handlers (Assignee), who hold PEOPLE_CASE_HANDLE;
     nobody else reads it, the employee's manager, HR and the instance administrator included. Written and read only through
     mantle.request.RequestServices' case services (PeopleCases.js). -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="PeopleCase" package="mantle.request" cache="never">
         <description>A confidential case's own facts, beside its Request (requestTypeEnumId RqtHrCase): the employer and the
             employment it was filed under, what the employee wrote (subject, details, the day it happened, how they want to be

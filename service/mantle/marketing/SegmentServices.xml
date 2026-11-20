@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     Each public service checks MARKETING_AUDIENCE_VIEW or _EDIT (a preview also MARKETING_SEND_EDIT or MARKETING_DISPATCH) and the
     organization itself (mantle/marketing/MarketingAccess.js); a source of a filter needs its own read. An evaluation or a preview
     subscribes no one and is no send authority. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- ===== segments (design §4 Segments, SegmentDetail) ===== -->
     <service verb="find" noun="Segments" allow-remote="false" read-only="true">
         <description>The segments of the caller's scope (design §4 SegmentList), filtered in the query by text (id, name or description, ignoring case), organization, kind (MskRule, MskExplicit), parent, store and archived (N, the default; Y; all); paged (segmentList with its page fields; pageNoLimit for an export, up to 1,000). Each row: name, description, kind, organization, parent, store, the rules in words, the explicit inclusions and exclusions in effect, state and revision. No count of matches: an evaluation is the caller's own, under the sources they read (evaluate#Segment). Needs MARKETING_AUDIENCE_VIEW (PERMISSION_DENIED); refuses an organization outside the scope (ORGANIZATION_DENIED).</description>

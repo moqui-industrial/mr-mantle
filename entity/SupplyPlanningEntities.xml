@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     supply that covers it (RequirementSupply), and the organization's one plan schedule (PlanSchedule, D20).
     mantle.product.SupplyPlanningServices (SupplyPlanning.js) writes them; nothing else does. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <extend-entity entity-name="Requirement" package="mantle.request.requirement">
         <field name="quantityUomId" type="id"><description>The unit of quantity: the product's stock unit (requirement
             quantity stays in the stock unit and is converted when supply is created, R-SA-15)</description></field>

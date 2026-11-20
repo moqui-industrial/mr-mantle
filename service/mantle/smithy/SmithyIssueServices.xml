@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- Smithy's issues (mr-pass plan/design-smithy.md §8, §15.4, DG3; SmithyIssues.js). Each operation takes PASS's input
         map (its fields are SmithySchema.js's, siteId among them) and answers result. An issue the caller may not read is
         Not Found, exactly as one that is not there: a confidential issue to all but its Owners and its reporter, a task

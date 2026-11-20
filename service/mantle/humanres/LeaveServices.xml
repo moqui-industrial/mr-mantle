@@ -28,7 +28,7 @@ along with this software (see the LICENSE.md file). If not, see
     reversal once), the team's absences (TeamCalendar) and the Team absence projected CalDAV collection. A request's reason is
     read on the request alone (the person, who asked, the approvers and HR) and reaches no AI tool (ai-opt-out); an allocation's
     reason is HR's (F202). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="find" noun="Policies" allow-remote="false">
         <description>The leave policies of the employers an HR reader reads, by name or id (term, ignoring case), of an employer

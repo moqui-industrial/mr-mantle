@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     the next, with its fields audit-logged, so a document reads the policy as of the time it was evaluated. PurchasePolicy.js
     reads and writes it; the supplier category classification type is seeded here too. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="PurchasePolicy" package="mantle.order.purchase" cache="never">
         <description>Dated buying policy of an organization: the buying defaults and the controls of its purchase documents. An
             empty field takes the built-in default, which is Mantle's behavior with no row: every flag that changes an

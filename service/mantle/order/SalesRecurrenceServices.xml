@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     organization's answers as missing (RECORD_UNAVAILABLE, SalesAccess.js recurrenceOf); a Shop contract's base is Shop's. Every change
     names the base's revision (recurRevision: REVISION_REQUIRED, REVISION_CHANGED). A Sales reader reads the subscriptions of the scope
     (store contracts read only, beside storeless subscriptions of native orders). All in process only (allow-remote="false"). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="find" noun="RecurringSalesOrders" allow-remote="false" read-only="true">
         <description>RecurrenceList's bases (design §7 RecurrenceFind): the recurring sales orders of the caller's organizations (or the one
             named), by state (active, the default; paused; ended; failing: the last run failed; all), customer, agreement and text (the

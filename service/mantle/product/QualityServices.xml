@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     permission (QUALITY_TEMPLATE_EDIT, QUALITY_INSPECT, QUALITY_VERIFY, QUALITY_DISPOSE) and the organization scope
     (FacilityScope.js); reads take the organization scope and an app's facilityIds. Refusals are "CODE: message". -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- ===== templates ===== -->
     <service verb="store" noun="InspectionTemplate" allow-remote="false">
         <description>Create a draft template, or change one of the user's organizations' templates: the header when

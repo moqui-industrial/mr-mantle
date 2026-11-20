@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     FacilityServices.store#ProductFacilityPolicy (CX-FACILITY-POLICY), which checks STOCK_POLICY_PLAN and the organization;
     these suggest levels for it, apply them through it, and validate the catalog import's reorder-rule rows by its checks. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="preview" noun="ReorderLevels" allow-remote="false">
         <description>Suggested reorder levels of products at a facility: per product its average daily demand over the
             history (what was issued from the facility and those under it), its lead time (its supplier's standard lead

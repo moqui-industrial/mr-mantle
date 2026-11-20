@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     (productPriceId, priceListId, priceRuleId, unitListPrice and calculatedUnitAmount with its priceSource) and, when the rep
     enters another price or a free line, the entered value (unitAmount), the reason and the actor (mantle.order.SalesQuoteServices
     over service/mantle/order/SalesQuotes.js). -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <extend-entity entity-name="OrderHeader" package="mantle.order">
         <seed-data>
             <!-- the type is Shop's (ShopSubscriptionEntities.xml), named here too as this file loads first -->

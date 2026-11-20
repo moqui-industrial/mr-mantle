@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     tolerances, the backorder choice, blind counts, auto-print) and reservation (the facility reservation default where
     a store leaves it unset) are organization and facility policies that take STOCK_POLICY_MANAGE. A change ends the row
     in effect and starts the next, applies from its date (at posting) and never rewrites history. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="define" noun="PolicyResult" type="interface">
         <description>The in-parameters a policy read or change shares: the scope and the date.</description>
         <in-parameters>

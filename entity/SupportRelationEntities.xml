@@ -24,7 +24,7 @@ along with this software (see the LICENSE.md file). If not, see
     kept, and leaves the source's own clock Merged with its figures. Written by mantle.request.SupportCaseServices
     (CaseRelations.js) only; nothing here exists until an organization has a ServicePolicy. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="CaseRelation" package="mantle.request.support" cache="never">
         <description>One link of a case's lineage: from the source case (fromRequestId) to the other (toRequestId), a merge
             (the source merged into the case kept), a split (the new case split from the source) or a follow-up (the new case

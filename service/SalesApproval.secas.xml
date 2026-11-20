@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     stop it (AccountingCredit.secas.xml, Purchase.secas.xml); a person's approve#Order does not call the check. With no Sales rule
     nothing is added. A commercial change of a quote supersedes its earlier decisions. -->
 <secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-eca.xsd">
     <seca id="OrderPreApproveSales" service="mantle.order.OrderInfoServices.check#OrderPreApprove" when="post-service">
         <actions>
             <service-call name="mantle.order.SalesApprovalServices.check#SalesPreApprove" out-map="salesOut" disable-authz="true"

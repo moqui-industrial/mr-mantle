@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     it, no self-approval but under the one-person team's flag), the policy and vocabulary (MarketingPolicies.js), the campaign as a
     Chatter and RecordFiles host and the lifecycle participant's services. Each checks its permission and the organization itself
     (mantle/marketing/MarketingAccess.js). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- ===== P1: adoption (design §15.4) ===== -->
     <service verb="preview" noun="Adoption" allow-remote="false" read-only="true">
         <description>The records awaiting adoption: the campaigns with no organization, the lists that are not mailboxes and the

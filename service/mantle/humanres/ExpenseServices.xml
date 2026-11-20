@@ -28,7 +28,7 @@ along with this software (see the LICENSE.md file). If not, see
     org.moqui.agent.AiTaskServices.run#Extract and reviewed before they are saved; a receipt arrives by mail (the mail rule action
     createExpenseLine) or chat ("Add to my claim") as a draft line to review. Each service checks the caller's People scope
     (People.js) and the People permissions itself, then reads and writes with authorization off, and names no application group. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="check" noun="ClaimRecordVisible" allow-remote="false">
         <description>Whether the user sees an expense claim as a record (its card and panels; the RecordLinkType visibility service,

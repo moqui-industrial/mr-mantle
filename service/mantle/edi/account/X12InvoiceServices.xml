@@ -15,7 +15,7 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- X12 4010 invoice of the sample EDI profile (plan/payments-shipping-edi.md E1, docs/EdiX12.md). Ported from the Java
     Moqui mantle-edi component (1.1.5, commit 134acb6, account/X12InvoiceServices.xml), which sent product lines only;
     the mapping is X12Documents.js's. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="produce" noun="Invoice" allow-remote="false">
         <description>The 810 body for a sales invoice of one EDI order: BIG, the remit-to and ship-to, ITD with the
             due date, an IT1 per product line (with its child charges and allowances as SAC), TDS the invoice total, TXI for

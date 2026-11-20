@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     by its kind when the results are those the user reviewed. Depreciation (AssetBookServices) and project cost
     (OtherAutoPostServices) are kinds; logic in PeriodRuns.js. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="define" noun="RunCalculation" type="interface">
         <description>A kind's calculation: for an organization, its open period and the run's book day (effectiveDate),
             optionally limited to some sources, one result per source: sourceEntityName, sourceId, description, amount,

@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     StoreStaff row's stores (StoreAdmin.js). A missing store and one outside the scope are refused alike (RECORD_UNAVAILABLE).
     Every change of what a store shows advances the generation of its sites (the `shop` mounts naming it). Refusals start with
     their reason code. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="StorePublication" allow-remote="false" authenticate="anonymous-view">
         <description>Whether products are public and purchasable in a store (Shop's catalog, SHOP-CATALOG): a product is public
             only by a current publication row of it, or of its virtual product with no exclusion row of the variant, while it

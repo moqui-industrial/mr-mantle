@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     Purchasing posts no stock: receipts are mantle.shipment.WarehouseTaskServices', inspections
     mantle.product.QualityServices'. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="notify" noun="LateReceipts" allow-remote="false">
         <description>The nightly late-receipt notice (ServiceJob notify_LateReceipts, topic PurchaseLateReceipt): each
             purchase order part with a stock line still to come whose due date (the line's required date, else the part's

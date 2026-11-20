@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     and breach scan (the scan_CaseSla ServiceJob). The settings and reads check SUPPORT_POLICY_EDIT, SUPPORT_CASE_MANAGE or
     SUPPORT_CASE_EDIT and the organization; the rule services are internal. Business time is
     mantle.work.CalendarServices' (BusinessTime.js). Only these services write Request.responseRequiredDate on a case. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <!-- ===== the rules (internal) ===== -->
     <service verb="start" noun="CaseEpisode" authenticate="anonymous-all" allow-remote="false">

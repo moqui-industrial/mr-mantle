@@ -27,7 +27,7 @@ along with this software (see the LICENSE.md file). If not, see
     A file replayed (the same kind, scope and content) answers the batch it made. Written only by
     mantle.humanres.PayrollExchangeServices, which checks PAYROLL_VIEW and PAYROLL_EDIT (and PEOPLE_IMPORT for an import) and the
     employer first; amounts are opted out of AI. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="PayrollExchangeBatch" package="mantle.humanres.payroll" cache="never">
         <description>One payroll exchange: its kind (PayrollExchangeKind: an export of approved inputs, an import of history, an
             import of an external processor's results), the employer, the pay group and period (an export's and results'), the

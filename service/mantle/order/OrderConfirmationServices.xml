@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
     unchanged, and an order with none is rendered as of its placed time by the first store or resend (F55). A resend whose
     send fails is cancelled (cancel#FailedConfirmationSend, entity/OrderConfirmation.eecas.xml). Each service requires SUPPORT_CASE_EDIT or ORDER_APPROVE and an
     order of the user's organizations. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="OrderConfirmationPrint" allow-remote="false">
         <description>A placed sales order's confirmation as placed (HTML for html-print or a PDF): its lines as of the placed
             time from the audit log (product, quantity, unit price, required date), the customer, seller, reference and

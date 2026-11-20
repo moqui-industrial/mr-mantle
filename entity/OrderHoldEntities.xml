@@ -15,7 +15,7 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- Order holds by reason (design-crosscut §3.6, CX-ORDER-HOLD): an order on OrderHold names why, so one app's hold is
     never released by another app's decision (mantle.order.OrderServices.hold#Order, release#OrderHold). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="OrderHoldReason" package="mantle.order" cache="never">
         <description>Why an order (or one of its parts) is on hold: a credit, change, purchase or manual reason, the record that
             caused it (sourceId: a credit check, a change request, a revision), who placed it and when, and who released it,

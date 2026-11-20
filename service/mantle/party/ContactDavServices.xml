@@ -12,7 +12,7 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- The CardDAV adapter of the framework's DAV server (mr-moqui docs/interfaces/Sync.md; the conf's dav-server contact-services):
         each contact book the user may open (mantle.party.ContactBookServices.get#UserContactBooks) is an address book of
         vCards 3.0, the cards ContactImportServices.export#Contacts writes, one per party the user may see. A personal book

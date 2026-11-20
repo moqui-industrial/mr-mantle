@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
     application is never deleted, a closed opening keeps its applications. P17 (design §5 OfferDetail, §15): an offer of
     employment (EmploymentOffer, Offers.js) and the letters People issues (EmploymentLetter, Letters.js: an offer's and an
     employment change's, each stored once). -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="JobOpening" package="mantle.humanres.recruitment" cache="never">
         <description>An opening: the text an employer recruits with (title, description), its recruiting owner, the seats it
             fills (JobOpeningPosition: approved active positions of the employer), whether it is internal only, its state (Draft,

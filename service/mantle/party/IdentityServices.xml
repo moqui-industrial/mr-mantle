@@ -22,7 +22,7 @@ along with this software (see the LICENSE.md file). If not, see
     reasonCode, reason); a missing permission or an identity out of scope (RECORD_UNAVAILABLE) is an error. Names no app group:
     grants come as a proposal of registered bundles the app supplies. ALL_USERS may call them (data/PartyAccessData.xml): each
     refuses without its permission. The bodies are Identity.js. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="find" noun="Users" allow-remote="false">
         <description>The staff identities with a current relationship (agent, employee, member) to an internal organization the

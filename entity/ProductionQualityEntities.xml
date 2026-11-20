@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     production links of an inspection and of its scrap disposition. A file of its own so it merges apart from the quality
     and the other production entities. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <!-- a production template (inspectionContextEnumId QicProduction): in-process (an operation's gate, blocking the
         operations after it) or final (the output, received held); its sample counted on each receipt or on the run's
         quantity; attached to a method (a BOM: the final check of what it makes) or an operation (an operation template or a

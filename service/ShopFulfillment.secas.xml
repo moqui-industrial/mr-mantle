@@ -3,7 +3,7 @@
 <!-- Shop's digital delivery (mr-pass impl-shop P6; design-shop §8.3, §10; design-crosscut §1.3). Each acts only on what Shop
     made (an order with a completed StoreCheckout, its fulfillment rows); every other order, refund and return is
     unchanged. -->
-<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-eca.xsd">
     <!-- an approved Shop order's plain digital lines: invoice, capture, finalize, complete, grant (each step its own
         transaction, after the approval commits) -->
     <seca id="ShopOrderApprovedFulfillDigital" service="update#mantle.order.OrderHeader" when="tx-commit">

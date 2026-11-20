@@ -37,7 +37,7 @@ along with this software (see the LICENSE.md file). If not, see
     project (ProjectServices.get#VisibleProjectInfo); hours on projects the user does not see still count in a person's load,
     as Other projects. The topics: AllocationRequest (to the approvers when requested; its approve and refuse services decide
     it from the tray) and AllocationDecision (to the requester and the person). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <!-- ========== Capacity ========== -->
 

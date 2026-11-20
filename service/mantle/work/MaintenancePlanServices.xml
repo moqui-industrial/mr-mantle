@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     alike (RECORD_UNAVAILABLE). EquipmentServices.get#AssetMaintenanceNeeded stays the baseline's and is not called (F11). P14
     adds the occurrences (MaintenanceOccurrence), the generation of a planner and of the generate_MaintenanceWorkOrders job, the
     reconciliation of missed and counted obligations, and the job's state for Settings. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="check" noun="PlanRecordVisible" allow-remote="false">
         <description>Whether the user sees a maintenance plan (MaintenanceSchedule) as a record, its card and panels (the
             RecordLinkType visibility service, SEC-BOS-87): a reader of plans (MAINTENANCE_VIEW) of its organization alone.</description>

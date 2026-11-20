@@ -4,7 +4,7 @@
     its head is fetched by nobody but through Smithy's own reads for its author and its moderators. When the visibility of
     a post changes (a moderator approves it, hides it or removes it) the merge request it is the first post of follows.
     The service returns at once for any other post. -->
-<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
     <eeca id="SmithyMergeRequestPostVisibility" entity="mantle.forum.ForumPostState" on-update="true" get-original-value="true" run-on-error="false">
         <condition><expression>originalValue != null &amp;&amp; visibility != null &amp;&amp; visibility != originalValue.visibility</expression></condition>
         <actions><service-call name="mantle.smithy.SmithyReviewServices.sync#MergeRequestHidden"

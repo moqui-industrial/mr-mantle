@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
     PaymentGatewayOrganization; ALL_USERS may call it, and it refuses without ADMIN_CONNECTION_MANAGE and for an organization
     the caller does not administer (the organization filters of the authorization the call runs under, as
     mantle.party.IdentityServices). Stands without BOSS. The bodies are GatewayConnections.js. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="run" noun="GatewayConnectionAdapter" allow-remote="false">
         <description>One operation (list, get, store, test, consumers) of a gateway kind: paymentGateway (PaymentGatewayConfig

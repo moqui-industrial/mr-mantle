@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     substitute#ProductionMaterial, amend#ProductionOrder, split#ProductionOrder and clone#ProductionOrder. A file of its own
     so it merges apart from the other production entities. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <!-- A change requested on a run: a substitution (PchtSubstitution: of a material line's remaining quantity by an allowed
         alternative, at a factor) or an amendment (PchtAmendment: the run's remaining lines and operations remapped to its
         method as of methodDate). It records the run's revision and the preview it was asked at, who asked, the reviews (a

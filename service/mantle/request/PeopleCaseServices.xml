@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     RqtHrCase read and changed by its people alone, the employee who filed it and its handlers (PEOPLE_CASE_HANDLE and an Assignee
     row of the case). Every other caller is told the case is not available, a missing case alike (RECORD_UNAVAILABLE). Each service
     checks the caller itself, then reads and writes with authorization off. Not exposed to MCP or the assistant (design §1.4). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="create" noun="PeopleCase" allow-remote="false">
         <description>An employee files a confidential case with their employer: the subject, what happened, the day it happened and

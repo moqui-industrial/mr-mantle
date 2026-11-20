@@ -4,7 +4,7 @@
     service/mantle/public/Themes.js). A theme is a store's editable package of files, kept as dbresource:// versions under
     its one package root; a release is an immutable manifest that pins each file's version and digest; a binding is the
     release a site's app mount shows. Commerce P5's editors write drafts through ThemeServices, never these rows. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
   <entity entity-name="PublicTheme" package="mantle.public">
     <description>A store's theme: its draft is the current text of the files under packageRoot. draftRevision counts the
       draft's saves (each save checks it); the last validation's digest and outcome are kept for publish.</description>

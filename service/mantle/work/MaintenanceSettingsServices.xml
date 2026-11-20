@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     lookups (Maintenance's fixed kinds and its vocabularies, failure modes with their applicability) and the setup readiness, in
     MaintenanceSettings.js (P18); P11's cost threshold is two
     of the policy's fields, its estimate in MaintenanceCosts.js. Teams join in P8. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="MaintenancePolicy" allow-remote="false">
         <description>The work policy in effect for one of the user's organizations (MAINTENANCE_SETTINGS_EDIT or any maintenance
             read; ORGANIZATION_DENIED outside the scope), or the defaults when it has none (fromDate empty): approval threshold

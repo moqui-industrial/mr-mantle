@@ -5,7 +5,7 @@
     site's redirects of old paths to typed destinations, each dated. mantle.public.ThemeServices writes them
     (service/mantle/public/SitePages.js) after its permission and store checks; the live reads are SiteServices'
     get#SiteNavigation and resolve#SiteRedirect. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
   <entity entity-name="PublicSiteNavigation" package="mantle.public">
     <description>A menu of a site's app mount, by its key (main, footer, ...) and locale. draftText holds the draft's items
       as JSON ({itemId, parentItemId, label, destinationTypeEnumId, destinationValue, visible}, in order); draftRevision

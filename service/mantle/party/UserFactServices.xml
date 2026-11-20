@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     agent conversation's prompt says about the user's organizations, for every app's skills (Sales', Marketing's, the others'), named
     in Mantle's MoquiConf.xml llm-facade. Generic: it names no app. The facts are fixed when a conversation starts and the active
     organization may change during it, so a tool still takes its organization and checks it. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="OrganizationFacts" authenticate="false" allow-remote="false" read-only="true">
         <implements service="org.moqui.agent.AgentServices.get#UserFacts"/>
         <description>The user's organizations (the internal organizations they work in as get#PartyInternalOrgIds finds them: their

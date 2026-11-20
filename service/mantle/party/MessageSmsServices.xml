@@ -3,7 +3,7 @@
 <!-- Comms' text messages (mr-boss impl-marketing P22, F57, F72-F74) over service/mantle/party/MessageSms.js: the answer to the
     framework's sms-consent hook (registered in MoquiConf.xml), a STOP's withdrawal and suppression (SmsOptOut.eecas.xml) and a
     text's segment estimate. Internal: nothing is remote. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="check" noun="SmsConsent" allow-remote="false" read-only="true">
         <description>The sms-consent provider (org.moqui.comms.ProviderInterfaces sms#Consent), asked by the framework for every
             sender of a promotional text, the system included: consent true only when a party holding toNumber has PcpSms granted

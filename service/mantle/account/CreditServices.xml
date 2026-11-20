@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     (a Hold result puts the order on a Credit hold, keeping its reservations), the release of a credit hold with its
     recorded decision, and the customer's credit status. Logic in Credit.js. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="define" noun="PolicyParameters" type="interface">
         <description>A credit policy: the limit on exposure in its currency, the most days overdue, and whether going over
             warns or holds.</description>

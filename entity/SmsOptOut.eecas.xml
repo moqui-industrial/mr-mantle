@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     (mantle.party.MessageSmsServices note#SmsKeyword, MessageSms.js; mr-boss impl-marketing P22, F57). A START ends neither: new
     consent needs new evidence. Its own transaction, and a failure is logged: the opt-out the framework keeps never waits on it. -->
 <eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
     <eeca id="SmsStopWithdrawsConsent" entity="moqui.call.SmsOptOut" on-create="true" on-update="true" run-on-error="false"
             get-entire-entity="true">
         <condition><expression>optedOut == 'Y' &amp;&amp; lastKeyword == 'STOP'</expression></condition>

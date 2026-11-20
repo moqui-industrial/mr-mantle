@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     tolerance) or a template. Its activation and each later revision are approved through
     mantle.order.PurchaseServices.decide#PurchaseApproval with the agreementId, on PurchaseOrderApproval. Each service
     checks its permission and refuses an agreement outside the user's organizations (RECORD_UNAVAILABLE). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="store" noun="PurchaseAgreement" allow-remote="false">
         <description>Create or change a purchase agreement (design NewAgreement, AgreementHeader, AgreementTerms). With no
             agreementId: a draft of the organization with the supplier at revision 1, the currency the buying policy's when

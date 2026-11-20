@@ -23,7 +23,7 @@ along with this software (see the LICENSE.md file). If not, see
     (one of the user's, the vendor; the customer not internal). Mantle's own return services are unchanged for their callers.
     Settlement is Accounting's (ReturnServices preview#ReturnSettlement, settle#Return), receipt Warehouse's
     (WarehouseTaskServices receive#ReturnItems, request#ReturnLabel). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <!-- ===== policies (ReturnPolicies settings) ===== -->
     <service verb="find" noun="Policies" allow-remote="false">

@@ -26,7 +26,7 @@ along with this software (see the LICENSE.md file). If not, see
     reads these (assign#Case, save#AssignmentRule, preview#Assignment, preview#SavedReply, apply#SavedReply); nothing here acts
     until an organization has a rule or a saved reply. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <!-- the rule a case was last assigned by and why (audit-logged, so each evaluation stays readable) -->
     <extend-entity entity-name="CaseProfile" package="mantle.request.support">
         <field name="assignmentRuleId" type="id" enable-audit-log="update"><description>The assignment rule row the case was

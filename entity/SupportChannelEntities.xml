@@ -22,7 +22,7 @@ along with this software (see the LICENSE.md file). If not, see
     the one it replaces. Saved by mantle.request.SupportCaseServices.save#ServiceRoute (Channels.js); nothing reads it where
     no route is set up, so every intake path keeps Mantle's default. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="ServiceRoute" package="mantle.request.support" cache="never">
         <description>How one channel files into a service queue of an organization, effective-dated: the channel (mail,
             the queue's public form, a forum category of a PASS site, chat), for mail the account (empty: any account whose

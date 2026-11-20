@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     the sales line, and its receipt offers to reserve the received stock for it through
     mantle.product.AssetServices.reserve#AssetForOrderItem. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="ReceiptPegs" allow-remote="false">
         <description>A purchase receipt's received lines bought for customer-order demand, each with the sales line it was
             bought for (through the line's RequirementSupply: the requirement's customer order lines, and the purchase

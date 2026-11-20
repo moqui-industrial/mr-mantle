@@ -2,7 +2,7 @@
 <!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
 <!-- The one outbound delivery ledger's services (design-crosscut CX-DELIVERY, X8; Comms' contract, mr-pass impl-shop P6,
     F24) over service/mantle/party/MessageDeliveries.js. Internal: Mantle's sources call them; nothing is remote. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="queue" noun="Delivery" allow-remote="false">
         <description>One delivery of an event to a recipient by a channel and template (MessageDelivery): an existing one for
             the same four is answered and nothing is queued again. The source (a MessageDeliverySource whose enumCode is its

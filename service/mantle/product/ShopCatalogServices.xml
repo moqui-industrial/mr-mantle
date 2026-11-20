@@ -15,7 +15,7 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- The Shop app's public reads (mr-pass impl-shop; design-shop §13.2's K): PASS operations through pass.Facade.call#Operation,
     each taking PASS's restricted input map with the site the facade resolved and answering a declared result. P1 the context
     (ShopContext.js); P3 the catalog reads. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="ShopContext" authenticate="anonymous-all" allow-remote="false">
         <description>getShopContext (impl-shop P1): the published site, its Shop mount, the store the mount targets, the locale,
             currency, active theme release (the mount's PublicThemeBinding, null when none) and capabilities. A site not published, a missing or disabled Shop

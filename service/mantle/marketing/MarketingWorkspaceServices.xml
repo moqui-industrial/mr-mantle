@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     caller's scope (mantle/marketing/MarketingAccess.js), refuses a caller who reads nothing of Marketing (PERMISSION_DENIED) and an
     organization outside the scope (ORGANIZATION_DENIED), and leaves out what the caller may not read. Later phases add their
     sources, entries and checks. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="define" noun="ScopeParameters" type="interface">
         <description>The scope Home's projections share: an organization of the caller's marketing scope, or none for each of them.</description>
         <in-parameters>

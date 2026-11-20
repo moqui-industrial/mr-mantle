@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     quantity stays in the existing quantity fields; these are written by the receive, issue and pick entry points (P7,
     P11, P16) and are empty on rows Mantle's own services write. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <extend-entity entity-name="AssetReceipt" package="mantle.product.receipt">
         <field name="enteredQuantity" type="number-decimal"/>
         <field name="enteredQuantityUomId" type="id"/>

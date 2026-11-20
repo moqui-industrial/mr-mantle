@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     follow-up of a low score. Each service checks its permission and organization itself; BOSS's screens call them after
     ironstone.customerservice.AccessServices. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- ===== feedback forms (SUPPORT_POLICY_EDIT and the form's organization) ===== -->
     <service verb="create" noun="FeedbackForm" allow-remote="false">
         <description>A new dated feedback form (DbForm purpose DbfpCaseFeedback) of the organization: the default required rating

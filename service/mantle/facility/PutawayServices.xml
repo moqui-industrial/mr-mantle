@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     resolver and location capacity. The putaway itself is a move, mantle.shipment.WarehouseTaskServices.putaway#Stock
     (STOCK_MOVE), and a one-step receipt posts to the resolver's destination (Receiving.js). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="store" noun="PutawayRule" allow-remote="false">
         <description>A putaway rule of one of the user's facilities (FACILITY_EDIT, PERMISSION_DENIED; another organization's
             facility FACILITY_UNAVAILABLE): what it applies to (a source location or location type, a product, a product

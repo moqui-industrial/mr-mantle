@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     is never returned. receive#ChannelOrders and consume#ChannelOrder are the StoreChannelOrders message type's, the API
     intake behind /rest/sm (the remote authenticated by the endpoint) and a committed import alike. Refusals start with their
     reason code. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- ===== Integrations and channel import (P13) ===== -->
     <service verb="find" noun="StoreIntegrations" allow-remote="false">
         <description>The integrations of the user's stores (or one store): each binding of a registered connector (a SystemMessageRemote with the store and connector, or an EDI partner's connection), with its store, connector, direction, whether its intake is enabled, whether credentials are set (never what they are), its mapping, last success, failures, conflicts and EDI exceptions and a health key (disabled, credentials, failing, conflicts, ok, idle). By connector, enabled (Y or N) and health. COMMERCE_CHANNEL_OPERATE and the store scope.</description>

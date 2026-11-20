@@ -23,7 +23,7 @@ along with this software (see the LICENSE.md file). If not, see
     permissions itself, then reads and writes with authorization off, and names no application group. The reviewer's private notes
     reach no other reader, the release, an export, Chatter, a notice or the search index; the assessments' text is opted out of AI
     (PerformanceReviewStep.summary, PerformanceNote.noteText, FormResponseAnswer.valueText). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <!-- ===== templates and cycles ===== -->
     <service verb="find" noun="Cycles" allow-remote="false">

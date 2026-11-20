@@ -8,7 +8,7 @@
     hash of its canonical content, so a matching replay answers the original and a conflicting one is kept, rejected, as
     the evidence. A channel import batch is a SystemMessage of its own (StoreChannelImport) holding the file, Staged until
     it is committed; its orders are its children (parentMessageId), received through the same connector path as the API. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="StoreChannelConnector" package="mantle.product.store" use="configuration" cache="true">
         <description>A registered connector a store may be bound through: its message type, the kind of business message it
             carries, its direction and the mapping versions StoreChannels.js implements. Only a registered, enabled connector

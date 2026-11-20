@@ -15,7 +15,7 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- Return settlement (mantle.order.ReturnServices preview#ReturnSettlement and settle#Return) and the sales invoice
     finalized at ship: the organization's two flags and what a settlement records on its billing links. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
         <field name="returnSettlementRequired" type="text-indicator" default="'N'" enable-audit-log="update">
             <description>Y: approving a return only creates its shipment, a return is received through

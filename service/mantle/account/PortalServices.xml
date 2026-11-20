@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     PASS input map (siteId, a token or the signed-in contact, the record) and answers a result map; each checks the site's
     app target and check#AccessCapability first (Portal.js). The record's internal fields never leave here. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="issue" noun="InvoiceAccess" authenticate="anonymous-all" allow-remote="false">
         <description>A pay link for an invoice: the Billing app's InvoicePay page taking a new token (InvoicePay scope, 120 days).
             From a page (siteId) for a signed-in contact of the invoice's customer; from send#Invoice for a user with

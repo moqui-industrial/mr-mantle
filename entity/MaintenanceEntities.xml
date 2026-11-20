@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     mantle.work.MaintenanceServices changes it. Equipment work has one primary AssetMaintenance (assetMaintenanceId), which
     follows the root's status; facility work has none and its facility is WorkEffort.facilityId. The organization's work policy is
     a dated MaintenancePolicy row: a change starts a new row and ends the one in effect. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="MaintenanceWorkOrder" package="mantle.work.maintenance" cache="never">
         <description>A maintenance work order: the extension of its root WorkEffort (workEffortId), with its target equipment
             (assetId; a facility's work has none and names WorkEffort.facilityId), its primary AssetMaintenance, its kind, type,

@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     an asset whose owner or facility owner is one of them), narrowed to the caller's facilities when it passes them, and
     answer cost only to a user with ACCOUNTING_VIEW. No stock read permission exists in Mantle: an app's own access check
     decides who may call these. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="find" noun="Movements" allow-remote="false">
         <description>A page of the stock ledger (AssetDetail with its asset), newest first, each row with its source (receipt,
             issuance, adjustment, a revaluation split or a partial move with its other asset, or another ledger entry), the

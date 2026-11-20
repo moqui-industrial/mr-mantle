@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     Enumeration of MaintenanceFailureMode, ended by People's Enumeration.thruDate) applies to every piece of equipment, or, once it
     has applicability rows in effect, to the equipment of those asset classes and models alone. A row is dated and ended, never
     deleted (mantle.work.MaintenanceSettingsServices.store#MaintenanceLookup). -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="MaintenanceLookupApplicability" package="mantle.work.maintenance" cache="never">
         <description>Where a maintenance lookup value applies, from fromDate to thruDate: equipment of an asset class (classEnumId,
             AssetClass) or of a model (productId), one of the two. A value with no row in effect applies everywhere.</description>

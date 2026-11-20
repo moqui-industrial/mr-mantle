@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     with its readiness. Each service checks MARKETING_EVENT_MANAGE (a write) or a Marketing read and the event's organization itself;
     the event stays the calendar's (mantle.work.EventServices, under the calendar's own rules). P17 adds the registrations, their
     payment and their notices; P18 check-in. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- ===== Marketing P16: events and registration setup ===== -->
     <service verb="find" noun="Events" allow-remote="false" read-only="true">
         <description>The registration events of the caller's organizations (an organization's, or a campaign's when

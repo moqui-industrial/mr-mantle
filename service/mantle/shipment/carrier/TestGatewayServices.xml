@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     is an invalid address, 99904 queues the label until it is asked about and 99905 keeps it queued. Real carriers are
     their own gateways. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="ShippingRatesBulk">
         <description>Rates of the asked methods of the carriers this gateway serves (ShippingGatewayCarrier): each package's
             base and per-pound charge times the zone factor, summed; none for an invalid address or a package with no

@@ -6,7 +6,7 @@
     recurring offers, a customer's accepted contract with its off-session consent and resource instance, and one renewal
     occurrence per contract and period. Money and order lines stay on Mantle's own orders, payments and invoices; access
     stays Mantle's Subscription rows (and the Forum's source-bound grants), one per paid term of the contract's instance. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
   <!-- Sales' proposed order purpose (design-sales SAL-QUOTE; review X5): RecurringTemplate marks a recurring base, the one
     marker every exclusion reads (credit exposure, reservation, the store emails, invoicing, subscription fulfillment, the
     order lists and the sales index). Sales seeds its own values (SalesQuote, SalesOrder) when it builds them. -->

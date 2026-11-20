@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     revise, a withdrawal or a decline ends it. A response is the customer's acceptance or decline of one issue, with its evidence and
     operation key; one issue has at most one response. Resending an issue is a delivery (the ledger's or the rep's own mail), not
     another issue. mantle.order.SalesQuoteIssueServices over service/mantle/order/SalesQuoteIssues.js reads and writes them. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="SalesQuoteIssue" package="mantle.sales.quote" cache="never">
         <description>One issue of a quote (design §17 SAL-QUOTE): the order and the commercial revision it offers, the seller and
             customer, when and by whom it was issued, the validity it carries, the PDF stored at that revision (orderContentId and

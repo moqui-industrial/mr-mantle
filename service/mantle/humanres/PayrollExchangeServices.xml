@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
     an import PEOPLE_IMPORT, PAYROLL_VIEW and PAYROLL_EDIT; another employer's batch is a missing one. The registrations of the
     framework's data transfer (data/PeoplePayrollExchangeSetupData.xml) name find#ExchangeRuns, find#ExportScopes and
     export#InputsTransfer. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="preview" noun="Batch" allow-remote="false">
         <description>A payroll exchange read and each row resolved, nothing made (PayrollExchange's Exchange step). exchangeKind export
             (PAYROLL_VIEW and PAYROLL_EDIT): a pay group's prepared period's approved inputs, each with its source key (NOTHING_TO_EXPORT,

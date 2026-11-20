@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     assets, preview, test, preparation and schedule (MarketingSends.js). The approval is CampaignServices request#MarketingApproval and
     decide#MarketingApproval with targetKind send (MarketingApprovals.js); the release, dispatch, pause, cancel and recovery are P9's (MarketingDispatch.js).
     Each service checks its permission and the send's organization itself (mantle/marketing/MarketingAccess.js). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="find" noun="Sends" allow-remote="false" read-only="true">
         <description>The sends of the caller's scope (design §5 SendList), filtered in the query: text (id, name or subject, ignoring case), an organization of the scope, a campaign, status (one, open by default, or all), channel, mine (made by the caller) and a schedule range; paged (sendList with its page fields; pageNoLimit for an export, up to 1,000). Each row: name, campaign, organization, topic, profile, subject, status with its text and colour, schedule, revision, and the eligible count of a preparation at the current revision. Refuses a caller who reads nothing of Marketing (PERMISSION_DENIED) and an organization outside the scope (ORGANIZATION_DENIED).</description>
         <in-parameters>

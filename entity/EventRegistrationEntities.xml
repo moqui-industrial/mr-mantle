@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     (EventCommunicationSchedule) and the attendee places themselves (EventRegistration, P16 its seat-taking states only, which the
     capacity checks count; P17 the hold, order, payment and credential). Written only through mantle.work.EventRegistrationServices. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
 
     <!-- ===== Marketing P16: events and registration setup (impl-marketing P16; design-marketing §9 Events, EventDetail, RegistrationSetup) ===== -->
     <entity entity-name="RegistrationEvent" package="mantle.work.registration" cache="never">

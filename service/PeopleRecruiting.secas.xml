@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
     made. RecruitingServices.send#InterviewInvitations sends them as the system in a transaction of its own, a failure logged and
     recorded on the interview, where its recruiters send them again; the rules run as the recruiter, on a service worker. send#EventInvitations tells only the attendees whose invitation changed, so a
     second run tells nobody again. -->
-<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-eca.xsd">
     <seca id="PeopleOfferLetterEmail" service="mantle.humanres.RecruitingServices.change#OfferState" when="tx-commit">
         <condition><expression>action == 'issue' &amp;&amp; employmentOfferId &amp;&amp; !repeated</expression></condition>
         <actions><service-call name="mantle.humanres.RecruitingServices.send#OfferLetter" in-map="{employmentOfferId:employmentOfferId}"/></actions>

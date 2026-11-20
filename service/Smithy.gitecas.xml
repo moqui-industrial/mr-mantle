@@ -8,7 +8,7 @@
     the gate's rule for a push to review holds it too (§9.3). Not write: a write through Moqui (a page's commit,
     create#GitRef, a merge) is made by an operation that has checked its caller. Not fetch or import: a mirror's fetch
     has no pusher (a job runs it), and an import is an operator's act; neither is an account's push to refuse. -->
-<gitecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/git-eca-3.xsd">
+<gitecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-git-eca.xsd">
     <giteca rule-name="SmithyPushGate" source="push" event="pre-receive">
         <actions><service-call name="mantle.smithy.SmithyGitServices.check#Push" in-map="context"/></actions>
     </giteca>

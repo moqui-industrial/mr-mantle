@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     the account, parent, contact and manager it is given (service/mantle/sales/SalesAccounts.js over SalesAccess.js); refusals carry
     reason codes, and an account outside the scope answers as a missing one (RECORD_UNAVAILABLE). Until P3 the four services were
     authenticate="false" and took no organization. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="create" noun="Account">
         <description>Create a Sales account of an organization of the caller's sales scope: an organization (organizationName) or,
             with partyTypeEnumId PtyPerson, an individual customer (firstName, lastName), owned by that organization

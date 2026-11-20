@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- Smithy and GitHub (mr-pass plan/design-smithy.md §11 Import, §15.9, §18.2, DG8; SmithyImport.js): the import of a
         GitHub repository's issues and pull requests into a repository of a group, and a repository's push mirrors. Each
         operation takes PASS's input map (its fields are SmithySchema.js's, siteId among them) and answers result. What

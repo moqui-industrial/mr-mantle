@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!-- No copyright or license for configuration file, details here are not considered a creative work. -->
-<moqui-conf xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/moqui-conf-3.xsd">
+<moqui-conf xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-moqui-conf.xsd">
     <!-- Mantle's settings, each also an environment name (moqui_conf__mantle__smithy_github_api): smithy-github-api the
         GitHub API the Smithy import reads (a GitHub Enterprise Server's /api/v3), smithy-agreement-max-commits how many
         commits of a merge request are checked for agreements (250, the most a compare gives, when empty),

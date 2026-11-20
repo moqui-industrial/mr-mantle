@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     whose SystemMessageRemote holds the API base (sendUrl), the API token (password) and the webhook secret
     (sharedSecret); labels go through WarehouseTaskServices.request#PackageLabels and refund#PackageLabels, which record
     each attempt before calling these. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="ShippingRatesBulk" allow-remote="false">
         <description>Shippo's rates of the asked methods for the packages given: one Shippo shipment per package, each
             method's cheapest rate of its service level and carrier account per package, summed for a method rated for

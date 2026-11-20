@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     part's and lines' audit-logged acknowledgement fields. Each service needs PURCHASE_ORDER_EDIT (the preview also
     PURCHASE_APPROVE) in the order's buying organization (RECORD_UNAVAILABLE outside it), on a purchase order of one purchase
     part (NOT_PURCHASE, PURCHASE_PARTS). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="define" noun="PurchaseRevisionChange" type="interface">
         <description>A proposed revision of a purchase order: the lines' and the part's new values.</description>
         <in-parameters>

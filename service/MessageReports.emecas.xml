@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
-<emecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/email-eca-3.xsd">
+<emecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-email-eca.xsd">
     <!-- Comms' bounce intake (impl-marketing P6, F18, F76; design-marketing §15.1 DeliveryReportIntake): a stored message that is a
         delivery status notification or an abuse report (a multipart/report of report-type delivery-status or feedback-report), or
         one that came to a VERP bounce address bounces+(delivery).(key)@ a domain, is read by mantle.party.MessageServices

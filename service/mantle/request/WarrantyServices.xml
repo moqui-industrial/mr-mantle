@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
     WarrantyDecision at the claim's revision. A repair is an AssetMaintenance on the sold serial with a WepMaintenance task
     (F67); its completion tells the agent and resolves nothing; a replacement goes through a return. Each service checks its
     permission and the case's organization itself and reads and writes with artifact authorization off. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="find" noun="WarrantyClaims" allow-remote="false">
         <description>The warranty claims of the user's organizations (WarrantyFind, WarrantyList), newest first: each with its

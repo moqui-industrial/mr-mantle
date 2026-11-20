@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     supplier's quote is a purchase order in OrderRequested and then OrderProposed, its lines linked to the RFQ items by
     RequestItemOrder. Every verb checks PURCHASE_ORDER_EDIT and the organization, but publish#SupplierQuotePrice, which
     checks SUPPLIER_PRICE_EDIT only. Quotes are never supply, never approved and never sent as purchase orders. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="create" noun="QuoteRequest" allow-remote="false">
         <description>A draft RFQ (RqtPurchaseRfq) of one of the user's organizations, filed by the user: the organization as its
             OrgInternal RequestParty, its name, specification text, delivery facility, currency (the buying policy's, else the

@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     purchase orders. Each checks its Moqui permission and the organization itself;
     the apps' SupplyPlanning mounts call these after their own access check. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="define" noun="PlanScope" type="interface">
         <description>The organization and facility set a plan is for: the organization given, else the first facility's
             owner, else the user's active organization; the facilities given (each a warehouse or plant of the

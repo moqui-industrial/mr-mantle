@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     FormPublication.js). An app makes and sends its invitations with its own services (Customer Service:
     mantle.request.CaseFeedbackServices); these are the parts every app shares. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="guard" noun="FormResponse" authenticate="anonymous-all" allow-remote="false">
         <description>Refuses (RESPONSE_LOCKED) when the response answers a FormInvitation, which keeps it as submitted; the
             FormPublication.eecas.xml rules run the same check before every write of a response and its answers, so

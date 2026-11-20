@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     (SUPPLIER_TERMS_EDIT) and buying fields (SUPPLIER_PROFILE_EDIT), a new supplier, its buyer and category
     (SupplierProfile.js), and a supplier's finance with the organization. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="store" noun="SupplierProfile" allow-remote="false">
         <description>Change an organization's profile of a supplier: the row in effect ends at fromDate (now by default) and
             the next starts there with the fields given and the others carried over; nothing changes when nothing differs.

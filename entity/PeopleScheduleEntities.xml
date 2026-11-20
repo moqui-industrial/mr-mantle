@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     mantle.humanres.ScheduleServices.assign#Schedule), and mantle.work.ResourceServices.get#PartyCapacity reads it before the
     WetAvailable and timesheet policy fallback. Written only by ScheduleServices (Schedules.js); rows are ended, never
     deleted. P14: an employment's dated shifts (ShiftAssignment), the roster's explicit overrides of the schedule on their days. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="WorkingSchedule" package="mantle.humanres.schedule" cache="never">
         <description>A working week of an employer: its name, time zone (the zone its intervals are local times of and its days are
             attributed in), its holiday calendar and its dates (in use from fromDate, ended at thruDate, never deleted). A copy is a

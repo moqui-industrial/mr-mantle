@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
     mantle.request.SupportCaseServices (save#CaseTemplate, save#CaseTemplateField, save#CaseTemplateCondition,
     end#CaseTemplatePart; CaseTemplates.js). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <!-- the organization whose case template a DbForm is, as RequestCategory's owner (F6) -->
     <extend-entity entity-name="DbForm" package="moqui.screen.form">
         <field name="ownerPartyId" type="id" enable-audit-log="true"><description>The organization whose case template this

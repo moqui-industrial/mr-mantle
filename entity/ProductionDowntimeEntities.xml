@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     only by mantle.work.ProductionServices.store#ProductionDowntime and request#ProductionMaintenance
     (ProductionDowntime.js). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="ProductionDowntime" package="mantle.work.production" cache="never">
         <description>A stop of a work center (facilityId) of an organization, from fromDate to thruDate (open while empty):
             no material, no operator, waiting for quality, a changeover or an equipment fault are reasons on the same interval

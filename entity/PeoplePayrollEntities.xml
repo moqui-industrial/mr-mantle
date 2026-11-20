@@ -30,7 +30,7 @@ along with this software (see the LICENSE.md file). If not, see
     calls of Nov 12, 2026, impl-people §4); the formulas are checked and computed by the framework's org.moqui.impl.ExpressionServices, never by a script. Published
     terms and lines are ended, never changed or deleted. Nothing here is the legacy payroll (PayrollAdjustment and its rows), which
     no People service reads (design §8.4). -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="PayrollComponent" package="mantle.humanres.payroll" cache="never">
         <description>An employer's pay component: a stable code (a formula's name for its result, unique in the employer), a name,
             and its kind, an earning, a deduction, an employer contribution or a statistical value (which enters no total and posts

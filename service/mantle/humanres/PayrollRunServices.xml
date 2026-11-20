@@ -22,7 +22,7 @@ along with this software (see the LICENSE.md file). If not, see
     off-cycle runs (the period's approved adjustments no run took) and correction runs (create#Correction: a slip's employment
     recalculated, its change paid on a new slip linked to the original, which stays); an approved run's calculated employments
     become payslips (PayrollResults.js: preview slips in preview mode), withdrawn when its approval is taken back. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="check" noun="RunRecordVisible" allow-remote="false">
         <description>Whether the user sees a pay run as a record (its card and panels; the RecordLinkType visibility service,
             SEC-BOS-87): a payroll reader (PAYROLL_VIEW) of its employer in People's scope alone.</description>

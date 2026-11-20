@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     (SUPPLIER_PROFILE_EDIT). Each checks its permission and that the organization is one of the user's.
     SupplierScorecards.js. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="ScorecardPolicy" allow-remote="false">
         <description>An organization's scorecard basis in effect (period days, minimum sample, due-date basis, each with its
             built-in default), each measure's weight, target and floor with its source, the response rules in effect and

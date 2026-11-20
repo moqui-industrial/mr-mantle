@@ -12,7 +12,7 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <!-- PayTrace on its JSON API v3 (https://api.paytrace.com/v3/redoc, OpenAPI 3.5.1), ported from the Java Moqui
         mantle-paytrace component (github.com/moqui/mantle-paytrace 1.0.3, commit 5dbe616, on API v1). Configuration: a
         PaymentGatewayConfig of type PgtPayTrace naming these services, its PaymentGatewayPayTrace options (merchant id,

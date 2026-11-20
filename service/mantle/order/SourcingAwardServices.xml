@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     record: an award places the quote order ("Place from Quote") with its RequirementSupply links, and the quotes left are
     cancelled as Not awarded ("Cancel Quote"). Every verb checks its permission (PURCHASE_ORDER_EDIT; the comparison also a
     purchase approver; the award's decision PURCHASE_APPROVE) and the RFQ's organization. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="compare" noun="SupplierQuotes" allow-remote="false">
         <description>An RFQ's quotes compared per demand line (its items, or the one chosen): each offer (a quote line linked to
             the item, or another line of the quote of a pack or declared substitute of its product) in the item's unit through

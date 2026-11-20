@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     visibility, protected flag and named assignee (ChecklistStep, copied to each task made from it), and each execution's
     employment and change (EmploymentChecklist). A separation's equipment return tasks are People's too (ChecklistStep with the
     equipment return link). mantle.humanres.PeopleServices (Checklists.js) reads and writes them. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="ChecklistTemplate" package="mantle.humanres.checklist" cache="never">
         <description>A lifecycle checklist template: the template root WorkEffort (isTemplate Y, purpose WepPrOrgMgmt), the employer
             whose hires, transfers or separations start it, its lifecycle kind and its dates (in use from fromDate, ended at

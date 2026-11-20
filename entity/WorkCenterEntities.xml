@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <!-- Manufacturing's production resources (design-manufacturing §12 M5, crosscut CX-WORKCENTER): the WorkCenter extension
         of a Facility and its dated rates (Products P8), capacities and alternates (Manufacturing P3). Facility.capacity stays
         the facility's people capacity; production throughput is WorkCenterCapacity. Written through

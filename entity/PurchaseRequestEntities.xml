@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     revision is the time of the last change to them and a decision made before it is refused
     (mantle.request.RequestServices, PurchaseRequests.js). The request's organization is its OrgInternal RequestParty. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <extend-entity entity-name="RequestItem" package="mantle.request">
         <field name="productId" type="id" enable-audit-log="true"/>
         <field name="quantity" type="number-decimal" enable-audit-log="true"/>

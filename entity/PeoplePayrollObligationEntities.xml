@@ -23,7 +23,7 @@ along with this software (see the LICENSE.md file). If not, see
     (AC-23, mantle/account/PayrollOrigin.js), which keeps the invoices an obligation made, their payments and their ledger lines to
     holders of PAYROLL_VIEW. An obligation is no balance of its own: what is posted, approved, paid and returned is the invoice's
     and its payments', read from Accounting. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <entity entity-name="PayrollObligation" package="mantle.humanres.payroll" cache="never">
         <description>A finalized pay run's obligation: its unique key (NET and the payslip, PAYEE with the run and the payee, CLAIM
             and the claim's invoice, RECEIVABLE and the correction slip), so a retried finalization finds it and makes nothing again;

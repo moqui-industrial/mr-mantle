@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     statusId, estimatedPoints, estimatedWorkTime and remainingWorkTime: a value at a time is the last one logged by then, else
     the first logged after it (its old value, else its new one), else the item's value now. Done is Complete or Closed;
     a cancelled item is left nothing to do but is not counted as completed. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="get" noun="SprintBurndown">
         <description>

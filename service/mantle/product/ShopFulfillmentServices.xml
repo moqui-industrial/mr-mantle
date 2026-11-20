@@ -5,7 +5,7 @@
     pass.Facade.call#Operation, each taking PASS's restricted input map: the site the facade resolved, the guest's order link
     as orderToken or the signed-in buyer, and the grant), and Mantle's own fulfillment, notice, job and refund services over
     ShopFulfillment.js. -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="get" noun="Downloads" authenticate="anonymous-all" allow-remote="false">
         <description>getDownloads (DownloadList): the download grants the guest's order link (its SalesOrder capability with the Download scope: its one order) or the signed-in verified buyer (the self relationship: their own in this store) reaches, each with its product, order, file, version, size, dates and whether it can be downloaded now; never a location. Refuses a visitor with neither (SIGN_IN_REQUIRED) and another store's or another order's link (NOT_AVAILABLE).</description>
         <in-parameters>

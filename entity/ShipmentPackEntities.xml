@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     mantle.work.ManufacturingServices.produce#AvailableAssemblies, and what a box type needs beyond Mantle's: a retire date
     (a used type is retired, never removed from the packages it is on) and the most weight it carries. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
         <field name="kitCostFromComponents" type="text-indicator" default="'N'" enable-audit-log="update">
             <description>Y: a pick-assembly kit made at pack (produce#AvailableAssemblies, for every caller) is received

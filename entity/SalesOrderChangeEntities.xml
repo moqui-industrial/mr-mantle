@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     (mantle.order.OrderChangeServices over OrderChanges.js and SalesOrderChanges.js). An address, ship method or carrier change
     applies to one part of the order, named on the proposal, so it never reaches a part the proposal did not show; the field is
     audit-logged and so counts in the proposal's revision. No change or application record of Sales' own. -->
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <extend-entity entity-name="Request" package="mantle.request">
         <field name="orderPartSeqId" type="id" enable-audit-log="true"><description>An order change of an address, ship method or
             carrier (OckAddress, OckShipMethod, OckCarrier): the part of the order it changes; empty on another kind (its lines

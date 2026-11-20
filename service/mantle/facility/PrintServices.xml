@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     and a facility's printer bindings (copies, fromDate, thruDate). The rules are Printing.js's. PDF only; ZPL is later
     (impl-warehouse §4). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="dispatch" noun="Document" allow-remote="false" transaction="ignore">
         <description>Print a document at a facility: a shipment's package labels (documentType shipmentLabel or returnLabel,
             the PDF the gateway gave) or a screen (documentType screen, rendered as PDF by print#ScreenDocument), on the

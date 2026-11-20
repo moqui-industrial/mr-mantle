@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     and what it claims is written to the order through Mantle's own services (store#SupplierQuote and
     store#SupplierQuoteItem, record#Acknowledgement), or kept as the order's content (a drop-ship delivery report). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <extend-entity entity-name="ExternalAccessCapability" package="mantle.party">
         <!-- the record's revision the capability was issued for: a purchase order's orderRevision (send#PurchaseOrder); empty
             for a link of no revision -->

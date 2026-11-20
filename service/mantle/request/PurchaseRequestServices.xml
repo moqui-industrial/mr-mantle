@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     (the filer, or one of its people), a buyer (PURCHASE_ORDER_EDIT) on any of the organization's. Its revision is the time of
     the last change to a line's audit-logged product, quantity, unit, required date, supplier or cost centre.
     mantle.order.OrderServices.create#PurchaseRequestOrder stays as it is for its Mantle callers (F4). -->
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="create" noun="PurchaseRequest" allow-remote="false">
         <description>A draft purchase request (RqtPurchase) of one of the user's organizations, filed by the user: the
             organization as its OrgInternal RequestParty, the purpose (requestCategoryId), project (rootWorkEffortId),
