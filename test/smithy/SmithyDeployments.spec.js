@@ -1,8 +1,9 @@
 // Smithy's deploy environments and deployments (mr-pass plan/design-smithy.md "Deploy environments (DG10)", §11
 // Pipelines; SmithyPipelines.js findCiEnvironments, storeCiEnvironment, findDeployments, getDeployment, requestDeploy,
 // decideDeploy, cancelDeploy, deploymentNotice) over the framework's engine (org.moqui.git.GitCiServices,
-// docs/interfaces/Pipelines.md "Deployments"), called as the caller: an environment is a Maintainer's, its token
-// write-only (hasToken) and in no receipt; a Developer asks for a deployment, a Reporter is refused; a Maintainer
+// docs/interfaces/Pipelines.md "Deployments"), called as the caller: an environment is a Maintainer's, its target's
+// token an item of an operational vault the Maintainer is a member of (vaultId; Smithy takes no token, and hasToken says
+// the vault holds it); a Developer asks for a deployment, a Reporter is refused; a Maintainer
 // decides, never the one who asked; a Developer cancels their own, a Maintainer any; a hidden repository's deployments
 // are Not Found; with no approver group, a deployment waiting for approval is told to the Maintainers and Owners. The
 // engine runs the environment's pipeline on a fake host, where nothing runs: the run's success is played by moving the
@@ -14,6 +15,8 @@ const SITE = "SDP_SITE"
 const HOST = "sdp.smithy.test"
 const CI = "org.moqui.git.GitCiServices."
 const TOKEN = "sdp-target-token-0123456789abcdefghij"
+const VAULT = "SDP_VAULT"
+const OTHER_VAULT = "SDP_OTHER_VAULT"
 const ids = {}
 /* An operation in a transaction of its own, as each request is: the engine moves a deployment by a conditional
    statement, which a transaction held across operations (the feature's) would not read back. */
@@ -90,8 +93,31 @@ spec({
         })
         ids.head = lib.commit(ids.repositoryId, "Start", {"README.md": "# Code\n", "ci.xml": CI_XML})
         lib.settle(ids.repositoryId)
+        // the operational vault of the target's token, SDP_MAINT a member of it, and another vault nobody here is in (a
+        // vault's own rules are the framework's: its rows only, as a member's client would leave them)
+        for (const vaultId of [VAULT, OTHER_VAULT])
+            if (!lib.row("moqui.security.vault.Vault", {vaultId}))
+                lib.make("moqui.security.vault.Vault", {
+                    vaultId,
+                    vaultKindEnumId: "VkOperational",
+                    lockEnumId: "VlSharedKey",
+                    ownerUserId: vaultId === VAULT ? "SDP_MAINT" : "SDP_OWNER",
+                    keyVersion: 1,
+                    revision: 1,
+                    vaultName: vaultId
+                })
+        if (!lib.row("moqui.security.vault.VaultMember", {vaultId: VAULT, userId: "SDP_MAINT", keyVersion: 1}))
+            lib.make("moqui.security.vault.VaultMember", {
+                vaultId: VAULT,
+                userId: "SDP_MAINT",
+                keyVersion: 1,
+                roleEnumId: "VrManage",
+                fromDate: ec.user.nowTimestamp
+            })
     },
     cleanupSpec() {
+        if (lib.row("moqui.security.vault.VaultItem", {vaultItemId: "SDP_TOKEN_ITEM"}))
+            lib.run("delete#moqui.security.vault.VaultItem", {vaultItemId: "SDP_TOKEN_ITEM"})
         // the engine off again for the specs after this one, and nothing of this spec's left running
         if (lib.row("moqui.resource.GitRunnerPool", {runnerPoolId: "SDP_TRUSTED"}))
             lib.run(CI + "store#RunnerPool", {runnerPoolId: "SDP_TRUSTED", enabled: false})
@@ -111,12 +137,12 @@ spec({
     }
 })
 
-feature("an environment is a Maintainer's: its token is write-only, in no list and no receipt", {
+feature("an environment is a Maintainer's: its token is an item of a vault the Maintainer is in, never a parameter, in no list or receipt", {
     when() {
         const input = {
             name: "demo",
             targetUrl: "https://deploy.sdp.example.com",
-            token: TOKEN,
+            vaultId: VAULT,
             requiredPipeline: "deploy",
             dataTypes: "seed, seed-initial",
             approvalRequired: "Y",
@@ -126,6 +152,20 @@ feature("an environment is a Maintainer's: its token is write-only, in no list a
         const developer = op("SDP_DEV", "storeCiEnvironment", {...input, operationId: "sdp-env-dev"})
         const stored = op("SDP_MAINT", "storeCiEnvironment", input)
         ids.environmentId = stored.environmentId
+        // the token, made in the vault by a member's client: the item bound to the environment
+        if (lib.row("moqui.security.vault.VaultItem", {vaultItemId: "SDP_TOKEN_ITEM"}))
+            lib.run("delete#moqui.security.vault.VaultItem", {vaultItemId: "SDP_TOKEN_ITEM"})
+        lib.make("moqui.security.vault.VaultItem", {
+            vaultItemId: "SDP_TOKEN_ITEM",
+            vaultId: VAULT,
+            keyVersion: 1,
+            revision: 1,
+            vaultItemTypeId: "api-key",
+            bindingKey: "GitCiEnvironment:" + stored.environmentId + ":targetToken",
+            itemName: "demo target token",
+            bodyCipher: "sealed",
+            createdDate: ec.user.nowTimestamp
+        })
         const withUser = op("SDP_MAINT", "storeCiEnvironment", {
             environmentId: stored.environmentId,
             cloneUrl: "https://someone:secret@git.example.com/a.git"
@@ -144,11 +184,11 @@ feature("an environment is a Maintainer's: its token is write-only, in no list a
             action: "smithy.storeCiEnvironment"
         })
         const listed = op("SDP_DEV", "findCiEnvironments")
-        // a token under 32 characters, and an environment without approval: only unprotected branches wait
-        const shortToken = op("SDP_MAINT", "storeCiEnvironment", {
-            environmentId: stored.environmentId,
-            token: "short-token-0123456789"
-        })
+        // a token is never a parameter; a vault the Maintainer is not a member of, or none of that id, is refused alike;
+        // and an environment without approval: only unprotected branches wait
+        const withToken = op("SDP_MAINT", "storeCiEnvironment", {environmentId: stored.environmentId, token: TOKEN})
+        const otherVault = op("SDP_MAINT", "storeCiEnvironment", {environmentId: stored.environmentId, vaultId: OTHER_VAULT})
+        const noVault = op("SDP_MAINT", "storeCiEnvironment", {environmentId: stored.environmentId, vaultId: "SDP_NO_VAULT"})
         const manyTypes = op("SDP_MAINT", "storeCiEnvironment", {
             environmentId: stored.environmentId,
             dataTypes: Array.from({length: 21}, (_, k) => "type" + k).join(",")
@@ -158,7 +198,9 @@ feature("an environment is a Maintainer's: its token is write-only, in no list a
         const byMaintainer = op("SDP_MAINT", "findCiEnvironments").environmentList
         op("SDP_MAINT", "deleteCiEnvironment", {environmentId: unapproved.environmentId})
         return {
-            shortToken,
+            withToken,
+            otherVault,
+            noVault,
             manyTypes,
             badType,
             byMaintainer,
@@ -185,19 +227,27 @@ feature("an environment is a Maintainer's: its token is write-only, in no list a
         listed,
         listedText,
         reporter,
-        shortToken,
+        withToken,
+        otherVault,
+        noVault,
         manyTypes,
         badType,
         byMaintainer
     }) {
-        shortToken.kind == "Unprocessable"
+        // no operation takes a token
+        withToken.kind == "Unprocessable"
+        withToken.message == "Unsupported request field: token"
         // Smithy's own refusals, by their field, before the engine's
-        shortToken.message.startsWith("token:")
+        otherVault.kind == "Unprocessable"
+        otherVault.message.startsWith("vaultId:")
+        noVault.message == otherVault.message
         manyTypes.message.startsWith("dataTypes must be")
         badType.message.startsWith("dataTypes must be")
         // the target's address is the engine's to give: a Maintainer's, not a Developer's
         listed.environmentList[0].targetUrl == null
+        listed.environmentList[0].vaultId == null
         byMaintainer.find(env => env.name == "demo").targetUrl == "https://deploy.sdp.example.com"
+        byMaintainer.find(env => env.name == "demo").vaultId == VAULT
         listed.environmentList[0].dataTypes == ["seed", "seed-initial"]
         listed.environmentList[0].approvalFor == "every"
         byMaintainer.find(env => env.name == "preview").approvalFor == "unprotected"

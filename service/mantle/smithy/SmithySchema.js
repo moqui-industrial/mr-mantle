@@ -558,7 +558,7 @@
             "allowedRefs",
             "approvalRequired",
             "targetUrl",
-            "token",
+            "vaultId",
             "cloneUrl",
             "requiredPipeline",
             "dataTypes",
