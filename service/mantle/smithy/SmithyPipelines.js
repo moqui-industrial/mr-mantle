@@ -978,8 +978,9 @@ kit => {
             environmentList: Array.from(out.environmentList || []).map(env => ({
                 environmentId: env.environmentId,
                 name: env.name,
-                // a target's addresses are the engine's to give: a Maintainer's
+                // a target's addresses are the engine's to give: a Maintainer's, as is the vault of its token
                 targetUrl: env.targetUrl || null,
+                vaultId: r.rank >= RANK.SmrMaintainer ? env.vaultId || null : null,
                 cloneUrl: env.cloneUrl || null,
                 requiredPipeline: env.requiredPipeline || null,
                 approvalRequired: flag(env.approvalRequired),
@@ -1022,12 +1023,14 @@ kit => {
         // environment's secrets to any branch a Developer pushes
         if (allowedRefs && allowedRefs.split(" ").some(ref => /^[*\/]*$/.test(ref.replace(/^refs\/(?:heads\/|tags\/)?/, ""))))
             invalid("allowedRefs must name branches or tags: a pattern of only wildcards takes every one")
-        // the deployment fields (DG10): an empty value clears one, a left-out one stays; the token is write-only, and
-        // left out or empty it stays while the target does. The engine's store#CiEnvironment clears what a change would
-        // hand to a wider audience: the values of the environment's secrets when allowedRefs widens or approvalRequired
-        // goes from Y to N, and the target's token when targetUrl changes without a new one (SEC-GIT-91); it says so as
-        // its cleared, which the save returns for Smithy's notice. Smithy has no approver groups: an approval is any
-        // Maintainer's but the requester's, so approverGroupId is always cleared
+        // the deployment fields (DG10): an empty value clears one, a left-out one stays. The target's token is no field
+        // of the environment: it is an item of an operational vault (vaultId), bound to
+        // GitCiEnvironment:<environmentId>:targetToken, which a member of the vault makes in their client and a
+        // deployment reads under its lease (plans/Vault-Instances.md §4.6); no operation takes a token (SmithySchema.js
+        // refuses the field). The engine's store#CiEnvironment clears what a change would hand to a wider audience: the
+        // values of the environment's secrets when allowedRefs widens or approvalRequired goes from Y to N (SEC-GIT-91);
+        // it says so as its cleared, which the save returns for Smithy's notice. Smithy has no approver groups: an
+        // approval is any Maintainer's but the requester's, so approverGroupId is always cleared
         if (given(p.approverGroupId) && p.approverGroupId !== "")
             invalid("approverGroupId: Smithy has no approver groups; a Maintainer other than the requester approves")
         const cleared = value => (value === "" ? null : text(value).trim())
@@ -1049,8 +1052,25 @@ kit => {
             invalid("targetUrl: An address with no user or password in it")
         if (deployFields.cloneUrl && withUserInfo(deployFields.cloneUrl))
             invalid("cloneUrl: An address with no user or password in it")
-        const token = given(p.token) && p.token !== "" ? String(p.token) : null
-        if (token != null && token.length < 32) invalid("token: The target's token is at least 32 characters")
+        // the vault of the target's token: an operational vault the Maintainer is a member of, else the same refusal as
+        // for none, so no other vault is named or confirmed
+        if (given(p.vaultId) && p.vaultId !== "") {
+            const vaultId = text(p.vaultId).trim()
+            const vault = /^[A-Za-z0-9._-]{1,64}$/.test(vaultId)
+                ? ec.entity.find("moqui.security.vault.Vault").condition("vaultId", vaultId).disableAuthz().one()
+                : null
+            const member =
+                vault?.vaultKindEnumId === "VkOperational" &&
+                !!ec.user.userId &&
+                ec.entity
+                    .find("moqui.security.vault.VaultMember")
+                    .condition({vaultId, userId: ec.user.userId})
+                    .conditionDate("fromDate", "thruDate", null)
+                    .disableAuthz()
+                    .count() > 0
+            if (!member) invalid("vaultId: No operational vault of that id that you are a member of")
+            deployFields.vaultId = vaultId
+        } else if (given(p.vaultId)) deployFields.vaultId = null
         const store = () => {
             const out = asCallerMove("store#CiEnvironment", {
                 repositoryId,
@@ -1058,8 +1078,7 @@ kit => {
                 name,
                 ...(allowedRefs !== undefined ? {allowedRefs: allowedRefs || null} : {}),
                 ...(given(p.approvalRequired) && p.approvalRequired !== "" ? {approvalRequired: flag(p.approvalRequired)} : {}),
-                ...deployFields,
-                ...(token != null ? {token} : {})
+                ...deployFields
             })
             kit.maintainerAudit(p, "storeCiEnvironment", name)
             return out
@@ -1069,8 +1088,7 @@ kit => {
             const out = store() || {}
             return {environmentId: editing.environmentId, cleared: out.cleared || null}
         }
-        // the receipt keeps no trace of the token
-        return receipt({...p, token: null}, "smithy.storeCiEnvironment", () => ({environmentId: store().environmentId || null}))
+        return receipt(p, "smithy.storeCiEnvironment", () => ({environmentId: store().environmentId || null}))
     }
     methods.deleteCiEnvironment = p => {
         const r = maintainer(p)
