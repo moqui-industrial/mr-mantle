@@ -272,6 +272,8 @@ const REASONS = [
     'numbersTaken',
     // Smithy F6: a push mirror's new address, username or host key without its secret again
     'secretRequired',
+    // Smithy: a deployment's lease is opened by an approver of its environment's vault
+    'vaultApproverRequired',
 ]
 const CODED = /^([A-Z][A-Z0-9_]+|[a-z][a-zA-Z0-9]+)(?:\[([A-Za-z][A-Za-z0-9_.]{0,63})\])?: ([^]*)$/
 /* Text a framework failure carries rather than a refusal a service wrote: a database or script error, a qualified entity or

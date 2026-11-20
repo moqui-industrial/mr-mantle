@@ -4,7 +4,8 @@
 // docs/interfaces/Pipelines.md "Deployments"), called as the caller: an environment is a Maintainer's, its target's
 // token an item of an operational vault the Maintainer is a member of (vaultId; Smithy takes no token, and hasToken says
 // the vault holds it); a Developer asks for a deployment, a Reporter is refused; a Maintainer
-// decides, never the one who asked; a Developer cancels their own, a Maintainer any; a hidden repository's deployments
+// decides, never the one who asked, and a deployment with a lease is approved in the framework's lease dialog by an
+// approver of the vault (another Maintainer is told who); a Developer cancels their own, a Maintainer any; a hidden repository's deployments
 // are Not Found; with no approver group, a deployment waiting for approval is told to the Maintainers and Owners. The
 // engine runs the environment's pipeline on a fake host, where nothing runs: the run's success is played by moving the
 // deployment to waiting-approval as the engine does when its run passes, so the states are checked up to the decision,
@@ -522,6 +523,68 @@ feature(
         }
     }
 )
+
+feature("a deployment with a lease is approved in the lease dialog by an approver of the vault; another Maintainer is told who", {
+    when() {
+        // a deployment whose run passed (played), with the lease of its target's token as the engine asks for it; the
+        // vault's approvers: SDP_OWNER, and SDP_DEV, who asked for it and so does not approve it (SDP_MAINT manages the vault)
+        const deploymentId = op("SDP_DEV", "requestDeploy", {environment: "demo", operationId: "sdp-deploy-lease"}).deploymentId
+        passed(deploymentId)
+        const lease = {
+            vaultId: VAULT,
+            keyVersion: 1,
+            statusId: "VlsRequested",
+            approvedByUserId: null,
+            requestedDate: ec.user.nowTimestamp
+        }
+        if (lib.row("moqui.security.vault.VaultLease", {leaseId: "SDP_LEASE"}))
+            lib.set("moqui.security.vault.VaultLease", {leaseId: "SDP_LEASE"}, lease)
+        else lib.make("moqui.security.vault.VaultLease", {leaseId: "SDP_LEASE", ...lease})
+        lib.set("moqui.resource.GitDeployment", {deploymentId}, {leaseId: "SDP_LEASE"})
+        for (const userId of ["SDP_OWNER", "SDP_DEV"])
+            if (!lib.row("moqui.security.vault.VaultMember", {vaultId: VAULT, userId, keyVersion: 1}))
+                lib.make("moqui.security.vault.VaultMember", {
+                    vaultId: VAULT,
+                    userId,
+                    keyVersion: 1,
+                    roleEnumId: "VrApprove",
+                    fromDate: ec.user.nowTimestamp
+                })
+        const read = username => op(username, "getDeployment", {deploymentId}).lease
+        const approve = username => op(username, "decideDeploy", {deploymentId, decision: "approve"})
+        const waiting = {developer: read("SDP_DEV"), owner: read("SDP_OWNER")}
+        const notApprover = approve("SDP_MAINT")
+        const approver = approve("SDP_OWNER")
+        const row = deploymentRow(deploymentId)
+        // approved in the dialog (as approve#VaultLease leaves it): the page says so
+        lib.set("moqui.security.vault.VaultLease", {leaseId: "SDP_LEASE"}, {statusId: "VlsOpen", approvedByUserId: "SDP_OWNER"})
+        const open = read("SDP_DEV")
+        lib.set("moqui.security.vault.VaultLease", {leaseId: "SDP_LEASE"}, {statusId: "VlsEnded"})
+        const ended = approve("SDP_OWNER")
+        op("SDP_OWNER", "cancelDeploy", {deploymentId})
+        return {waiting, notApprover, approver, row, open, ended}
+    },
+    then({waiting, notApprover, approver, row, open, ended}) {
+        waiting.developer.leaseId == "SDP_LEASE"
+        waiting.developer.state == "waiting"
+        waiting.developer.approvers.join() == "sdpowner"
+        waiting.developer.canApprove == false
+        waiting.owner.canApprove == true
+        notApprover.kind == "Conflict"
+        notApprover.reason == "vaultApproverRequired"
+        notApprover.message.includes("@sdpowner")
+        !notApprover.message.includes("@sdpdev")
+        approver.state == "waiting-approval"
+        approver.leaseId == "SDP_LEASE"
+        // nothing is decided until the lease is opened
+        row.statusId == "waiting-approval"
+        row.approvedByUserId == null
+        open.state == "open"
+        open.approvedBy == "sdpowner"
+        ended.kind == "Conflict"
+        ended.message.includes("has ended")
+    }
+})
 
 feature("another repository's deployment and environment are Not Found through this one", {
     when() {
