@@ -15,7 +15,7 @@ along with this software (see the LICENSE.md file). If not, see
 <entity-facade-xml type="seed">
     <!-- Maintenance procedures (IronStone Maintenance design §4.1, §4.2, §12; impl-maintenance P6): the template status flow and
         the WorkProcessApproval topic. A procedure is a template root (isTemplate Y, WetTask, WepMaintenance) with its steps and a
-        WorkEffortProcessPolicy of WppMaintenanceProcedure that guards execution (entity/WorkProcessEntities.xml), changed only
+        WorkEffortProcessPolicy of WppMaintenanceProcedure that guards execution (entity/work/EffortEntities.xml), changed only
         through mantle.work.ProcessServices (MaintenanceProcedures.js). -->
 
     <!-- The template's states: Draft (WeInPlanning), Approved (WeApproved), Retired (WeClosed). The framework admits a move any

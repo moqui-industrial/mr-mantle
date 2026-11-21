@@ -4,7 +4,7 @@
 // SelfService's Clock, PE-05, PE-19; impl-people P13). Every service checks the caller's People scope first (People.js scopeOf) and
 // reads and writes with authorization off after it.
 //
-// Attendance is evidence of presence, apart from work allocation and payable time (PeopleAttendanceEntities.xml):
+// Attendance is evidence of presence, apart from work allocation and payable time (entity/humanres/AttendanceEntities.xml):
 // - a punch is a raw event of an employment, in or out at an instant, with its source and the source's own key; its unique
 //   source key records it once, and it is never changed or deleted;
 // - the day a punch counts on is the employment's day in the zone of its working schedule (the primary assignment's, else the

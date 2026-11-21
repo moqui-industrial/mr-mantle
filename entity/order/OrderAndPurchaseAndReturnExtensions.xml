@@ -1,0 +1,402 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <extend-entity entity-name="OrderItem" package="mantle.order">
+        <field name="costCenterId" type="id" enable-audit-log="update"/>
+    </extend-entity>
+
+<!-- Cart recovery (impl-commerce P10; design-commerce §6 CartDetail, §8 RecoveryPolicy; service/mantle/order/CartRecovery.js):
+    a recovery link's one-time token is the cart access row's recoveryTokenDigest (Shop P4 kept the field for it), with the
+    date it stops working; the sends are deliveries on the Comms ledger (MessageDelivery, source MdsrcCartRecovery), and the
+    policy is dated ProductStoreSetting rows. No record of its own. -->
+  <extend-entity entity-name="StoreCartAccess" package="mantle.order">
+    <field name="recoveryExpireDate" type="date-time"><description>When the recovery link's token stops working (the end of
+      the store's recovery window); a spent, expired or replaced token reaches nothing.</description></field>
+    <field name="recoveryHandledDate" type="date-time"><description>The shopper activity (lastActivityDate) whose recovery the
+      job handled (queued, already sent or at the store's most sends; impl-commerce F133), so later runs skip the cart until
+      the shopper is active again, which clears it.</description></field>
+  </extend-entity>
+
+    <extend-entity entity-name="OrderItem" package="mantle.order">
+        <field name="salesOrderId" type="id"><description>On a drop-ship purchase order line, the customer order whose line
+            it ships (the order's parentOrderId).</description></field>
+        <field name="salesOrderItemSeqId" type="id"><description>On a drop-ship purchase order line, the customer order
+            line it ships.</description></field>
+        <relationship type="one-nofk" title="Sales" related="mantle.order.OrderItem" short-alias="salesItem">
+            <key-map field-name="salesOrderId" related="orderId"/>
+            <key-map field-name="salesOrderItemSeqId" related="orderItemSeqId"/></relationship>
+        <index name="ORDITM_SALES_ITEM"><index-field name="salesOrderId"/><index-field name="salesOrderItemSeqId"/></index>
+    </extend-entity>
+
+    <!-- ===== end of Marketing P20 ===== -->
+    <!-- ===== Marketing follow-up 4: a remote PASS checkout's visitor key (impl-marketing §4 Nov 15) ===== -->
+    <!-- The digest of the frontend's first-party visitor key a Shop checkout kept with its order (ShopCheckout.js freeze, cleared at
+        placement when no longer allowed), the same digest MarketingTrackingEvent.visitorKeyHash keeps, so record#OrderAttribution
+        finds the events of a visitor whose checkout went through a remote frontend (no local visit). Kept only where an event would
+        have kept the key (the seller's MarketingPolicy visitorKeys, or the customer allowing tracking with the seller), never for a
+        customer who withdrew tracking; the raw key is never stored. -->
+    <extend-entity entity-name="OrderHeader" package="mantle.order">
+        <field name="marketingVisitorKeyHash" type="text-medium"><description>The digest of the checkout's visitor key (Marketing
+            attribution)</description></field>
+    </extend-entity>
+
+    <!-- ===== end of Marketing follow-up 4 ===== -->
+    <extend-entity entity-name="OrderEmailMessage" package="mantle.order">
+        <field name="orderContentId" type="id">
+            <description>The stored document the message sent (a confirmation resend: the OctOrderConfirmation content); empty
+                for a message that carried none.</description></field>
+        <relationship type="one" related="mantle.order.OrderContent" short-alias="orderContent"/>
+    </extend-entity>
+
+    <!-- the key fields of a purchase order the audit log did not cover (F18, F36), logged on create and update ("update"
+        leaves out the first value set on an empty field, such as the first cancelled quantity), so the order as of a time
+        reads the first change after it -->
+    <extend-entity entity-name="OrderHeader" package="mantle.order">
+        <field name="orderRevision" type="number-integer" enable-audit-log="true"/>
+    </extend-entity>
+
+    <extend-entity entity-name="OrderItem" package="mantle.order">
+        <field name="itemDescription" type="text-medium" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"/>
+        <field name="quantityCancelled" type="number-decimal" enable-audit-log="true"/>
+    </extend-entity>
+
+<!-- Purchase order revisions and acknowledgements (design-purchasing §6 OrderChanges and Acknowledgements; impl-purchasing
+    P9, §2, §4, F17, F18, F36, F57): no revision or acknowledgement record. A revision is OrderHeader.orderRevision and its
+    time, with the changed key fields in the audit log; the supplier's acknowledgement is the part's supplier reference and
+    date, the revision it acknowledged and its outcome, and a promise per line, all audit-logged ("true": the first value set
+    on an empty field is the change that matters, F57), so each acknowledgement's history is the audit log and a print as of a
+    time reads the part's reference, dates and terms back. The buying policy's substitution rule (F49) and a reminder's
+    occurrence on the order's email (send#PurchaseReminder dedupes on revision, template and occurrence). -->
+    <extend-entity entity-name="OrderPart" package="mantle.order">
+        <!-- the supplier's reference and date, the delivery promise and the terms a revision changes (F36) -->
+        <field name="otherPartyOrderId" type="text-short" enable-audit-log="true"/>
+        <field name="otherPartyOrderDate" type="date-time" enable-audit-log="true"/>
+        <field name="estimatedDeliveryDate" type="date-time" enable-audit-log="true"/>
+        <field name="tradeTermEnumId" type="id" enable-audit-log="true"/>
+        <field name="settlementTermId" type="id" enable-audit-log="true">
+            <description>Settlement (payment) term for auto order payments and set on Invoice(s) based on this OrderPart</description></field>
+        <!-- the supplier's acknowledgement (mantle.order.OrderServices.record#Acknowledgement) -->
+        <field name="acknowledgedRevision" type="number-integer" enable-audit-log="true">
+            <description>The order revision the supplier acknowledged; the order is unacknowledged while it is not the
+                order's current revision.</description></field>
+        <field name="acknowledgementEnumId" type="id" enable-audit-log="true">
+            <description>The supplier's response to the acknowledged revision (PurchaseAcknowledgement): accepted, accepted
+                with changes for the buyer to review, or rejected.</description></field>
+        <field name="acknowledgedDate" type="date-time" enable-audit-log="true">
+            <description>When the acknowledgement was recorded.</description></field>
+        <field name="acknowledgementNote" type="text-medium" enable-audit-log="true">
+            <description>The supplier's exception or late reason, as entered.</description></field>
+        <relationship type="one" title="PurchaseAcknowledgement" related="moqui.basic.Enumeration"
+                short-alias="acknowledgement"><key-map field-name="acknowledgementEnumId" related="enumId"/></relationship>
+    </extend-entity>
+
+    <extend-entity entity-name="OrderItem" package="mantle.order">
+        <!-- the supplier's promise per line; the requested date stays requiredByDate, for on-time delivery -->
+        <field name="promisedDate" type="date-time" enable-audit-log="true"/>
+        <field name="promisedQuantity" type="number-decimal" enable-audit-log="true"/>
+    </extend-entity>
+
+    <extend-entity entity-name="OrderHeader" package="mantle.order">
+        <!-- a currency change on a part nothing was received or billed on (apply#PurchaseRevision), read back as of a time -->
+        <field name="currencyUomId" type="id" enable-audit-log="update"/>
+    </extend-entity>
+
+    <extend-entity entity-name="OrderHoldReason" package="mantle.order">
+        <field name="appliedRevision" type="number-integer">
+            <description>On a purchase revision's Change hold (sourceId the revision it started from): the revision
+                apply#PurchaseRevision wrote under it, waiting for its approval. Empty while the change is only started, so
+                a revision moved by something else (a note, a receipt's status) does not read as an applied change.</description></field>
+        <field name="changedByUserIds" type="text-long">
+            <description>On a purchase revision's Change hold: each user who applied a change under it, comma separated. None
+                of them approves the revision (decide#PurchaseApproval's self-approval rule, SEC-BAP-110).</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="OrderEmailMessage" package="mantle.order">
+        <field name="reminderOccurrence" type="text-short">
+            <description>A reminder's occurrence (send#PurchaseReminder, by default its day): a recipient gets one reminder
+                per revision, template and occurrence; empty for the order as sent.</description></field>
+    </extend-entity>
+
+    <!-- a Sales approval decision (design §5 the approval binding, §4 Nov 11): the native OrderDecision with the order revision it
+        binds (a decision at an earlier revision no longer counts; invalidatedDate records when a later revision superseded it), its
+        purpose, the rule (none for the unconfigured manual-price rule) and the time it was evaluated, its result (an approval asked,
+        approved or refused), who decided and why, and the operation key a retry answers by -->
+    <extend-entity entity-name="OrderDecision" package="mantle.order">
+        <field name="orderRevision" type="number-integer"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="decisionPurposeEnumId" type="id"/>
+        <field name="salesApprovalPolicyId" type="id"/>
+        <field name="ruleTypeEnumId" type="id"/>
+        <field name="evaluatedDate" type="date-time"/>
+        <field name="decisionResultEnumId" type="id"/>
+        <field name="decisionByUserId" type="id"/>
+        <field name="reasonText" type="text-medium"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one-nofk" related="mantle.sales.policy.SalesApprovalPolicy"/>
+        <relationship type="one-nofk" title="SalesApprovalPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="decisionPurposeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="SalesDecisionResult" related="moqui.basic.Enumeration" short-alias="result">
+            <key-map field-name="decisionResultEnumId" related="enumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Sales decision result" enumTypeId="SalesDecisionResult"/>
+            <moqui.basic.Enumeration enumId="SdrRequested" description="Approval asked" sequenceNum="1" enumTypeId="SalesDecisionResult"/>
+            <moqui.basic.Enumeration enumId="SdrApproved" description="Approved" sequenceNum="2" enumTypeId="SalesDecisionResult"/>
+            <moqui.basic.Enumeration enumId="SdrRefused" description="Refused" sequenceNum="3" enumTypeId="SalesDecisionResult"/>
+        </seed-data>
+    </extend-entity>
+
+<!-- Sales' quote drafts (IronStone Sales design §5 Quotes and OrderDetail's quote context, §17 SAL-QUOTE; impl-sales P7, F7):
+    a quote is the native OrderHeader, OrderPart and OrderItem, marked by its order purpose. Sales seeds the purpose values beside
+    Shop's RecurringTemplate (entity/product/MaintenanceAndSubscriptionEntities.xml): SalesQuote for an order that starts as an offer, SalesOrder for one
+    entered directly; status, not purpose, says whether it was placed. A quote line keeps the price the one resolver selected
+    (productPriceId, priceListId, priceRuleId, unitListPrice and calculatedUnitAmount with its priceSource) and, when the rep
+    enters another price or a free line, the entered value (unitAmount), the reason and the actor (mantle.order.SalesQuoteServices
+    over service/mantle/order/SalesQuotes.js). -->
+    <extend-entity entity-name="OrderHeader" package="mantle.order">
+        <seed-data>
+            <!-- Declare Shop's recurring template type before the order seed that references it. -->
+            <moqui.basic.EnumerationType description="Order purpose" enumTypeId="OrderPurpose"/>
+            <moqui.basic.Enumeration enumId="OrpSalesQuote" description="Sales quote" sequenceNum="1" enumTypeId="OrderPurpose"/>
+            <moqui.basic.Enumeration enumId="OrpSalesOrder" description="Sales order" sequenceNum="2" enumTypeId="OrderPurpose"/>
+        </seed-data>
+    </extend-entity>
+
+    <!-- a quote line's price provenance and override basis (design §5: a manual price or discount keeps the calculated basis, the
+        entered value, reason and actor), the basis audit-logged with the native unitAmount and price ids -->
+    <extend-entity entity-name="OrderItem" package="mantle.order">
+        <field name="calculatedUnitAmount" type="currency-precise" enable-audit-log="true"><description>The unit price the one
+            price resolver selected for the line when it was priced (the basis a manual price or free line overrides); empty when
+            no price was available.</description></field>
+        <field name="priceSource" type="text-short"><description>Where the line's unit price came from: product-price,
+            price-list or list-price-fallback (the resolver's), manual (the rep's entered price) or free (an authorized free
+            line).</description></field>
+        <field name="priceOverrideReason" type="text-medium" enable-audit-log="update"><description>Why the entered price or
+            free line replaces the calculated one.</description></field>
+        <field name="priceOverrideUserId" type="id" enable-audit-log="update"><description>Who entered the price or free line.</description></field>
+        <field name="priceOverrideDate" type="date-time"><description>When the price or free line was entered.</description></field>
+    </extend-entity>
+
+<!-- Sales' quote templates (IronStone Sales design §5 QuoteTemplates and QuoteTemplateDetail, §17 SAL-TEMPLATE; impl-sales P12, §4
+    Nov 11, 2026): a template is the native OrderHeader, OrderPart and OrderItem of purpose SalesQuoteTemplate, never placed and
+    never leaving Open (OrderServices.update#OrderStatus refuses it any other status), with no SalesQuoteTemplate table. Its one part
+    names the selling organization and no customer; the part's validity is its published interval (none while it is a draft); its
+    lines are order items (a product at the price of the quote's own date, or a fixed price with its reason, or a charge). A quote
+    is a copy made with clone#Order and priced as of its own date (mantle.order.SalesQuoteServices over
+    service/mantle/order/SalesQuoteTemplates.js). Every reader that leaves out a recurring base (OrpRecurringTemplate) leaves this
+    purpose out too: credit, reservation, invoicing, the sales summaries, store worklists and store mail. -->
+    <extend-entity entity-name="OrderHeader" package="mantle.order">
+        <field name="templateDescription" type="text-medium"><description>A quote template's description (purpose
+            SalesQuoteTemplate); empty on every other order, a quote made from it included.</description></field>
+        <field name="templateValidityDays" type="number-integer"><description>A quote template's default validity: the days from
+            its start a quote made from it is valid for; empty for the selling organization's (SalesPolicy).</description></field>
+        <seed-data>
+            <moqui.basic.Enumeration enumId="OrpSalesQuoteTemplate" description="Sales quote template" sequenceNum="3" enumTypeId="OrderPurpose"/>
+        </seed-data>
+    </extend-entity>
+
+<!-- Sales' recurring orders (IronStone Sales design §7 RecurringOrders, §13.1 create_RecurringOrders, §17 SAL-RECURRENCE and CX-RECURRING,
+    review X5; impl-sales P16, F22, §4 Q7): a recurring base is a native OrderHeader in OrderApproved marked OrpRecurringTemplate (Shop's
+    marker, which every exclusion reads), with no reservation, shipment or billing source; recurCronExpression is its cadence and
+    lastOrderedDate its last occurrence, as before. Sales adds the zone the cadence is read in, the dates it runs between, a pause,
+    the agreement it is kept under, a revision every Sales change names, the last failure, and on each generated order the occurrence
+    it was made for. The worker (OrderServices.create#RecurringOrders, create#RecurringOrder) reads them; a base without them runs as
+    before. clone#Order clears them on a copy. Written by mantle.order.SalesRecurrenceServices (SalesRecurrence.js). -->
+    <extend-entity entity-name="OrderHeader" package="mantle.order">
+        <field name="recurTimeZone" type="text-short" enable-audit-log="update"><description>The time zone (an IANA name) a recurring
+            base's cadence (recurCronExpression) is read in; the machine's, as the job's, when empty.</description></field>
+        <field name="recurFromDate" type="date-time" enable-audit-log="update"><description>A recurring base's first moment: no
+            occurrence before it is ordered.</description></field>
+        <field name="recurThruDate" type="date-time" enable-audit-log="update"><description>A recurring base's end: no occurrence at
+            or after it is ordered (an ended base).</description></field>
+        <field name="recurPausedDate" type="date-time" enable-audit-log="update"><description>Set while a recurring base is paused:
+            the worker orders nothing for it, and the occurrences that fall in the pause are skipped.</description></field>
+        <field name="recurResumedDate" type="date-time"><description>When a paused base was resumed: occurrences before it are not
+            ordered late.</description></field>
+        <field name="recurAgreementId" type="id" enable-audit-log="update"><description>The customer agreement (AgrSales or
+            AgrProduct) a recurring base is kept under: an occurrence is ordered only while it applies (active, in its dates, of the
+            seller with the customer).</description></field>
+        <field name="recurRevision" type="number-integer"><description>A recurring base's revision, counted by each change of its
+            recurrence in Sales and named by the next one.</description></field>
+        <field name="recurFailureDate" type="date-time"><description>When a recurring base's last occurrence failed; empty after one
+            succeeds.</description></field>
+        <field name="recurFailureMessage" type="text-medium"><description>Why a recurring base's last occurrence failed.</description></field>
+        <field name="recurOccurrenceDate" type="date-time"><description>On an order generated from a recurring base: the scheduled
+            occurrence it was made for (one order for an occurrence).</description></field>
+        <relationship type="one" title="Recurrence" related="mantle.party.agreement.Agreement" short-alias="recurAgreement">
+            <key-map field-name="recurAgreementId" related="agreementId"/></relationship>
+    </extend-entity>
+
+<!-- Shop's prepaid and recurring access (mr-pass impl-shop P7; design-shop §10 Subscriptions, SubscriptionDetail, §10.1,
+    §10.2, §14.2; SHOP-SUBSCRIPTION, CX-RECURRING; mantle.product.ShopSubscriptionServices over
+    service/mantle/product/ShopSubscriptions.js). Sales' RecurringTemplate marker on OrderHeader (X5, F21), a store's
+    recurring offers, a customer's accepted contract with its off-session consent and resource instance, and one renewal
+    occurrence per contract and period. Money and order lines stay on Mantle's own orders, payments and invoices; access
+    stays Mantle's Subscription rows (and the Forum's source-bound grants), one per paid term of the contract's instance. -->
+  <!-- Sales' proposed order purpose (design-sales SAL-QUOTE; review X5): RecurringTemplate marks a recurring base, the one
+    marker every exclusion reads (credit exposure, reservation, the store emails, invoicing, subscription fulfillment, the
+    order lists and the sales index). Sales seeds its own values (SalesQuote, SalesOrder) when it builds them. -->
+  <extend-entity entity-name="OrderHeader" package="mantle.order">
+    <field name="orderPurposeEnumId" type="id"><description>OrderPurpose: OrpRecurringTemplate for a recurring base,
+      the template of the next period that never reserves, invoices, emails or counts as an order; empty for any other order.</description></field>
+    <relationship type="one" title="OrderPurpose" related="moqui.basic.Enumeration">
+      <key-map field-name="orderPurposeEnumId" related="enumId"/>
+    </relationship>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Order purpose" enumTypeId="OrderPurpose"/>
+      <moqui.basic.Enumeration enumId="OrpRecurringTemplate" description="Recurring template" sequenceNum="9" enumTypeId="OrderPurpose"/>
+    </seed-data>
+  </extend-entity>
+
+  <!-- the checkout of a subscription purchase: the offer it buys (or the prepaid contract it renews) and the buyer's
+    recorded off-session consent -->
+  <extend-entity entity-name="StoreCheckout" package="mantle.order">
+    <field name="recurringOfferId" type="id"><description>The StoreRecurringOffer this checkout buys (begin#SubscriptionPurchase); its
+      product's line is the subscription line, and a signed-in verified account is required.</description></field>
+    <field name="renewContractId" type="id"><description>For another prepaid term of a contract (RenewPrepaid): the contract it extends.</description></field>
+    <field name="recurringConsentDate" type="date-time"><description>When the buyer accepted the offer's renewal terms
+      and off-session charges of the method kept at this checkout (submit's recurringConsent).</description></field>
+    <field name="recurringConsentTerms" type="text-short"><description>The offer's terms version the consent is for.</description></field>
+    <field name="recurringConsentEvidence" type="text-medium"><description>What was shown and accepted: the hash of the
+      offer's price, currency, term and terms version with the visit.</description></field>
+  </extend-entity>
+
+<!-- The comparison and award of supplier quotes (design-purchasing §5 QuoteComparison, Award; impl-purchasing P12, §4, F19):
+    no award record. An award places the quote order ("Place from Quote") with its RequirementSupply links; the quotes not
+    awarded are cancelled ("Cancel Quote"). A quote order is marked when it is made (supplierQuote), so the purchase order
+    lists can leave out the quotes that never left the quote statuses (F-P12-1). -->
+    <extend-entity entity-name="OrderHeader" package="mantle.order">
+        <!-- Y on an order made as a supplier's quote (requested or proposed, Sourcing.js quoteOrder); kept once an award places
+            it, so a quote that was never placed (no placedDate) is told from a purchase order -->
+        <field name="supplierQuote" type="text-indicator"/>
+    </extend-entity>
+
+    <extend-entity entity-name="OrderPart" package="mantle.order">
+        <!-- a supplier quote's validity: expired once past its thru date (an expired quote shows but cannot be placed) -->
+        <field name="validFromDate" type="date-time" enable-audit-log="true"/>
+        <field name="validThruDate" type="date-time" enable-audit-log="true"/>
+    </extend-entity>
+
+<!-- Checkout opt-ins (impl-commerce P9 follow-up, Nov 6; design-shop §6 Checkout, §9 EmailPreferences;
+    service/mantle/public/StoreTopics.js): what the buyer chose among the store's opt-ins, each unchecked until they check
+    it, and the confirmation its pending choices wait for. The consent itself is Mantle's: PartyConsent for a granted
+    topic, ContactListParty CLPT_PENDING for a choice not yet confirmed. -->
+  <extend-entity entity-name="StoreCheckout" package="mantle.order">
+    <field name="optInsJson" type="text-long"><description>The opt-ins the buyer checked ({chosen}), and once the order
+      is placed what each became ({outcome}: granted, pending, already or failed).</description></field>
+    <field name="optInPending" type="text-indicator"><description>Y while a chosen opt-in waits for its confirmation (the
+      receipt's link, or a sign-in with the checkout's email verified).</description></field>
+    <field name="optInCodeDigest" type="text-medium"><description>The digest of the receipt link's confirmation code
+      (the code itself is only in the message).</description></field>
+    <field name="optInCodeDate" type="date-time"/>
+    <index name="STORE_CHECKOUT_OPT_IN">
+      <index-field name="customerPartyId"/>
+      <index-field name="optInPending"/>
+    </index>
+  </extend-entity>
+
+    <!-- a decision a later revision of its source superseded (a key field changed after it; the SECA on
+        increment#OrderRevision), kept with the time it stopped counting -->
+    <extend-entity entity-name="PurchaseApprovalDecision" package="mantle.order.purchase">
+        <field name="supersededDate" type="date-time"/>
+        <relationship type="one-nofk" related="mantle.order.purchase.PurchaseApprovalPolicy"/>
+    </extend-entity>
+
+    <!-- the commercial revision (crosscut CX-ORDER-AUTHORITY, X2) for the organization's purchase orders, behind its flag -->
+    <extend-entity entity-name="PurchasePolicy" package="mantle.order.purchase">
+        <field name="commercialRevisionOnly" type="text-indicator" enable-audit-log="true"><description>Y: a purchase
+            order's revision counts only commercial changes (lines, parties, addresses, terms): a stored file or PDF, a note
+            and a status change (place, approve, send, hold) no longer move it, so an approval decision and a send stay
+            bound to it (increment#OrderRevision); N with no row, Mantle's counting</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="PurchasePolicy" package="mantle.order.purchase">
+        <field name="substitutionEnumId" type="id" enable-audit-log="true">
+            <description>Whether a revision may put another product on a line (PurchaseSubstitution); empty is not
+                allowed.</description></field>
+        <relationship type="one" title="PurchaseSubstitution" related="moqui.basic.Enumeration" short-alias="substitution">
+            <key-map field-name="substitutionEnumId" related="enumId"/></relationship>
+    </extend-entity>
+
+<!-- The buy conversion's route by policy (impl-purchasing P14b; crosscut §4.2, R-PUR-20; design-purchasing §8
+    SupplyPlanning): with planBuyToRequest Y on the organization's buying policy, convert#PlanningSuggestions turns a buy
+    suggestion into a purchase request sent to its approval rather than a line of a draft purchase order. Empty takes N, so
+    the conversion is P14a's draft order unless the policy says otherwise. -->
+    <extend-entity entity-name="PurchasePolicy" package="mantle.order.purchase">
+        <field name="planBuyToRequest" type="text-indicator" enable-audit-log="true"><description>Y: a buy suggestion of
+            the supply plan is converted into a purchase request sent to its approval (its approved demand is then sourced
+            in RequestSourcing); N with no row: into a line of a draft purchase order</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="ReturnHeader" package="mantle.order.return">
+        <field name="customerReference" type="text-medium" enable-audit-log="update"><description>The customer's own reference
+            for the return (their case or order number); externalId and originId stay integration keys</description></field>
+        <field name="authorizationExpireDate" type="date-time" enable-audit-log="update"><description>When the RMA stops
+            being valid for the goods to arrive (the policy's authorization days from authorization)</description></field>
+        <field name="returnPolicyId" type="id" enable-audit-log="update"><description>The policy row the return was evaluated
+            against; empty with manualReview Y when none applied</description></field>
+        <field name="policyEvaluatedDate" type="date-time"/>
+        <field name="manualReview" type="text-indicator" enable-audit-log="update"><description>Y: no policy applied, so a
+            person decides the return (design ReturnPolicies: no policy is manual review, never an unrestricted
+            return)</description></field>
+        <relationship type="one-nofk" related="mantle.order.return.ReturnPolicy" short-alias="policy"/>
+        <relationship type="many" related="mantle.order.return.ReturnParty" short-alias="parties">
+            <key-map field-name="returnId"/></relationship>
+    </extend-entity>
+
+    <extend-entity entity-name="ReturnItem" package="mantle.order.return">
+        <field name="replacedQuantity" type="number-decimal" enable-audit-log="update"><description>The quantity
+            settle#Return replaced, which credits nothing and so has no billing link; with the linked quantity it is what
+            the item settled.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="ReturnItemBilling" package="mantle.order.return">
+        <field name="originalInvoiceId" type="id"><description>The sales invoice or supplier bill that billed the returned
+            quantity.</description></field>
+        <field name="originalInvoiceItemSeqId" type="id"/>
+        <field name="receiptless" type="text-indicator"><description>Y for a credit given without a receipt, with a reason
+            and an approver holding RETURN_CREDIT_APPROVE.</description></field>
+        <field name="settlementReason" type="text-medium"/>
+        <field name="approvedByUserId" type="id"/>
+        <field name="settledByUserId" type="id"/>
+        <field name="settledDate" type="date-time"/>
+        <field name="operationKey" type="id"><description>The settle#Return operation that made the link.</description>
+        </field>
+        <relationship type="one" title="Original" related="mantle.account.invoice.InvoiceItem">
+            <key-map field-name="originalInvoiceId" related="invoiceId"/>
+            <key-map field-name="originalInvoiceItemSeqId" related="invoiceItemSeqId"/>
+        </relationship>
+        <index name="RETURN_BILLING_ORIGINAL">
+            <index-field name="originalInvoiceId"/>
+            <index-field name="originalInvoiceItemSeqId"/>
+        </index>
+    </extend-entity>
+
+<!-- Returns in the warehouse (design-warehouse WH-RETURN and WH-RECORD-HOSTS, design-purchasing PUR-RETURN; impl-warehouse
+    P14): the link from a supplier return's item to the receipt and the stock it sends back (F32), what a quality disposition
+    sent back to the supplier has shipped, and a return's files. -->
+    <extend-entity entity-name="ReturnItem" package="mantle.order.return">
+        <field name="assetReceiptId" type="id" enable-audit-log="update"><description>A supplier return's source receipt
+            (PUR-RETURN): the purchase receipt whose accepted stock this item sends back, so eligibility is counted per
+            receipt (mantle.order.ReturnServices.find#ReturnableReceipts, add#ReceiptToReturn).</description></field>
+        <field name="assetId" type="id" enable-audit-log="update"><description>The stock this item sends back: the receipt's
+            asset, or the asset an inspection's disposition left the stock in; WarehouseTaskServices.issue#SupplierReturnStock
+            issues this asset.</description></field>
+        <relationship type="one-nofk" related="mantle.product.receipt.AssetReceipt"/>
+        <relationship type="one-nofk" related="mantle.product.asset.Asset"/>
+        <index name="RETURN_ITEM_RECEIPT"><index-field name="assetReceiptId"/></index>
+    </extend-entity>
+</entities>

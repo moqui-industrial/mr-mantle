@@ -1,0 +1,542 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!-- mantle.work.measurement -->
+    <!-- ========================================================= -->
+    <entity entity-name="Measurement" package="mantle.work.measurement" short-alias="measurements" cache="never">
+        <field name="measurementId" type="id" is-pk="true"/>
+        <field name="measurementTypeId" type="id"/>
+        <field name="measurementDate" type="date-time"/>
+        <field name="measurementValue" type="number-decimal"/>
+        <field name="measurementUomId" type="id"/>
+        <field name="measurementEnumId" type="id"/>
+
+        <field name="workEffortId" type="id"/>
+        <field name="assetId" type="id"/>
+        <field name="facilityId" type="id"/>
+        <field name="productId" type="id"/>
+        <field name="reasonEnumId" type="id"/>
+        <field name="productMeterId" type="id"/>
+        <field name="assetMaintenanceId" type="id"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+
+        <relationship type="one" related="mantle.work.measurement.MeasurementType"/>
+        <relationship type="one" title="Measurement" related="moqui.basic.Uom">
+            <key-map field-name="measurementUomId"/></relationship>
+        <relationship type="one" title="Measurement" related="moqui.basic.Enumeration">
+            <!-- The title won't match the enumTypeId for this field -->
+            <key-map field-name="measurementEnumId"/></relationship>
+        <relationship type="one" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one" related="mantle.product.asset.Asset"/>
+        <relationship type="one" related="mantle.facility.Facility"/>
+        <relationship type="one" related="mantle.product.Product"/>
+        <relationship type="one" title="MeasurementReason" related="moqui.basic.Enumeration">
+            <key-map field-name="reasonEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.maintenance.AssetMaintenance"/>
+        <relationship type="one" related="mantle.product.maintenance.ProductMeter"/>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+
+        <!-- Measurement Reason -->
+        <seed-data>
+            <moqui.basic.EnumerationType description="Measurement Reason" enumTypeId="MeasurementReason"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="MeasurementType" package="mantle.work.measurement">
+        <field name="measurementTypeId" type="id" is-pk="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="hasValue" type="text-indicator"/>
+        <field name="uomTypeEnumId" type="id"/>
+        <field name="enumTypeId" type="id"/>
+        <field name="productMeterTypeId" type="id"/>
+
+        <relationship type="one" title="UomType" related="moqui.basic.Enumeration">
+            <key-map field-name="uomTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.basic.EnumerationType"/>
+        <relationship type="one" related="mantle.product.maintenance.ProductMeterType"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Sixteen Point Compass" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="North (0°)" enumCode="N" enumId="SPC_N" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="North Northeast (22.5°)" enumCode="NNE" enumId="SPC_NNE" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="Northeast (45°)" enumCode="NE" enumId="SPC_NE" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="East Northeast (67.5°)" enumCode="ENE" enumId="SPC_ENE" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="East (90°)" enumCode="E" enumId="SPC_E" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="East Southeast (112.5°)" enumCode="SSE" enumId="SPC_ESE" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="Southeast (135°)" enumCode="SE" enumId="SPC_SE" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="South Southeast (157.5°)" enumCode="SSE" enumId="SPC_SSE" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="South (180°)" enumCode="S" enumId="SPC_S" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="South Southwest (202.5°)" enumCode="SSW" enumId="SPC_SSW" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="Southwest (225°)" enumCode="SW" enumId="SPC_SW" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="West Southwest (247.5°)" enumCode="WSW" enumId="SPC_WSW" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="West (270°)" enumCode="W" enumId="SPC_W" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="West Northwest (292.5°)" enumCode="WNW" enumId="SPC_WNW" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="Northwest (315°)" enumCode="NW" enumId="SPC_NW" enumTypeId="SixteenPointCompass"/>
+            <moqui.basic.Enumeration description="North Northwest (337.5°)" enumCode="NNW" enumId="SPC_NNW" enumTypeId="SixteenPointCompass"/>
+
+            <mantle.work.measurement.MeasurementType measurementTypeId="Temperature" description="Temperature"
+                    hasValue="Y" uomTypeEnumId="UT_TEMP_MEASURE"/>
+            <mantle.work.measurement.MeasurementType measurementTypeId="TemperatureFeelsLike" description="Temperature Feels Like"
+                    hasValue="Y" uomTypeEnumId="UT_TEMP_MEASURE"/>
+            <mantle.work.measurement.MeasurementType measurementTypeId="WindSpeed" description="Wind Speed"
+                    hasValue="Y" uomTypeEnumId="UT_VELOCITY_MEASURE"/>
+            <mantle.work.measurement.MeasurementType measurementTypeId="WindDirection" description="Wind Direction (Degrees)"
+                    hasValue="Y" uomTypeEnumId="" enumTypeId="SixteenPointCompass"/>
+            <mantle.work.measurement.MeasurementType measurementTypeId="AtmosphericPressure" description="Atmospheric Pressure"
+                    hasValue="Y" uomTypeEnumId="UT_PRESSURE_MEASURE"/>
+            <mantle.work.measurement.MeasurementType measurementTypeId="Precipitation" description="Precipitation"
+                    hasValue="Y" uomTypeEnumId="UT_LENGTH_MEASURE"/>
+            <mantle.work.measurement.MeasurementType measurementTypeId="Humidity" description="Humidity (Percentage)"
+                    hasValue="Y" uomTypeEnumId=""/>
+            <mantle.work.measurement.MeasurementType measurementTypeId="CloudCover" description="Cloud Cover (Percentage)"
+                    hasValue="Y" uomTypeEnumId=""/>
+
+            <mantle.work.measurement.MeasurementType measurementTypeId="pH" description="pH"
+                    hasValue="Y" uomTypeEnumId=""/>
+        </seed-data>
+    </entity>
+
+<!-- mantle.work.registration: event registration (IronStone Marketing design §9, §14.1; impl-marketing P16, P17). An event stays the
+    Commons calendar's WorkEffort (WetEvent), edited under the calendar's own rules (mantle.work.EventServices.check#EventAccess); these
+    records add what a registration needs beside it: the organization that offers it (RegistrationEvent, impl-marketing F107), one dated
+    offer per occurrence (EventRegistrationPolicy: its window, seats, hold, waitlist, terms, site and optional store), its ticket types
+    (EventTicketType, a ticket product through WorkEffortProduct and its price source; no amount of its own), its notices
+    (EventCommunicationSchedule) and the attendee places themselves (EventRegistration, P16 its seat-taking states only, which the
+    capacity checks count; P17 the hold, order, payment and credential). Written only through mantle.work.EventRegistrationServices. -->
+    <!-- ===== Marketing P16: events and registration setup (impl-marketing P16; design-marketing §9 Events, EventDetail, RegistrationSetup) ===== -->
+    <entity entity-name="RegistrationEvent" package="mantle.work.registration" cache="never">
+        <description>An event an internal organization offers registration for: the organization kept for a Commons event, whose owner
+            is a person (impl-marketing F107). Made once, by an events manager of the organization who may edit the event
+            (store#RegistrationEvent); the event itself stays the calendar's.</description>
+        <field name="workEffortId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="update"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <index name="REG_EVENT_ORG"><index-field name="organizationPartyId"/></index>
+    </entity>
+
+    <entity entity-name="EventRegistrationPolicy" package="mantle.work.registration" cache="never">
+        <description>One occurrence's registration offer: the event (a series names one of its occurrences by the start its rule
+            gives it, occurrenceStart; an event that does not repeat, its own start), its public title and description, the window,
+            the seats every ticket shares, the hold a place keeps before it is completed, the waitlist, the terms and cancellation
+            terms, the site it is offered on, an optional store (a store order, design §9; storeless by default) and the registration
+            questions (formPublicationId, a publication of purpose registration). Draft until published (publish#Registration, with
+            its readiness), then open in its window until closed. policyRevision counts every change; termsRevision the changes of
+            the terms after it was first published, so a registration names the terms it accepted (P17).</description>
+        <field name="registrationPolicyId" type="id" is-pk="true"/>
+        <field name="workEffortId" type="id"/>
+        <field name="occurrenceStart" type="date-time"/>
+        <field name="occurrenceEnd" type="date-time"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="publicTitle" type="text-medium" enable-audit-log="update"/>
+        <field name="publicDescription" type="text-very-long"/>
+        <field name="timeZone" type="text-short"><description>The IANA zone the offer's times are shown in</description></field>
+        <field name="siteId" type="id" enable-audit-log="update"/>
+        <field name="productStoreId" type="id" enable-audit-log="update"><description>A store whose order a paid registration
+            places; empty for a storeless order of the organization</description></field>
+        <field name="opensDate" type="date-time" enable-audit-log="update"/>
+        <field name="closesDate" type="date-time" enable-audit-log="update"/>
+        <field name="totalSeats" type="number-integer" enable-audit-log="update"/>
+        <field name="holdMinutes" type="number-integer" enable-audit-log="update"/>
+        <field name="waitlistEnabled" type="text-indicator" enable-audit-log="update"/>
+        <field name="waitlistLimit" type="number-integer" enable-audit-log="update"/>
+        <field name="termsText" type="text-very-long" enable-audit-log="update"/>
+        <field name="cancellationTerms" type="text-long" enable-audit-log="update"/>
+        <!-- Marketing follow-up 1 (§4 Nov 15, the user's call): the cancellation terms as a rule a buyer's cancellation and its refund
+            follow; part of the terms a registrant accepts (a change after publication raises termsRevision) -->
+        <field name="cancelDeadlineHours" type="number-integer" enable-audit-log="update"><description>Online cancellation closes
+            this many hours before the occurrence's start (a day is 24); empty: until the start</description></field>
+        <field name="refundPercent" type="number-decimal" enable-audit-log="update"><description>The share of a confirmed place's
+            price and tax refunded when it is cancelled online before the deadline, 0 to 100; empty: 100</description></field>
+        <field name="lateCancelAllowed" type="text-indicator" enable-audit-log="update"><description>Y: after the deadline a buyer
+            may still cancel online, with no refund (the seat freed for others); else online cancellation is refused then</description></field>
+        <field name="entryCodeKey" type="text-medium" encrypt="true"><description>The offer's secret its attendees' entry codes are
+            derived from (a keyed digest of the registration and its credential revision), made at the first code and encrypted
+            with the server's key; never shown, listed or exported</description></field>
+        <field name="formPublicationId" type="id" enable-audit-log="update"/>
+        <field name="questionScopeEnumId" type="id"><description>Whom the questions are for: each attendee or the buyer once</description></field>
+        <field name="consentText" type="text-long" enable-audit-log="update"><description>The consent a registrant accepts with the
+            questions (the terms of the registration, never a marketing consent)</description></field>
+        <field name="sendingProfileId" type="id"><description>The transactional sending profile of the notices; empty for the
+            organization's ready one</description></field>
+        <field name="policyRevision" type="number-integer"/>
+        <field name="termsRevision" type="number-integer"/>
+        <field name="publishedDate" type="date-time"/>
+        <field name="publishedByUserId" type="id"/>
+        <field name="closedDate" type="date-time"/>
+        <field name="closedByUserId" type="id"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" related="mantle.work.registration.RegistrationEvent" short-alias="registrationEvent"/>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one" related="mantle.public.PublicSite" short-alias="site"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="productStore"/>
+        <relationship type="one" title="Form" related="mantle.party.FormPublication" short-alias="formPublication">
+            <key-map field-name="formPublicationId" related="publicationId"/></relationship>
+        <relationship type="one" title="QuestionScope" related="moqui.basic.Enumeration" short-alias="questionScope">
+            <key-map field-name="questionScopeEnumId"/></relationship>
+        <index name="REG_POLICY_OCCURRENCE" unique="true"><index-field name="workEffortId"/><index-field name="occurrenceStart"/></index>
+        <index name="REG_POLICY_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Event Registration Offer" statusTypeId="EventRegistrationPolicy"/>
+            <moqui.basic.StatusItem statusId="ErpDraft" description="Draft" sequenceNum="1" statusTypeId="EventRegistrationPolicy"/>
+            <moqui.basic.StatusItem statusId="ErpPublished" description="Published" sequenceNum="2" statusTypeId="EventRegistrationPolicy"/>
+            <moqui.basic.StatusItem statusId="ErpClosed" description="Closed" sequenceNum="3" statusTypeId="EventRegistrationPolicy"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ErpDraft" toStatusId="ErpPublished" transitionName="Publish Registration"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ErpDraft" toStatusId="ErpClosed" transitionName="Close Registration"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ErpPublished" toStatusId="ErpClosed" transitionName="Close Registration"/>
+            <moqui.basic.EnumerationType description="Event Registration Question Scope" enumTypeId="EventRegistrationQuestionScope"/>
+            <moqui.basic.Enumeration description="Each attendee" enumId="ErqAttendee" enumTypeId="EventRegistrationQuestionScope" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="The buyer, once" enumId="ErqBuyer" enumTypeId="EventRegistrationQuestionScope" sequenceNum="2"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="EventTicketType" package="mantle.work.registration" cache="never">
+        <description>A kind of place an offer sells or gives: free, or a ticket product of the organization (linked to the event by
+            WorkEffortProduct, typeEnumId WeptSales) priced by the product's own prices (the Commerce and Sales price authority; no
+            amount is kept here), with its own capacity within the offer's seats (empty: the offer's seats alone), its sales dates
+            and a per-order limit. Ended (thruDate), never deleted.</description>
+        <field name="ticketTypeId" type="id" is-pk="true"/>
+        <field name="registrationPolicyId" type="id"/>
+        <field name="ticketName" type="text-medium" enable-audit-log="update"/>
+        <field name="priceSourceEnumId" type="id" enable-audit-log="update"/>
+        <field name="productId" type="id" enable-audit-log="update"/>
+        <field name="capacity" type="number-integer" enable-audit-log="update"/>
+        <field name="salesFromDate" type="date-time" enable-audit-log="update"/>
+        <field name="salesThruDate" type="date-time" enable-audit-log="update"/>
+        <field name="perOrderLimit" type="number-integer" enable-audit-log="update"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="mantle.work.registration.EventRegistrationPolicy" short-alias="policy"/>
+        <relationship type="one" title="PriceSource" related="moqui.basic.Enumeration" short-alias="priceSource">
+            <key-map field-name="priceSourceEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <index name="REG_TICKET_POLICY"><index-field name="registrationPolicyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Event Ticket Price Source" enumTypeId="EventTicketPriceSource"/>
+            <moqui.basic.Enumeration description="Free" enumId="EtpFree" enumTypeId="EventTicketPriceSource" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="The ticket product's price" enumId="EtpProduct" enumTypeId="EventTicketPriceSource" sequenceNum="2"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="EventCommunicationSchedule" package="mantle.work.registration" cache="never">
+        <description>A notice an offer sends each registration once (P17's job, a delivery of the Comms ledger): its trigger and
+            offset, the Comms template, the channel, whom it goes to and its kind (a transactional notice under the registration's
+            own authority, or a promotional one that needs the recipient's promotional consent). Ended, never deleted.</description>
+        <field name="scheduleId" type="id" is-pk="true"/>
+        <field name="registrationPolicyId" type="id"/>
+        <field name="triggerEnumId" type="id" enable-audit-log="update"/>
+        <field name="offsetMinutes" type="number-integer" enable-audit-log="update"/>
+        <field name="messageTemplateId" type="id" enable-audit-log="update"/>
+        <field name="channelEnumId" type="id"/>
+        <field name="recipientScopeEnumId" type="id" enable-audit-log="update"/>
+        <field name="purposeEnumId" type="id" enable-audit-log="update"><description>MtpTransactional or MtpPromotional</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="mantle.work.registration.EventRegistrationPolicy" short-alias="policy"/>
+        <relationship type="one" title="Trigger" related="moqui.basic.Enumeration" short-alias="trigger">
+            <key-map field-name="triggerEnumId"/></relationship>
+        <relationship type="one" related="mantle.party.MessageTemplate" short-alias="template"/>
+        <relationship type="one" title="RecipientScope" related="moqui.basic.Enumeration" short-alias="recipientScope">
+            <key-map field-name="recipientScopeEnumId"/></relationship>
+        <index name="REG_COMM_POLICY"><index-field name="registrationPolicyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Event Communication Trigger" enumTypeId="EventCommunicationTrigger"/>
+            <moqui.basic.Enumeration description="When a registration is confirmed" enumId="EctConfirmed" enumTypeId="EventCommunicationTrigger" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Before the event starts" enumId="EctBeforeStart" enumTypeId="EventCommunicationTrigger" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="After the event ends" enumId="EctAfterEnd" enumTypeId="EventCommunicationTrigger" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="When the event changes" enumId="EctChanged" enumTypeId="EventCommunicationTrigger" sequenceNum="4"/>
+            <moqui.basic.Enumeration description="When a registration is cancelled" enumId="EctCancelled" enumTypeId="EventCommunicationTrigger" sequenceNum="5"/>
+            <moqui.basic.EnumerationType description="Event Communication Recipients" enumTypeId="EventCommunicationRecipients"/>
+            <moqui.basic.Enumeration description="Each attendee" enumId="EcrAttendee" enumTypeId="EventCommunicationRecipients" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="The buyer" enumId="EcrBuyer" enumTypeId="EventCommunicationRecipients" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Attendees and the buyer" enumId="EcrBoth" enumTypeId="EventCommunicationRecipients" sequenceNum="3"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="EventRegistration" package="mantle.work.registration" cache="never">
+        <description>One attendee's place on an offer (design §14.1): its ticket type, the attendee and the buyer, its state and, while
+            held, when the hold ends. The places that take a seat (held while the hold lasts, pending the order's approval, confirmed)
+            are counted by the capacity checks of store#RegistrationPolicy and store#TicketType, the offer's advisory availability and
+            every reservation (P16). P17: the reservation it came by, its order line and payment, the campaign, the attendee's
+            response, the terms revision it accepted, the entry credential's digest and revision (the code itself is never kept), its
+            waitlist time, and the refund handed to Accounting when a paid place is cancelled; written only by
+            mantle.work.EventRegistrationServices (EventRegistrationPlaces.js and EventRegistrationPayments.js).</description>
+        <field name="registrationId" type="id" is-pk="true"/>
+        <field name="registrationPolicyId" type="id"/>
+        <field name="ticketTypeId" type="id"/>
+        <field name="attendeePartyId" type="id"/>
+        <field name="attendeeName" type="text-medium"><description>The attendee's name as typed (the buyer's for the first place
+            until the attendees are named): the public pages and notices show it, never the stored name of the party an address
+            matched (SEC-PSS-61)</description></field>
+        <field name="buyerPartyId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="holdExpireDate" type="date-time"/>
+        <field name="createdDate" type="date-time"/>
+        <!-- Marketing P17: the request it came by, its order line and payment, the campaign, the answers, the terms it accepted, the entry
+            credential (its digest and revision only; the code itself goes to the attendee and is never kept), its waitlist place and the
+            refund handed to Accounting on a cancellation -->
+        <field name="reservationId" type="id"/>
+        <field name="orderId" type="id"/>
+        <field name="orderItemSeqId" type="id"/>
+        <field name="paymentId" type="id"/>
+        <field name="marketingCampaignId" type="id"/>
+        <field name="formResponseId" type="id"/>
+        <field name="termsRevision" type="number-integer"/>
+        <field name="credentialDigest" type="text-medium"/>
+        <field name="credentialRevision" type="number-integer"/>
+        <field name="credentialDate" type="date-time"/>
+        <field name="waitlistDate" type="date-time"><description>When it joined the waitlist: places are offered in this order, then
+            by id</description></field>
+        <field name="confirmedDate" type="date-time"/>
+        <field name="cancelledDate" type="date-time"/>
+        <field name="cancelReason" type="text-medium"/>
+        <field name="refundStatusEnumId" type="id" enable-audit-log="update"/>
+        <field name="refundPaymentId" type="id"/>
+        <field name="refundPercent" type="number-decimal"><description>Follow-up 1: the share of the place's price and tax refunded,
+            decided when it was cancelled (the accepted terms' rule, 100 for a place not yet confirmed, or staff's with a
+            reason)</description></field>
+        <relationship type="one" related="mantle.work.registration.EventRegistrationPolicy" short-alias="policy"/>
+        <relationship type="one" related="mantle.work.registration.EventTicketType" short-alias="ticketType"/>
+        <relationship type="one" related="mantle.work.registration.EventReservation" short-alias="reservation"/>
+        <relationship type="one-nofk" related="mantle.order.OrderHeader" short-alias="order"/>
+        <relationship type="one-nofk" related="mantle.account.payment.Payment" short-alias="payment"/>
+        <relationship type="one" title="RegistrationRefund" related="moqui.basic.Enumeration" short-alias="refundStatus">
+            <key-map field-name="refundStatusEnumId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one" title="Attendee" related="mantle.party.Party" short-alias="attendee">
+            <key-map field-name="attendeePartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Buyer" related="mantle.party.Party" short-alias="buyer">
+            <key-map field-name="buyerPartyId" related="partyId"/></relationship>
+        <index name="EVENT_REG_POLICY"><index-field name="registrationPolicyId"/><index-field name="statusId"/></index>
+        <index name="EVENT_REG_RESERVATION"><index-field name="reservationId"/></index>
+        <index name="EVENT_REG_ORDER"><index-field name="orderId"/></index>
+        <index name="EVENT_REG_CREDENTIAL"><index-field name="credentialDigest"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Event Registration" statusTypeId="EventRegistration"/>
+            <moqui.basic.StatusItem statusId="EvrHeld" description="Held" sequenceNum="1" statusTypeId="EventRegistration"/>
+            <moqui.basic.StatusItem statusId="EvrPending" description="Payment received, awaiting confirmation" sequenceNum="2" statusTypeId="EventRegistration"/>
+            <moqui.basic.StatusItem statusId="EvrConfirmed" description="Confirmed" sequenceNum="3" statusTypeId="EventRegistration"/>
+            <moqui.basic.StatusItem statusId="EvrWaitlisted" description="Waitlisted" sequenceNum="4" statusTypeId="EventRegistration"/>
+            <moqui.basic.StatusItem statusId="EvrExpired" description="Hold expired" sequenceNum="5" statusTypeId="EventRegistration"/>
+            <moqui.basic.StatusItem statusId="EvrCancelled" description="Cancelled" sequenceNum="6" statusTypeId="EventRegistration"/>
+            <!-- Marketing P17: a payment that succeeded after its hold ended takes no seat: it waits for staff (a refund, or a place given
+                by hand where one is free), never overselling the occurrence -->
+            <moqui.basic.StatusItem statusId="EvrReview" description="Paid after the hold ended: review" sequenceNum="7" statusTypeId="EventRegistration"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrHeld" toStatusId="EvrPending" transitionName="Payment received"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrHeld" toStatusId="EvrConfirmed" transitionName="Confirm"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrHeld" toStatusId="EvrExpired" transitionName="Hold ended"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrHeld" toStatusId="EvrCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrHeld" toStatusId="EvrReview" transitionName="Paid after the hold ended"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrPending" toStatusId="EvrConfirmed" transitionName="Confirm"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrPending" toStatusId="EvrCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrConfirmed" toStatusId="EvrCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrWaitlisted" toStatusId="EvrHeld" transitionName="Offer a place"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrWaitlisted" toStatusId="EvrCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrWaitlisted" toStatusId="EvrExpired" transitionName="Waitlist ended"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrExpired" toStatusId="EvrReview" transitionName="Paid after the hold ended"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrReview" toStatusId="EvrConfirmed" transitionName="Give a place"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EvrReview" toStatusId="EvrCancelled" transitionName="Cancel and refund"/>
+            <moqui.basic.EnumerationType description="Event Registration Refund" enumTypeId="EventRegistrationRefund"/>
+            <moqui.basic.Enumeration description="Refund requested" enumId="ErfRequested" enumTypeId="EventRegistrationRefund" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Refund pending with the payment provider" enumId="ErfPending" enumTypeId="EventRegistrationRefund" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Refunded" enumId="ErfRefunded" enumTypeId="EventRegistrationRefund" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Refund needs Accounting" enumId="ErfFailed" enumTypeId="EventRegistrationRefund" sequenceNum="4"/>
+            <moqui.basic.Enumeration description="Nothing to refund" enumId="ErfNone" enumTypeId="EventRegistrationRefund" sequenceNum="5"/>
+        </seed-data>
+    </entity>
+
+    <!-- ===== end of Marketing P16 ===== -->
+    <!-- ===== Marketing P17: registrations, tickets and payment (impl-marketing P17; design-marketing §9 Registrations, RegistrationDetail,
+        §13 Register and Registration, §14.1) ===== -->
+    <entity entity-name="EventReservation" package="mantle.work.registration" cache="never">
+        <description>One request for places on an offer (a visitor's on PASS Register, or a staff entry): its buyer and their address, the
+            request key whose repeat answers the first result (unique per offer), the terms revision accepted when it was completed, the
+            order and payment of its paid places (a storeless order of the organization, or the offer's store's) and the digest of the key
+            a payment provider's return carries. Its places are EventRegistration rows, one per attendee.</description>
+        <field name="reservationId" type="id" is-pk="true"/>
+        <field name="registrationPolicyId" type="id"/>
+        <field name="buyerPartyId" type="id"/>
+        <field name="emailContactMechId" type="id"/>
+        <field name="sourceEnumId" type="id"/>
+        <field name="siteId" type="id"/>
+        <field name="requestKey" type="text-short"/>
+        <field name="requestHash" type="text-medium"><description>The request's own values, so a key reused with others is refused</description></field>
+        <field name="marketingCampaignId" type="id"/>
+        <field name="termsRevision" type="number-integer"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="orderId" type="id"/>
+        <field name="paymentId" type="id"/>
+        <field name="returnKeyDigest" type="text-medium"/>
+        <field name="placementTries" type="number-integer"/>
+        <field name="failureMessage" type="text-medium"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.work.registration.EventRegistrationPolicy" short-alias="policy"/>
+        <relationship type="one" title="Buyer" related="mantle.party.Party" short-alias="buyer">
+            <key-map field-name="buyerPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="ReservationSource" related="moqui.basic.Enumeration" short-alias="source">
+            <key-map field-name="sourceEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.order.OrderHeader" short-alias="order"/>
+        <relationship type="one-nofk" related="mantle.account.payment.Payment" short-alias="payment"/>
+        <index name="EVENT_RES_KEY" unique="true"><index-field name="registrationPolicyId"/><index-field name="requestKey"/></index>
+        <index name="EVENT_RES_ORDER"><index-field name="orderId"/></index>
+        <index name="EVENT_RES_BUYER"><index-field name="buyerPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Event Reservation Source" enumTypeId="EventReservationSource"/>
+            <moqui.basic.Enumeration description="Public registration" enumId="ErsPublic" enumTypeId="EventReservationSource" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Staff entry" enumId="ErsStaff" enumTypeId="EventReservationSource" sequenceNum="2"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="EventRegistrationTerms" package="mantle.work.registration" cache="never">
+        <description>The words a registrant accepted (P16 review): the offer's terms, cancellation terms and consent text at one terms
+            revision, written once when the first registration accepts that revision, so a later change of the offer never changes
+            what an earlier registrant agreed to.</description>
+        <field name="registrationPolicyId" type="id" is-pk="true"/>
+        <field name="termsRevision" type="number-integer" is-pk="true"/>
+        <field name="termsText" type="text-very-long"/>
+        <field name="cancellationTerms" type="text-long"/>
+        <field name="consentText" type="text-long"/>
+        <!-- follow-up 1: the cancellation rule of the revision, which a cancellation of a registration that accepted it follows -->
+        <field name="cancelDeadlineHours" type="number-integer"/>
+        <field name="refundPercent" type="number-decimal"/>
+        <field name="lateCancelAllowed" type="text-indicator"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.work.registration.EventRegistrationPolicy" short-alias="policy"/>
+    </entity>
+
+    <entity entity-name="EventRegistrationAction" package="mantle.work.registration" cache="never">
+        <description>What happened to a registration (design §14.1): reserved, waitlisted, offered a place, answered, paid, confirmed,
+            expired, cancelled, a refund handed over and its result, a correction or substitution with its reason, a ticket shown again;
+            who did it and when, the state before and after, and the credential revision then. An operation key makes a repeat answer
+            the first.</description>
+        <field name="actionId" type="id" is-pk="true"/>
+        <field name="registrationId" type="id"/>
+        <field name="actionEnumId" type="id"/>
+        <field name="fromStatusId" type="id"/>
+        <field name="toStatusId" type="id"/>
+        <field name="credentialRevision" type="number-integer"/>
+        <field name="reason" type="text-medium"/>
+        <field name="operationKey" type="text-short"/>
+        <field name="actorUserId" type="id"/>
+        <field name="actionDate" type="date-time"/>
+        <relationship type="one" related="mantle.work.registration.EventRegistration" short-alias="registration"/>
+        <relationship type="one" title="RegistrationAction" related="moqui.basic.Enumeration" short-alias="action">
+            <key-map field-name="actionEnumId"/></relationship>
+        <relationship type="one" title="Actor" related="moqui.security.UserAccount" short-alias="actor">
+            <key-map field-name="actorUserId" related="userId"/></relationship>
+        <index name="EVENT_REG_ACTION"><index-field name="registrationId"/><index-field name="actionDate"/></index>
+        <index name="EVENT_REG_ACTION_KEY" unique="true"><index-field name="registrationId"/><index-field name="operationKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Event Registration Action" enumTypeId="EventRegistrationAction"/>
+            <moqui.basic.Enumeration description="Place held" enumId="EraReserved" enumTypeId="EventRegistrationAction" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Waitlisted" enumId="EraWaitlisted" enumTypeId="EventRegistrationAction" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Offered a place from the waitlist" enumId="EraOffered" enumTypeId="EventRegistrationAction" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Answers and terms accepted" enumId="EraCompleted" enumTypeId="EventRegistrationAction" sequenceNum="4"/>
+            <moqui.basic.Enumeration description="Payment started" enumId="EraPaymentStarted" enumTypeId="EventRegistrationAction" sequenceNum="5"/>
+            <moqui.basic.Enumeration description="Payment received" enumId="EraPaid" enumTypeId="EventRegistrationAction" sequenceNum="6"/>
+            <moqui.basic.Enumeration description="Confirmed" enumId="EraConfirmed" enumTypeId="EventRegistrationAction" sequenceNum="7"/>
+            <moqui.basic.Enumeration description="Hold ended" enumId="EraExpired" enumTypeId="EventRegistrationAction" sequenceNum="8"/>
+            <moqui.basic.Enumeration description="Paid after the hold ended" enumId="EraReview" enumTypeId="EventRegistrationAction" sequenceNum="9"/>
+            <moqui.basic.Enumeration description="Cancelled" enumId="EraCancelled" enumTypeId="EventRegistrationAction" sequenceNum="10"/>
+            <moqui.basic.Enumeration description="Refund handed to Accounting" enumId="EraRefundRequested" enumTypeId="EventRegistrationAction" sequenceNum="11"/>
+            <moqui.basic.Enumeration description="Refund result" enumId="EraRefunded" enumTypeId="EventRegistrationAction" sequenceNum="12"/>
+            <moqui.basic.Enumeration description="Corrected" enumId="EraCorrected" enumTypeId="EventRegistrationAction" sequenceNum="13"/>
+            <moqui.basic.Enumeration description="Attendee substituted" enumId="EraSubstituted" enumTypeId="EventRegistrationAction" sequenceNum="14"/>
+            <moqui.basic.Enumeration description="Entry code shown" enumId="EraTicketShown" enumTypeId="EventRegistrationAction" sequenceNum="15"/>
+            <moqui.basic.Enumeration description="Notice sent again" enumId="EraNotified" enumTypeId="EventRegistrationAction" sequenceNum="16"/>
+            <!-- follow-up 1: a new entry code by staff (the revision raised, the earlier code revoked) and a refund set against the terms -->
+            <moqui.basic.Enumeration description="New entry code issued" enumId="EraCodeReissued" enumTypeId="EventRegistrationAction" sequenceNum="17"/>
+            <moqui.basic.Enumeration description="Refund set against the terms" enumId="EraRefundOverride" enumTypeId="EventRegistrationAction" sequenceNum="18"/>
+            <moqui.basic.Enumeration description="Order invoiced and its payment captured" enumId="EraInvoiced" enumTypeId="EventRegistrationAction" sequenceNum="19"/>
+        </seed-data>
+    </entity>
+
+    <!-- A registration's files (design §14.1 EventRegistrationContent): the RecordFiles host association of EventRegistration -->
+    <entity entity-name="EventRegistrationContent" package="mantle.work.registration" cache="never">
+        <field name="registrationContentId" type="id" is-pk="true"/>
+        <field name="registrationId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.work.registration.EventRegistration" short-alias="registration"/>
+        <relationship type="one" title="RegistrationContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Event Registration Content Type" enumTypeId="RegistrationContentType"/>
+            <moqui.basic.Enumeration description="Document" enumId="RctDocument" enumTypeId="RegistrationContentType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Correspondence" enumId="RctCorrespondence" enumTypeId="RegistrationContentType" sequenceNum="2"/>
+        </seed-data>
+    </entity>
+
+    <!-- ===== end of Marketing P17 ===== -->
+    <!-- ===== Marketing P18: check-in (impl-marketing P18; design-marketing §9 CheckIn, RegistrationDetail's Attendance, §14.1) ===== -->
+    <entity entity-name="EventAttendance" package="mantle.work.registration" cache="never">
+        <description>The attendance fact of one registration (design §9 CheckIn): written once, at its first check-in, so a second scan or
+            a retry answers this first result. How it was admitted: by its entry code (at a door tablet or by staff), by staff who found
+            the attendee by name, with a reason, or by an events manager's override of a place not confirmed (a held or pending one),
+            with a reason, which changes neither its state nor its payment. The offer, event, organization and attendee are kept for
+            the attendance reports and the "attended" triggers of automations and lead rules (their cursor is checkInDate). Written only
+            by mantle.work.EventRegistrationServices checkIn#Registration (EventCheckIn.js); never changed or deleted.</description>
+        <field name="registrationId" type="id" is-pk="true"/>
+        <field name="registrationPolicyId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="attendeePartyId" type="id"/>
+        <field name="ticketTypeId" type="id"/>
+        <field name="methodEnumId" type="id"/>
+        <field name="statusIdAtCheckIn" type="id"><description>The registration's state when it was admitted (an override's held or
+            pending place)</description></field>
+        <field name="credentialRevision" type="number-integer"><description>The entry code's revision presented (by code)</description></field>
+        <field name="reason" type="text-medium"/>
+        <field name="deviceId" type="id"><description>The shared device it was checked in at (a door tablet), else none</description></field>
+        <field name="checkInByUserId" type="id"/>
+        <field name="checkInDate" type="date-time"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one" related="mantle.work.registration.EventRegistration" short-alias="registration"/>
+        <relationship type="one" related="mantle.work.registration.EventRegistrationPolicy" short-alias="policy"/>
+        <relationship type="one-nofk" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="Attendee" related="mantle.party.Party" short-alias="attendee">
+            <key-map field-name="attendeePartyId" related="partyId"/></relationship>
+        <relationship type="one" title="EventAttendanceMethod" related="moqui.basic.Enumeration" short-alias="method">
+            <key-map field-name="methodEnumId"/></relationship>
+        <relationship type="one-nofk" title="CheckInBy" related="moqui.security.UserAccount" short-alias="checkInBy">
+            <key-map field-name="checkInByUserId" related="userId"/></relationship>
+        <index name="EVENT_ATTEND_POLICY"><index-field name="registrationPolicyId"/><index-field name="checkInDate"/></index>
+        <index name="EVENT_ATTEND_ORG"><index-field name="organizationPartyId"/><index-field name="checkInDate"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Event Attendance Method" enumTypeId="EventAttendanceMethod"/>
+            <moqui.basic.Enumeration description="Entry code" enumId="EamCode" enumTypeId="EventAttendanceMethod" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Found by name" enumId="EamLookup" enumTypeId="EventAttendanceMethod" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Manager's override" enumId="EamOverride" enumTypeId="EventAttendanceMethod" sequenceNum="3"/>
+            <!-- the registration's history (EventRegistrationAction) shows the check-in beside its other actions -->
+            <moqui.basic.Enumeration description="Checked in" enumId="EraCheckedIn" enumTypeId="EventRegistrationAction" sequenceNum="17"/>
+        </seed-data>
+    </entity>
+    <!-- ===== end of Marketing P18 ===== -->
+</entities>

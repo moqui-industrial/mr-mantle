@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- The form-submission trigger of an automation (P11's triggers, design §6): a submission of the publication by a known party (an
+        invitation's recipient or a signed-in account's own party; an anonymous answer names no one). -->
+    <extend-entity entity-name="MarketingAutomation" package="mantle.marketing.automation">
+        <field name="formPublicationId" type="id" enable-audit-log="update"/>
+        <relationship type="one-nofk" title="FormPublication" related="mantle.party.FormPublication">
+            <key-map field-name="formPublicationId" related="publicationId"/></relationship>
+    </extend-entity>
+
+    <!-- ===== Marketing P18: the registration triggers (impl-marketing P18, §4 Nov 15; design-marketing §6 triggers, §10 LeadRules) ===== -->
+    <!-- The registration and attendance triggers of an automation (P11's triggers, design §6): an attendee's place confirmed on the offer
+        (AtrRegistered, read by a cursor over EventRegistration.confirmedDate) or checked in at its door (AtrAttended, over
+        EventAttendance.checkInDate), each filed once per registration; the offer (one occurrence's EventRegistrationPolicy) is one of
+        the automation's organization. A lead rule names the same offer as its source (MarketingLeadRule sourceKindEnumId
+        MlsRegistrationOffer, sourceId the offer) with the trigger MltRegistered or MltAttended, capturing
+        MlcsRegistration or MlcsAttendance (the enumerations below). -->
+    <extend-entity entity-name="MarketingAutomation" package="mantle.marketing.automation">
+        <field name="registrationPolicyId" type="id" enable-audit-log="update"/>
+        <relationship type="one-nofk" title="RegistrationPolicy" related="mantle.work.registration.EventRegistrationPolicy">
+            <key-map field-name="registrationPolicyId"/></relationship>
+    </extend-entity>
+
+    <!-- ===== end of Marketing P7 ===== -->
+    <!-- ===== Marketing P8: sends and the composer (impl-marketing P8; design-marketing §5 Sends, SendDetail, Compose, §14.1, §18) ===== -->
+    <!-- A send's test allowlist (design §5 Compose TestSend): the policy's bounded list of addresses a test message may go to, each a
+        valid address, at most ten (mantle.marketing.CampaignServices store#MarketingPolicy); a test goes nowhere else. -->
+    <extend-entity entity-name="MarketingPolicy" package="mantle.marketing.campaign">
+        <field name="testAddresses" type="text-long" enable-audit-log="true"><description>The addresses a send's test message may go
+            to, one a line, at most ten</description></field>
+    </extend-entity>
+
+    <!-- ===== end of Marketing P8 ===== -->
+    <!-- ===== Marketing P9: dispatch and delivery (impl-marketing P9; design-marketing §5 SendDetail's control, CampaignDelivery,
+        RecipientDetail, §15.2, §15.3) ===== -->
+    <!-- A send's release and dispatch (mantle.marketing.CampaignSendServices release#Send, run#DueSends, pause#Send, cancel#Send;
+        MarketingDispatch.js): who released it at which approval, whether it was released by an author or approver under the
+        one-person-team flag (selfDispatch, the recipients counted at the release under 500), the communication event the list's
+        rows refer to, the root of the server's own unsubscribe page when the sending profile names no site, and the attachments
+        copied at preparation (P8 review F200: a campaign's file changed after approval never reaches a message). -->
+    <extend-entity entity-name="CampaignSend" package="mantle.marketing.campaign">
+        <field name="preparedAttachmentsJson" type="text-long"><description>The attachments as prepared: [{location, fileName,
+            contentType}], copies of the files made at preparation that no later change touches</description></field>
+        <field name="releasedDate" type="date-time" enable-audit-log="update"/>
+        <field name="releasedByUserId" type="id"/>
+        <field name="releaseDecisionId" type="id"><description>The approval (MarketingDecision) the release went out under</description></field>
+        <field name="selfDispatch" type="text-indicator"><description>Y: released by its author or approver under the one-person-team
+            flag, with fewer than 500 recipients counted at the release</description></field>
+        <field name="releasedCount" type="number-integer"><description>The recipients counted at the release</description></field>
+        <field name="communicationEventId" type="id"><description>The send's CommunicationEvent (the approved subject and body), which
+            each recipient's ContactListCommStatus and unsubscribe token name</description></field>
+        <field name="unsubscribeBaseUrl" type="text-medium"><description>The conf webapp's root at the release (ec.web.getWebappRootUrl), for
+            the /u/ page when the sending profile has no site with Account and no configured root (its relay's web base URL, the send
+            template's)</description></field>
+        <field name="pausedDate" type="date-time"/>
+        <field name="cancelledDate" type="date-time"/>
+        <field name="cancelReason" type="text-medium" enable-audit-log="update"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="lastDispatchDate" type="date-time"/>
+        <field name="dispatchNote" type="text-medium"><description>Why the last dispatch run handed off nothing (a campaign no longer
+            approved, a sending profile not ready), for the dispatcher</description></field>
+        <relationship type="one" title="Release" related="mantle.marketing.campaign.MarketingDecision">
+            <key-map field-name="releaseDecisionId" related="marketingDecisionId"/></relationship>
+        <relationship type="one" related="mantle.party.communication.CommunicationEvent"/>
+    </extend-entity>
+
+    <!-- A recipient's dispatch: the claim of the worker that holds it (claimKey, until leaseUntilDate: a page claimed again after the
+        lease ends hands off each recipient once, the ledger answering the delivery it holds for the recipient's key), when it was
+        handed off to the ledger (messageDeliveryId), or why it was skipped at dispatch (a withdrawal, a suppression, a changed address,
+        the frequency cap: skipReasonCode, MarketingEligibility.js's reasons). -->
+    <extend-entity entity-name="CampaignRecipient" package="mantle.marketing.campaign">
+        <field name="claimKey" type="text-short"/>
+        <field name="leaseUntilDate" type="date-time"/>
+        <field name="handedOffDate" type="date-time"/>
+        <field name="skipReasonCode" type="text-short"/>
+        <field name="skipDate" type="date-time"/>
+        <index name="CMP_RCPT_DELIVERY"><index-field name="messageDeliveryId"/></index>
+    </extend-entity>
+
+    <!-- A recipient's place in its send's experiment: the variant it is sent (a sample's, assigned at preparation and never again; a
+        remainder recipient's, the winner's once released) and whether it is of the remainder (held, CrsHeld, until the winner's
+        release). -->
+    <extend-entity entity-name="CampaignRecipient" package="mantle.marketing.campaign">
+        <field name="campaignExperimentVariantId" type="id"/>
+        <field name="experimentRemainder" type="text-indicator"><description>Y: of the remainder, held for the winner</description></field>
+        <relationship type="one" related="mantle.marketing.campaign.CampaignExperimentVariant"/>
+    </extend-entity>
+
+    <!-- A send step's content (P11): a CampaignSend of an automation (its marketingAutomationId and automationStepId), status
+        CsAutomation, which the send services neither list, edit, prepare, approve nor release: it is prepared when its step is stored,
+        approved with the automation, and each participant who reaches the step becomes one of its CampaignRecipient rows, handed to the
+        ledger by the step run (MarketingAutomations.js) through the dispatch's checks. The automation's steps also have a policy bound:
+        MarketingPolicy automationMaxSteps (ten when none). -->
+    <extend-entity entity-name="CampaignSend" package="mantle.marketing.campaign">
+        <field name="marketingAutomationId" type="id"/>
+        <field name="automationStepId" type="id"/>
+        <relationship type="one" related="mantle.marketing.automation.MarketingAutomation"/>
+        <index name="CMP_SEND_AUTOMATION"><index-field name="marketingAutomationId"/></index>
+    </extend-entity>
+
+    <extend-entity entity-name="MarketingPolicy" package="mantle.marketing.campaign">
+        <field name="automationMaxSteps" type="number-integer" enable-audit-log="true"><description>The most steps an automation may
+            have (ten when empty)</description></field>
+    </extend-entity>
+
+    <!-- An invitation send (MarketingFormServices create#Invitations): an ordinary CampaignSend whose every recipient's message carries
+        their own invitation link to the publication (build#CampaignDelivery makes the FormInvitation once per recipient and a link per
+        attempt), so an invitation reaches only a recipient the send's preparation and dispatch admit (promotional eligibility). -->
+    <extend-entity entity-name="CampaignSend" package="mantle.marketing.campaign">
+        <field name="formPublicationId" type="id" enable-audit-log="update"/>
+        <relationship type="one-nofk" title="FormPublication" related="mantle.party.FormPublication">
+            <key-map field-name="formPublicationId" related="publicationId"/></relationship>
+        <index name="CMP_SEND_FORM_PUB"><index-field name="formPublicationId"/></index>
+    </extend-entity>
+
+    <!-- Newsletter assembly (design §8 ContentDetail Distribution): a send that takes the approved posts of a blog category as of its
+        preparation names the category; the preparation records each post it took with the page version it read
+        (CampaignSendPost), so the send's content stays what was approved then. A send sets neither WikiBlog.publishDate nor a page's
+        published version, and WikiBlogCategory.sentDate is not its record. -->
+    <extend-entity entity-name="CampaignSend" package="mantle.marketing.campaign">
+        <field name="postCategoryId" type="id" enable-audit-log="update"><description>The blog category (WikiPageCategory) whose
+            approved posts the preparation adds to the body</description></field>
+        <field name="campaignContentId" type="id"><description>The content link the send was drafted from (ContentDetail's
+            Distribution)</description></field>
+        <relationship type="one-nofk" title="PostCategory" related="moqui.resource.wiki.WikiPageCategory">
+            <key-map field-name="postCategoryId" related="wikiPageCategoryId"/></relationship>
+        <relationship type="one-nofk" related="mantle.marketing.campaign.CampaignContent"/>
+        <index name="CMP_SEND_CONTENT"><index-field name="campaignContentId"/></index>
+    </extend-entity>
+
+    <!-- The organization's tracking settings (design §8, §12 CampaignDefaults): the privileged external allowlist a tracking link's
+        destination may name beside the hosts of the organization's own sites, and whether its public tracking sets a visitor key
+        (a first-party cookie; off by default, and never for a browser that asks not to be tracked). -->
+    <extend-entity entity-name="MarketingPolicy" package="mantle.marketing.campaign">
+        <field name="trackingDomains" type="text-long" enable-audit-log="true"><description>External hosts a tracking link may lead
+            to, one a line (a host or a parent domain), at most twenty</description></field>
+        <field name="visitorKeys" type="text-indicator" enable-audit-log="true"><description>Whether public tracking sets a visitor
+            key (Y), off by default</description></field>
+    </extend-entity>
+
+    <!-- A landing page's optional review (impl-marketing §4 Nov 14, P15): a MarketingDecision of the page kind names the wiki version
+        it reviewed; publishing stays the content grant's act with or without one. -->
+    <extend-entity entity-name="MarketingDecision" package="mantle.marketing.campaign">
+        <field name="targetVersionName" type="text-short"><description>A page's text version reviewed</description></field>
+    </extend-entity>
+
+    <!-- A campaign's derived summaries (design §11 CampaignPerformance; the reporting job, §15.3): numSent (the native field: the
+        transport-accepted promotional recipient executions of its sends, never a test or a transactional receipt) and
+        qualifiedLeadCount (its leads Sales qualified, each once; not the legacy id-typed convertedLeads), with the time they were
+        computed. Rebuildable: the aggregation recomputes them whole. -->
+    <extend-entity entity-name="MarketingCampaign" package="mantle.marketing.campaign">
+        <field name="qualifiedLeadCount" type="number-integer"/>
+        <field name="summaryDate" type="date-time"><description>When numSent and qualifiedLeadCount were last computed</description></field>
+    </extend-entity>
+
+    <!-- ===== end of Marketing P5 ===== -->
+    <!-- ===== Marketing P7: PASS Marketing, subscription and preferences (impl-marketing P7, F24, F25, F26, F43; design-marketing §13,
+        §14.1) ===== -->
+    <!-- A list's public offer is its policy's publicOffer with a site and an opening interval (P7): offered on that site's Marketing
+        mount only while the interval is open; ContactList.isPublic alone publishes nothing (mantle.marketing.MarketingPortalServices). -->
+    <extend-entity entity-name="ContactListPolicy" package="mantle.marketing.contact">
+        <field name="publicSiteId" type="id"><description>The PASS site whose Marketing mount offers the list (a public offer needs
+            one whose mount targets the list's organization)</description></field>
+        <field name="offerFromDate" type="date-time"><description>The public offer opens (empty: from the policy's start)</description></field>
+        <field name="offerThruDate" type="date-time"><description>The public offer closes (empty: open while the policy is)</description></field>
+        <relationship type="one" title="PublicSite" related="mantle.public.PublicSite">
+            <key-map field-name="publicSiteId" related="siteId"/></relationship>
+    </extend-entity>
+
+    <!-- P7: a public request (the PASS Subscribe page, PASS's request key) or a checkout's store-news choice: its site, the request
+        it belongs to (one public request asks one or more topics: each topic's row names the first row's id), the request key, when
+        its confirmation link expires, when it was confirmed and its verification delivery. The link's token is never kept: each
+        verification message makes its own (SubscriptionRequestToken, its digest only). -->
+    <extend-entity entity-name="SubscriptionRequest" package="mantle.marketing.contact">
+        <field name="siteId" type="id"><description>The PASS site of a public request</description></field>
+        <field name="requestGroupId" type="id"><description>The public request this row is a topic of (its first row's id)</description></field>
+        <field name="requestKey" type="text-medium"><description>A digest of the site, the address and PASS's request key: a repeat
+            answers the first request</description></field>
+        <field name="expireDate" type="date-time"><description>A public request is confirmed only before this</description></field>
+        <field name="verifiedDate" type="date-time"><description>When the recipient confirmed it</description></field>
+        <field name="verificationDeliveryId" type="id"><description>The ledger delivery of its verification message</description></field>
+        <relationship type="one" title="PublicSite" related="mantle.public.PublicSite">
+            <key-map field-name="siteId"/></relationship>
+        <relationship type="one" title="Verification" related="mantle.party.MessageDelivery">
+            <key-map field-name="verificationDeliveryId" related="deliveryId"/></relationship>
+        <index name="SUBSCR_REQ_GROUP"><index-field name="requestGroupId"/></index>
+        <index name="SUBSCR_REQ_KEY"><index-field name="requestKey"/></index>
+    </extend-entity>
+
+    <!-- ===== end of Marketing P14 ===== -->
+    <!-- ===== Marketing P15: tracking links and capture (impl-marketing P15, F31, F87; design-marketing §8 TrackingLinks,
+        TrackingLinkDetail, "Capture on the authority", §14.1, §18) ===== -->
+    <!-- A campaign's tracking link (design §14.1 TrackingCode, extended; mantle.marketing.TrackingServices store#TrackingLink): its
+        organization (the campaign's), the site its public URL is on (/trk/{siteId}/{publicCode} at the site's canonical host, the
+        public code random and unique, never the id), the typed UTM source, medium and content (the organization's vocabulary codes),
+        and its registered destination: a landing page of the organization's Marketing mount (sitePageId) or an https URL (the native
+        redirectUrl) on a host of a site that serves the organization or on the privileged external allowlist (MarketingPolicy
+        trackingDomains). A disabled or ended link answers its safe destination (safeUrl, checked the same way) or a neutral page;
+        nothing of a request ever names where a link goes. -->
+    <extend-entity entity-name="TrackingCode" package="mantle.marketing.tracking">
+        <field name="organizationPartyId" type="id"><description>The campaign's organization</description></field>
+        <field name="siteId" type="id" enable-audit-log="update"><description>The site the public URL is on</description></field>
+        <field name="publicCode" type="text-short"><description>The code of the public URL, random and unique</description></field>
+        <field name="destinationKindEnumId" type="id" enable-audit-log="update"/>
+        <field name="sitePageId" type="id" enable-audit-log="update"><description>For a landing page: the page of the organization's
+            Marketing mount</description></field>
+        <field name="safeUrl" type="text-long" enable-audit-log="update"><description>Where a disabled or ended link goes (else a
+            neutral page)</description></field>
+        <field name="utmSource" type="text-short" enable-audit-log="update"/>
+        <field name="utmMedium" type="text-short" enable-audit-log="update"/>
+        <field name="utmContent" type="text-short" enable-audit-log="update"/>
+        <field name="disabled" type="text-indicator" enable-audit-log="update"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.public.PublicSite"/>
+        <relationship type="one-nofk" related="mantle.public.PublicSitePage"/>
+        <relationship type="one" title="TrackingDestinationKind" related="moqui.basic.Enumeration">
+            <key-map field-name="destinationKindEnumId"/></relationship>
+        <index name="TRK_CODE_PUBLIC" unique="true"><index-field name="publicCode"/></index>
+        <index name="TRK_CODE_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Tracking Destination Kind" enumTypeId="TrackingDestinationKind"/>
+            <moqui.basic.Enumeration description="Landing page" enumId="TdkSitePage" enumTypeId="TrackingDestinationKind" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Web address" enumId="TdkUrl" enumTypeId="TrackingDestinationKind" sequenceNum="2"/>
+        </seed-data>
+    </extend-entity>
+</entities>

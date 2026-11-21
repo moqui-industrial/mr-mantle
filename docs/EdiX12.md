@@ -3,7 +3,7 @@
 Mantle's X12 business services for a supplier receiving retail purchase orders: `service/mantle/edi/EdiServices.xml`
 with `X12.js` (envelopes, validation, 997s, the lifecycle of documents sent), the mapping services the profile names
 (`order/X12OrderServices.xml`, `shipment/X12ShipmentServices.xml`, `account/X12InvoiceServices.xml`, on
-`X12Documents.js`), the grammars in `service/mantle/edi/x12/`, and the records in `entity/EdiEntities.xml`. They run on
+`X12Documents.js`), the grammars in `service/mantle/edi/x12/`, and the records in `entity/edi/EdiEntities.xml`. They run on
 the framework's `EdiHandler` and System Messages. They were ported from the Java Moqui
 [mantle-edi](https://github.com/moqui/mantle-edi/tree/134acb6) component (1.1.5, `134acb6`). The plan and its
 implementation record are [plan/payments-shipping-edi.md](../plan/payments-shipping-edi.md) (E1).

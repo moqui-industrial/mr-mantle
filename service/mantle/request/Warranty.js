@@ -1,5 +1,5 @@
 // Warranty claims (CS-WARRANTY; design-customer-service §5 WarrantyClaims and WarrantyAssessment, crosscut §3.2 DeliveredItems;
-// impl-customer-service §4, P11, F45, F50, F67; WarrantyServices.xml, SupportWarrantyEntities.xml). A claim is its case, a Request
+// impl-customer-service §4, P11, F45, F50, F67; WarrantyServices.xml, entity/request/SupportEntities.xml). A claim is its case, a Request
 // of type RqtWarranty: its product a RequestItem, its asset (the sold serial or lot), order, invoice and agreement RequestRecord
 // links, and its evidence's revision Request.claimRevision. The coverage is read, by §4's hierarchy: an AgrService agreement of
 // the organization with the customer, in effect at the claim's date, with a warranty term (TtWarranty) for the product; then

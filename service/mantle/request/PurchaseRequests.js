@@ -1,7 +1,7 @@
 // Purchase requests and their sourcing (design-purchasing §4 Requests, RequestDetail and RequestSourcing; crosscut §3.11
 // PurchaseSourcingProgress and PurchaseRequestApproval; impl-purchasing P10, R-PUR-01, R-PUR-06, F3, F4): a Request of type
 // RqtPurchase whose organization is its OrgInternal RequestParty, its lines RequestItems with a unit and a cost centre
-// (PurchaseRequestEntities.xml). Its revision is the time of the last change to a line's audit-logged product, quantity,
+// (entity/request/RequestAndRequirementAndSupportExtensions.xml). Its revision is the time of the last change to a line's audit-logged product, quantity,
 // unit, required date, supplier or cost centre. A requester files and submits their own request (no permission: the request
 // is their organization's demand, the approval its gate); a buyer (PURCHASE_ORDER_EDIT) edits any of the organization's.
 // Submitting sends the PurchaseRequestApproval topic to the approval policy's approvers (PasRequest rows, else the no-policy

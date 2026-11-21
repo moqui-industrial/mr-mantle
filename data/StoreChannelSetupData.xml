@@ -12,7 +12,7 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<!-- Store channel integrations (impl-commerce P13, COM-CHANNEL; entity/StoreChannelEntities.xml, StoreChannels.js): the
+<!-- Store channel integrations (impl-commerce P13, COM-CHANNEL; entity/product/StoreEntities.xml, StoreChannels.js): the
     message types of the channel order connector. StoreChannelOrders is the API intake (POST /rest/sm/StoreChannelOrders/
     {remote}, the remote authenticated by the endpoint): receive#ChannelOrders keeps the receipt and one message per order,
     deduplicated, and consume#ChannelOrder makes each order in its own transaction. StoreChannelImport is ChannelImport's

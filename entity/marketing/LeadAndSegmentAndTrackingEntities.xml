@@ -1,0 +1,470 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ===== end of Marketing P12 ===== -->
+    <!-- ===== Marketing P13: leads and the Sales handoff (impl-marketing P13; design-marketing §10 Leads, LeadRules, §15.3 Capture
+        handoff; MKT-LEAD) ===== -->
+    <!-- A lead rule (design §10 LeadRules, §14.1 MarketingLeadRule): how the accepted answers of one source (a lead form's publication;
+        later an event's registration or attendance, P17) are handed to Sales' mantle.sales.OpportunityServices.store#LeadIntake: the
+        trigger, the Sales source a lead takes when the organization's UTM map has none (defaultDataSourceId), the team whose queue it
+        goes to, the published fields mapped to the inquiry's name, organization, email and phone and those entered in its notes (no
+        other answer reaches Sales), an optional condition on one answer, and the notice the visitor reads on the page. One current rule
+        per source: a change starts a new rule from now and ends the one it replaces (mantle.marketing.MarketingFormServices
+        store#LeadRule), so a capture keeps the rule it was made under. Ended, never deleted. -->
+    <entity entity-name="MarketingLeadRule" package="mantle.marketing.lead" cache="never">
+        <field name="leadRuleId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="ruleName" type="text-medium"/>
+        <field name="sourceKindEnumId" type="id"/>
+        <field name="sourceId" type="id"><description>The source record: a FormPublication of the lead purpose (MlsFormPublication)</description></field>
+        <field name="triggerEnumId" type="id"/>
+        <field name="marketingCampaignId" type="id"><description>The source's campaign when the rule was made (a lead takes the
+            publication's campaign at each handoff)</description></field>
+        <field name="dataSourceId" type="id" enable-audit-log="true"><description>The Sales lead source when the UTM map has none: one
+            offered to the organization</description></field>
+        <field name="teamPartyId" type="id" enable-audit-log="true"><description>The Sales team whose queue a lead goes to: a current
+            team of the organization</description></field>
+        <field name="nameFieldName" type="text-short" enable-audit-log="true"/>
+        <field name="organizationFieldName" type="text-short" enable-audit-log="true"/>
+        <field name="emailFieldName" type="text-short" enable-audit-log="true"/>
+        <field name="phoneFieldName" type="text-short" enable-audit-log="true"/>
+        <field name="noteFieldNames" type="text-medium" enable-audit-log="true"><description>The published fields whose answers go in
+            the lead's notes, comma separated</description></field>
+        <field name="conditionFieldName" type="text-short" enable-audit-log="true"/>
+        <field name="conditionValue" type="text-medium" enable-audit-log="true"><description>Hand off only when the condition field's
+            answer is (or, for a multiple choice, includes) this value</description></field>
+        <field name="noticeText" type="text-medium"><description>What the page tells the visitor about the follow-up (plain text, no
+            expression); not a consent to anything else</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="endedByUserId" type="id"/>
+        <field name="replacesLeadRuleId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="MarketingLeadSourceKind" related="moqui.basic.Enumeration" short-alias="sourceKind">
+            <key-map field-name="sourceKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="MarketingLeadTrigger" related="moqui.basic.Enumeration" short-alias="trigger">
+            <key-map field-name="triggerEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.marketing.campaign.MarketingCampaign" short-alias="campaign"/>
+        <relationship type="one-nofk" related="moqui.basic.DataSource" short-alias="dataSource"/>
+        <relationship type="one-nofk" title="Team" related="mantle.party.Party" short-alias="team">
+            <key-map field-name="teamPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Replaces" related="mantle.marketing.lead.MarketingLeadRule" short-alias="replaces">
+            <key-map field-name="replacesLeadRuleId" related="leadRuleId"/></relationship>
+        <index name="MKT_LEAD_RULE_SRC"><index-field name="sourceKindEnumId"/><index-field name="sourceId"/></index>
+        <index name="MKT_LEAD_RULE_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Marketing lead source kind" enumTypeId="MarketingLeadSourceKind"/>
+            <moqui.basic.Enumeration enumId="MlsFormPublication" description="Lead form" sequenceNum="1" enumTypeId="MarketingLeadSourceKind"/>
+            <moqui.basic.EnumerationType description="Marketing lead trigger" enumTypeId="MarketingLeadTrigger"/>
+            <moqui.basic.Enumeration enumId="MltFormSubmitted" description="Form answered" sequenceNum="1" enumTypeId="MarketingLeadTrigger"/>
+        </seed-data>
+    </entity>
+
+    <!-- A lead capture (design §10 LeadRules, §14.1 MarketingLeadCapture, §15.3 Capture handoff): one per rule and source event (an
+        accepted form submission), made after the answer is kept and handed to Sales once under its own operation key (operationKey,
+        unique: a retry, the capture job's or an operator's ReprocessCapture, answers Sales' first result and never makes a second
+        lead). Its state: pending, handed off (the lead it made or joined, duplicate Y when it joined an open lead: Sales' review item),
+        skipped (the rule's condition not met) or failed (errorText: the reason code and words, never an answer; tried again at
+        nextAttemptDate). A failed handoff leaves the answer as it was; nothing here subscribes anyone. Written only by
+        MarketingFormServices (MarketingLeads.js). -->
+    <entity entity-name="MarketingLeadCapture" package="mantle.marketing.lead" cache="never">
+        <field name="leadCaptureId" type="id" is-pk="true"/>
+        <field name="leadRuleId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="sourceKindEnumId" type="id"/>
+        <field name="sourceId" type="id"><description>The source event: a FormSubmission (MlcsFormSubmission)</description></field>
+        <field name="publicationId" type="id"/>
+        <field name="formResponseId" type="id"/>
+        <field name="marketingCampaignId" type="id"/>
+        <field name="statusEnumId" type="id"/>
+        <field name="operationKey" type="text-short"/>
+        <field name="salesLeadIntakeId" type="id"/>
+        <field name="salesOpportunityId" type="id"/>
+        <field name="duplicate" type="text-indicator"/>
+        <field name="attemptCount" type="number-integer"/>
+        <field name="lastAttemptDate" type="date-time"/>
+        <field name="nextAttemptDate" type="date-time"/>
+        <field name="errorText" type="text-medium"/>
+        <field name="capturedDate" type="date-time"/>
+        <field name="handedOffDate" type="date-time"/>
+        <field name="reprocessedByUserId" type="id"/>
+        <field name="reprocessReason" type="text-medium"/>
+        <relationship type="one" related="mantle.marketing.lead.MarketingLeadRule" short-alias="rule"/>
+        <relationship type="one" title="MarketingLeadCaptureSource" related="moqui.basic.Enumeration" short-alias="sourceKind">
+            <key-map field-name="sourceKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="MarketingLeadCaptureStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.FormPublication" short-alias="publication">
+            <key-map field-name="publicationId"/></relationship>
+        <relationship type="one-nofk" related="mantle.sales.opportunity.SalesOpportunity" short-alias="opportunity"/>
+        <index name="MKT_LEAD_CAP_EVENT" unique="true"><index-field name="leadRuleId"/><index-field name="sourceKindEnumId"/>
+            <index-field name="sourceId"/></index>
+        <index name="MKT_LEAD_CAP_KEY" unique="true"><index-field name="operationKey"/></index>
+        <index name="MKT_LEAD_CAP_DUE"><index-field name="statusEnumId"/><index-field name="nextAttemptDate"/></index>
+        <index name="MKT_LEAD_CAP_CAMP"><index-field name="marketingCampaignId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Marketing lead capture source" enumTypeId="MarketingLeadCaptureSource"/>
+            <moqui.basic.Enumeration enumId="MlcsFormSubmission" description="Form answer" sequenceNum="1" enumTypeId="MarketingLeadCaptureSource"/>
+            <moqui.basic.EnumerationType description="Marketing lead capture status" enumTypeId="MarketingLeadCaptureStatus"/>
+            <moqui.basic.Enumeration enumId="MlcPending" description="Waiting for Sales" sequenceNum="1" enumTypeId="MarketingLeadCaptureStatus"/>
+            <moqui.basic.Enumeration enumId="MlcHandedOff" description="Handed to Sales" sequenceNum="2" enumTypeId="MarketingLeadCaptureStatus"/>
+            <moqui.basic.Enumeration enumId="MlcSkipped" description="Not handed off (condition not met)" sequenceNum="3" enumTypeId="MarketingLeadCaptureStatus"/>
+            <moqui.basic.Enumeration enumId="MlcFailed" description="Handoff failed" sequenceNum="4" enumTypeId="MarketingLeadCaptureStatus"/>
+        </seed-data>
+    </entity>
+
+    <!-- ===== end of Marketing P4 ===== -->
+    <!-- ===== Marketing P5: segments and audience preview (impl-marketing P5, F5; design-marketing §4 Segments, SegmentDetail,
+        AudiencePreview, §14.1) ===== -->
+    <!-- A segment's saved filter (design §4 SavedFilter): a typed, bounded predicate tree over the registered projections of
+        mantle.marketing.SegmentServices (MarketingSegments.js sources: party, contact, purchase, engagement and Sales' leads,
+        opportunities and accounts), stored as JSON that names only a source, a field, an operator and a value of each condition, in
+        ALL and ANY groups; never an entity name, SQL or script. Dated: the filter in effect is ended when the next starts, never
+        deleted. The other columns of MarketSegment and its native rule rows stay as they were (F5). -->
+    <entity entity-name="MarketSegmentFilter" package="mantle.marketing.segment" cache="never">
+        <field name="marketSegmentId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="filterJson" type="text-very-long"><description>{match: all|any, conditions: [{source, field, operator, value} or a
+            nested group]}, at most three levels and twenty conditions</description></field>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" related="mantle.marketing.segment.MarketSegment"/>
+        <relationship type="one" title="ChangedBy" related="moqui.security.UserAccount">
+            <key-map field-name="changedByUserId" related="userId"/></relationship>
+    </entity>
+
+    <!-- ========================================================= -->
+    <!-- mantle.marketing.segment -->
+    <!-- ========================================================= -->
+    <entity entity-name="MarketInterest" package="mantle.marketing.segment">
+        <field name="productCategoryId" type="id" is-pk="true"/>
+        <field name="marketSegmentId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="mantle.product.category.ProductCategory"/>
+        <relationship type="one" related="mantle.marketing.segment.MarketSegment"/>
+    </entity>
+
+    <entity entity-name="MarketSegment" package="mantle.marketing.segment">
+        <field name="marketSegmentId" type="id" is-pk="true"/>
+        <field name="marketSegmentTypeEnumId" type="id"/>
+        <field name="typeSequenceNum" type="number-integer"><description>
+            Intra-type Sequence Number for sets of segments that are not fully mutually exclusive.
+            When determining a MarketSegment by type, evaluate in order of this number to determine the first match.
+        </description></field>
+        <field name="parentMarketSegmentId" type="id"><description>
+            NOTE: this description is for the intended application of parentMarketSegmentId, actual behavior depends on code and could vary
+
+            A MarketSegment tree is a dependency tree with bi-directional dependencies so that any node in the tree can be
+            evaluated for membership by a Party while being able to configure segment factors at any level of the tree and have
+            them apply to all levels of a branch of the tree.
+
+            To implement this the general rule is that a Party is a member of a MarketSegment if all factors of that MarketSegment
+            match, and the factors of the parent MarketSegment match (if there is one), and the factors of at least one child
+            segment all match (if there is at least one child segment).
+
+            For example if segment A has two child segments A-1 and A-2, then a Party is in A if all factors of A match AND
+            they are a member of either sub-segment A-1 or sub-segment A-2. A Party is in A-2 if all factors of A-2 match,
+            and all factors of A match.
+        </description></field>
+        <field name="description" type="text-medium"/>
+        <field name="productStoreId" type="id"/>
+        <field name="ownerPartyId" type="id" enable-audit-log="update" default="'_NA_'"/>
+        <!-- impl-marketing P5 (design-marketing §4 Segments, SegmentDetail; F5): a segment's name, how it is defined (MskRule: the native
+            rules and the saved filter with its explicit members; MskExplicit: its explicit members alone; empty is a rule segment), who
+            started it, when it was archived (no new use; history kept), and the revision of its definition, raised by each change of
+            its rules, filter or parent (mantle.marketing.SegmentServices) -->
+        <field name="segmentName" type="text-medium"/>
+        <field name="segmentKindEnumId" type="id" enable-audit-log="update"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="archivedDate" type="date-time" enable-audit-log="update"/>
+        <field name="definitionRevision" type="number-integer"/>
+        <relationship type="one" title="MarketSegmentType" related="moqui.basic.Enumeration">
+            <key-map field-name="marketSegmentTypeEnumId"/></relationship>
+        <relationship type="one" title="MarketSegmentKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="segmentKindEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.store.ProductStore"/>
+        <relationship type="one" title="Parent" related="mantle.marketing.segment.MarketSegment" short-alias="parent">
+            <key-map field-name="parentMarketSegmentId"/></relationship>
+        <relationship type="one" title="Owner" related="mantle.party.Party" short-alias="owner">
+            <key-map field-name="ownerPartyId"/></relationship>
+        <seed-data>
+            <!-- Market Segment Type -->
+            <moqui.basic.EnumerationType description="Market Segment Type" enumTypeId="MarketSegmentType"/>
+            <moqui.basic.Enumeration enumId="MARKET_SEGMENT" description="Market Segment" enumTypeId="MarketSegmentType"/>
+            <moqui.basic.Enumeration enumId="SALES_SEGMENT" description="Sales Segment" enumTypeId="MarketSegmentType"/>
+            <!-- impl-marketing P5 -->
+            <moqui.basic.EnumerationType description="Market segment kind" enumTypeId="MarketSegmentKind"/>
+            <moqui.basic.Enumeration enumId="MskRule" description="Rules" sequenceNum="1" enumTypeId="MarketSegmentKind"/>
+            <moqui.basic.Enumeration enumId="MskExplicit" description="Explicit members" sequenceNum="2" enumTypeId="MarketSegmentKind"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="MarketSegmentClassification" package="mantle.marketing.segment">
+        <description>Define the segment by PartyClassification</description>
+        <field name="marketSegmentId" type="id" is-pk="true"/>
+        <field name="partyClassificationId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.marketing.segment.MarketSegment"/>
+        <relationship type="one" related="mantle.party.PartyClassification"/>
+    </entity>
+
+    <entity entity-name="MarketSegmentDimension" package="mantle.marketing.segment">
+        <description>Define the segment in terms of PartyDimension values</description>
+        <field name="marketSegmentId" type="id" is-pk="true"/>
+        <field name="uomDimensionTypeId" type="id" is-pk="true"/>
+        <field name="uomId" type="id" enable-audit-log="update"/>
+        <field name="minValue" type="number-decimal" enable-audit-log="update"/>
+        <field name="maxValue" type="number-decimal" enable-audit-log="update"/>
+        <relationship type="one" related="mantle.marketing.segment.MarketSegment" short-alias="marketSegment"/>
+        <relationship type="one" related="moqui.basic.UomDimensionType" short-alias="type"/>
+        <relationship type="one" related="moqui.basic.Uom" short-alias="uom"/>
+    </entity>
+
+    <entity entity-name="MarketSegmentGeo" package="mantle.marketing.segment">
+        <description>Define the segment by geographic area</description>
+        <field name="marketSegmentId" type="id" is-pk="true"/>
+        <field name="geoId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.marketing.segment.MarketSegment"/>
+        <relationship type="one" related="moqui.basic.Geo"/>
+    </entity>
+
+    <entity entity-name="MarketSegmentParty" package="mantle.marketing.segment">
+        <field name="marketSegmentId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <!-- impl-marketing P5 (F5; design-marketing §4 ExplicitMembers): an explicit member is dated and includes or excludes the party
+            (MspInclude, the default for a legacy row; MspExclude, which wins over every match); a row is ended, never deleted, and a
+            party added again after its end takes the same row with new dates, the audit log keeping the earlier ones -->
+        <field name="fromDate" type="date-time" enable-audit-log="update"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="memberKindEnumId" type="id" enable-audit-log="update"/>
+        <field name="comments" type="text-medium"/>
+        <relationship type="one" related="mantle.marketing.segment.MarketSegment"/>
+        <relationship type="one" title="MarketSegmentMemberKind" related="moqui.basic.Enumeration" short-alias="memberKind">
+            <key-map field-name="memberKindEnumId"/></relationship>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.RoleType"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Market segment member kind" enumTypeId="MarketSegmentMemberKind"/>
+            <moqui.basic.Enumeration enumId="MspInclude" description="Include" sequenceNum="1" enumTypeId="MarketSegmentMemberKind"/>
+            <moqui.basic.Enumeration enumId="MspExclude" description="Exclude" sequenceNum="2" enumTypeId="MarketSegmentMemberKind"/>
+        </seed-data>
+    </entity>
+
+    <!-- An observation captured on the authority (design §8 "Capture on the authority", §14.1 MarketingTrackingEvent;
+        TrackingServices record#TrackingEvent): the link, its organization and campaign, the site, the kind (a click of the link, an
+        open by a send's pixel, a visit of a page carrying the code, or a known automated fetch: a link scanner, a prefetch), the
+        digest of the visitor's opaque first-party key (never the key, never a party id; none without the site's visitor keys or with
+        the browser's do-not-track), and the recipient only for a send's personalized link or pixel of a recipient who allows tracking
+        (PcpTracking). A fetch is an observation, never a conversion, a consent or a submission. TrackingCodeVisit is written beside it
+        when the request has a local visit. -->
+    <entity entity-name="MarketingTrackingEvent" package="mantle.marketing.tracking" cache="never">
+        <field name="trackingEventId" type="id" is-pk="true"/>
+        <field name="trackingCodeId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="marketingCampaignId" type="id"/>
+        <field name="siteId" type="id"/>
+        <field name="eventKindEnumId" type="id"/>
+        <field name="automated" type="text-indicator"/>
+        <field name="visitorKeyHash" type="text-medium"><description>The digest of the visitor's opaque key</description></field>
+        <field name="campaignRecipientId" type="id"><description>Only for a recipient who allows tracking</description></field>
+        <field name="campaignSendId" type="id"/>
+        <field name="visitId" type="id"/>
+        <field name="eventDate" type="date-time"/>
+        <relationship type="one" related="mantle.marketing.tracking.TrackingCode"/>
+        <relationship type="one" title="TrackingEventKind" related="moqui.basic.Enumeration">
+            <key-map field-name="eventKindEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.marketing.campaign.CampaignRecipient"/>
+        <index name="MKT_TRK_EVT_CODE"><index-field name="trackingCodeId"/><index-field name="eventDate"/></index>
+        <index name="MKT_TRK_EVT_SITE"><index-field name="siteId"/><index-field name="eventDate"/></index>
+        <index name="MKT_TRK_EVT_RCPT"><index-field name="campaignRecipientId"/></index>
+        <index name="MKT_TRK_EVT_SEND"><index-field name="campaignSendId"/></index>
+        <!-- P20 review: the order attribution reads an order's events by its visit and by the visitor keys that visit carried, after
+            every placement; retention reads an organization's events by date -->
+        <index name="MKT_TRK_EVT_VISIT"><index-field name="visitId"/></index>
+        <index name="MKT_TRK_EVT_KEY"><index-field name="visitorKeyHash"/><index-field name="eventDate"/></index>
+        <index name="MKT_TRK_EVT_ORG"><index-field name="organizationPartyId"/><index-field name="eventDate"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Tracking Event Kind" enumTypeId="TrackingEventKind"/>
+            <moqui.basic.Enumeration description="Click" enumId="MteClick" enumTypeId="TrackingEventKind" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Open" enumId="MteOpen" enumTypeId="TrackingEventKind" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Page visit" enumId="MteVisit" enumTypeId="TrackingEventKind" sequenceNum="3"/>
+        </seed-data>
+    </entity>
+
+    <!-- A send recipient's personalized link token (design §8: opaque, server lookup, expiring): made at each attempt of the
+        delivery of a recipient who allows tracking (PcpTracking) under a sending profile that tracks them, for that message's tracking
+        links and pixel; only the digest is kept. The token rides in a link's token query parameter, which the request log redacts. -->
+    <entity entity-name="MarketingTrackingToken" package="mantle.marketing.tracking" cache="never">
+        <field name="tokenHash" type="text-medium" is-pk="true"/>
+        <field name="campaignRecipientId" type="id"/>
+        <field name="campaignSendId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="expireDate" type="date-time"/>
+        <relationship type="one" related="mantle.marketing.campaign.CampaignRecipient"/>
+        <index name="MKT_TRK_TOK_RCPT"><index-field name="campaignRecipientId"/></index>
+    </entity>
+
+    <!-- ========================================================= -->
+    <!-- mantle.marketing.tracking -->
+    <!-- ========================================================= -->
+    <entity entity-name="TrackingCode" package="mantle.marketing.tracking">
+        <field name="trackingCodeId" type="id" is-pk="true"/>
+        <field name="trackingCodeTypeEnumId" type="id"/>
+        <field name="marketingCampaignId" type="id"/>
+        <field name="redirectUrl" type="text-long"/>
+        <field name="comments" type="text-medium"/>
+        <field name="description" type="text-medium"/>
+        <field name="trackableLifetime" type="number-integer"/>
+        <field name="billableLifetime" type="number-integer"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="groupId" type="id"/>
+        <field name="subgroupId" type="id"/>
+        <relationship type="one" related="mantle.marketing.campaign.MarketingCampaign"/>
+        <relationship type="one" title="TrackingCodeType" related="moqui.basic.Enumeration">
+            <key-map field-name="trackingCodeTypeEnumId"/></relationship>
+        <seed-data>
+            <!-- Tracking Code Type -->
+            <moqui.basic.EnumerationType description="Tracking Code Type" enumTypeId="TrackingCodeType"/>
+            <moqui.basic.Enumeration enumId="ACCESS" description="Access Code" enumTypeId="TrackingCodeType"/>
+            <moqui.basic.Enumeration enumId="INTERNAL" description="Internal" enumTypeId="TrackingCodeType"/>
+            <moqui.basic.Enumeration enumId="EXTERNAL" description="External" enumTypeId="TrackingCodeType"/>
+            <moqui.basic.Enumeration enumId="PARTNER_MGD" description="Partner Managed" enumTypeId="TrackingCodeType"/>
+        </seed-data>
+    </entity>
+
+    <!--
+    Tracking code events
+    - incoming link parameter
+    - automatic for path (with option to only apply if no code in URL) possibly path + parameter constraint
+    - wiki page, for full page or content snippet (also track version number...)
+    -
+    -->
+    <entity entity-name="TrackingCodeOrder" package="mantle.marketing.tracking">
+        <field name="orderId" type="id" is-pk="true"/>
+        <field name="trackingCodeTypeEnumId" type="id" is-pk="true"/>
+        <field name="trackingCodeId" type="id"/>
+        <field name="isBillable" type="text-indicator"/>
+        <field name="siteId" type="text-medium"/>
+        <field name="hasExported" type="text-indicator"/>
+        <field name="affiliateReferredTimeStamp" type="date-time"/>
+        <relationship type="one" related="mantle.order.OrderHeader"/>
+        <relationship type="one" related="mantle.marketing.tracking.TrackingCode"/>
+        <relationship type="one" title="TrackingCodeType" related="moqui.basic.Enumeration">
+            <key-map field-name="trackingCodeTypeEnumId"/></relationship>
+    </entity>
+
+    <entity entity-name="TrackingCodeOrderReturn" package="mantle.marketing.tracking">
+        <field name="trackingCodeTypeEnumId" type="id" is-pk="true"/>
+        <field name="returnId" type="id" is-pk="true"/>
+        <field name="orderId" type="id" is-pk="true"/>
+        <field name="orderItemSeqId" type="id"/>
+        <field name="trackingCodeId" type="id"/>
+        <field name="isBillable" type="text-indicator"/>
+        <field name="siteId" type="text-medium"/>
+        <field name="hasExported" type="text-indicator"/>
+        <field name="affiliateReferredTimeStamp" type="date-time"/>
+        <relationship type="one" title="TrackingCodeType" related="moqui.basic.Enumeration">
+            <key-map field-name="trackingCodeTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.order.return.ReturnHeader"/>
+        <relationship type="one" related="mantle.order.OrderHeader"/>
+        <relationship type="one" related="mantle.marketing.tracking.TrackingCode"/>
+    </entity>
+
+    <entity entity-name="TrackingCodeVisit" package="mantle.marketing.tracking">
+        <field name="trackingCodeId" type="id" is-pk="true"/>
+        <field name="visitId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="sourceEnumId" type="id"/>
+        <relationship type="one" related="mantle.marketing.tracking.TrackingCode"/>
+        <relationship type="one" related="moqui.server.Visit"/>
+        <relationship type="one" title="TrackingCodeSource" related="moqui.basic.Enumeration">
+            <key-map field-name="sourceEnumId"/></relationship>
+        <seed-data>
+            <!-- Tracking Code Source -->
+            <moqui.basic.EnumerationType description="Tracking Code Source" enumTypeId="TrackingCodeSource"/>
+            <moqui.basic.Enumeration description="Cookie" enumId="TKCDSRC_COOKIE" enumTypeId="TrackingCodeSource"/>
+            <moqui.basic.Enumeration description="URL Parameter" enumId="TKCDSRC_URL_PARAM" enumTypeId="TrackingCodeSource"/>
+        </seed-data>
+    </entity>
+
+    <!-- ===== end of Marketing P18 ===== -->
+    <!-- ===== Marketing P20: attribution, reports and retention (impl-marketing P20, §4 Nov 11; design-marketing §11 Attribution,
+        CampaignPerformance, §15.3 the attribution and reporting jobs, X10) ===== -->
+    <!-- The one primary campaign of a placed sales order (design §11 Attribution, X10; TrackingServices record#OrderAttribution): decided
+        once, after the placement commits, from the most recent eligible tracking event of the order's identity (its local visit and the
+        visitor key that visit carried, or its customer as a consenting recipient) within the link's trackable lifetime, else the
+        source opportunity's campaign, else none (an unattributed decision, so the retry job does not ask again); its evidence and
+        evidence time kept, so a later campaign or link edit rewrites nothing. A staff correction ends the decision in force (thruDate,
+        supersededByLinkId) and starts its successor with the reason (basis MobStaff). One decision in force an order. The native
+        TrackingCodeOrder row (one per order and type) is written beside a decision from a tracking event, never billable. -->
+    <entity entity-name="MarketingOutcomeLink" package="mantle.marketing.tracking" cache="never">
+        <field name="outcomeLinkId" type="id" is-pk="true"/>
+        <field name="outcomeKindEnumId" type="id"><description>MarketingOutcomeKind: a placed order (MokOrder)</description></field>
+        <field name="orderId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The seller (the order's first part's vendor)</description></field>
+        <field name="marketingCampaignId" type="id"><description>The primary campaign; empty for an unattributed order</description></field>
+        <field name="basisEnumId" type="id"><description>MarketingAttributionBasis: a tracking event, the source opportunity, a staff
+            correction or none</description></field>
+        <field name="trackingCodeId" type="id"/>
+        <field name="trackingEventId" type="id"/>
+        <field name="salesOpportunityId" type="id"/>
+        <field name="evidenceDate" type="date-time"><description>When the evidence happened: the event, the opportunity's creation</description></field>
+        <field name="placedDate" type="date-time"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="decidedByUserId" type="id"><description>A staff correction's user; empty for the placement's decision</description></field>
+        <field name="reason" type="text-medium"><description>A staff correction's reason</description></field>
+        <field name="supersedesLinkId" type="id"/>
+        <field name="supersededByLinkId" type="id"/>
+        <field name="thruDate" type="date-time"><description>Ended by a successor decision</description></field>
+        <relationship type="one-nofk" related="mantle.order.OrderHeader"/>
+        <relationship type="one-nofk" related="mantle.marketing.campaign.MarketingCampaign"/>
+        <relationship type="one-nofk" related="mantle.marketing.tracking.TrackingCode"/>
+        <relationship type="one" title="MarketingOutcomeKind" related="moqui.basic.Enumeration">
+            <key-map field-name="outcomeKindEnumId"/></relationship>
+        <relationship type="one" title="MarketingAttributionBasis" related="moqui.basic.Enumeration">
+            <key-map field-name="basisEnumId"/></relationship>
+        <index name="MKT_OUTCOME_ORDER"><index-field name="orderId"/><index-field name="thruDate"/></index>
+        <index name="MKT_OUTCOME_CAMPAIGN"><index-field name="marketingCampaignId"/><index-field name="placedDate"/></index>
+        <index name="MKT_OUTCOME_ORG"><index-field name="organizationPartyId"/><index-field name="placedDate"/></index>
+        <index name="MKT_OUTCOME_EVENT"><index-field name="trackingEventId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Marketing Outcome Kind" enumTypeId="MarketingOutcomeKind"/>
+            <moqui.basic.Enumeration description="Placed order" enumId="MokOrder" enumTypeId="MarketingOutcomeKind" sequenceNum="1"/>
+            <moqui.basic.EnumerationType description="Marketing Attribution Basis" enumTypeId="MarketingAttributionBasis"/>
+            <moqui.basic.Enumeration description="Tracking event" enumId="MobTrackingEvent" enumTypeId="MarketingAttributionBasis" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Source opportunity" enumId="MobOpportunity" enumTypeId="MarketingAttributionBasis" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Staff correction" enumId="MobStaff" enumTypeId="MarketingAttributionBasis" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Unattributed" enumId="MobNone" enumTypeId="MarketingAttributionBasis" sequenceNum="4"/>
+        </seed-data>
+    </entity>
+
+    <!-- The reporting jobs' watermarks (design §15.3 "Reporting and retention": incremental with a watermark and freshness): the last
+        time a job's run finished its due work, what it did and what failed, which the reports show as their freshness. -->
+    <entity entity-name="MarketingReportWatermark" package="mantle.marketing.tracking" cache="never">
+        <field name="watermarkKey" type="id" is-pk="true"/>
+        <field name="watermarkDate" type="date-time"><description>Everything changed before this is counted</description></field>
+        <field name="lastRunDate" type="date-time"/>
+        <field name="itemCount" type="number-integer"/>
+        <field name="failedCount" type="number-integer"/>
+        <field name="lastError" type="text-medium"/>
+    </entity>
+</entities>

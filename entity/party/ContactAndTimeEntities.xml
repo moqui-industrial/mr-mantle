@@ -1,0 +1,483 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!-- mantle.party.contact -->
+    <!-- ========================================================= -->
+    <entity entity-name="ContactProjection" package="mantle.party.contact" cache="never">
+        <description>A projected CardDAV address book (mantle.party.ContactDavServices; CX-SYNC, impl-sales P5, F29), the contacts
+            counterpart of mantle.work.calendar.CalendarProjection: a read-only collection, collectionId projected-{projectionId},
+            whose cards are the parties its owner's service answers (ownerServiceName, implementing
+            mantle.party.ContactDavServices.define#ProjectionOwner) as the user, computed per request; no ContactBook row is
+            copied. A device's write is refused. Seeded by the owner's component; disabled Y leaves it out.</description>
+        <field name="projectionId" type="id" is-pk="true"/>
+        <field name="title" type="text-medium"/>
+        <field name="description" type="text-medium"/>
+        <field name="ownerServiceName" type="text-medium"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="disabled" type="text-indicator"/>
+    </entity>
+
+    <entity entity-name="ContactBook" package="mantle.party.contact" cache="never">
+        <description>A named collection of parties: a user's personal book (ownerUserId, visibility CbvPersonal) or a shared
+            book (visibility CbvShared, ownerPartyId the organization it belongs to, if any) that ContactBookShare rows open
+            to users and user groups. A personal contact (Party.privateOwnerUserId set) goes only in its owner's personal
+            books. The members are ContactBookParty rows; groups (labels) inside the book are ContactBookGroup.
+            mantle.party.ContactBookServices checks access: the owner manages a personal book, shares give view, edit or
+            manage on a shared one.</description>
+        <field name="contactBookId" type="id" is-pk="true"/>
+        <field name="contactBookName" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="color" type="text-short"><description>The book's color, a CSS color such as #1e88e5</description></field>
+        <field name="ownerUserId" type="id"><description>The user a personal book belongs to</description></field>
+        <field name="ownerPartyId" type="id"><description>The organization a shared book belongs to</description></field>
+        <field name="visibilityEnumId" type="id"/>
+        <field name="isDefault" type="text-indicator"><description>Y on the user's default personal book, where new
+            personal contacts go</description></field>
+        <field name="createdDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <relationship type="one" title="Owner" related="moqui.security.UserAccount" short-alias="ownerUser">
+            <key-map field-name="ownerUserId" related="userId"/></relationship>
+        <relationship type="one" title="Owner" related="mantle.party.Party" short-alias="ownerParty">
+            <key-map field-name="ownerPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="ContactBookVisibility" related="moqui.basic.Enumeration" short-alias="visibility">
+            <key-map field-name="visibilityEnumId"/></relationship>
+        <relationship type="many" related="mantle.party.contact.ContactBookParty" short-alias="parties">
+            <key-map field-name="contactBookId"/></relationship>
+        <relationship type="many" related="mantle.party.contact.ContactBookGroup" short-alias="groups">
+            <key-map field-name="contactBookId"/></relationship>
+        <relationship type="many" related="mantle.party.contact.ContactBookShare" short-alias="shares">
+            <key-map field-name="contactBookId"/></relationship>
+        <index name="CNTBK_OWNER_USER"><index-field name="ownerUserId"/></index>
+        <index name="CNTBK_OWNER_PARTY"><index-field name="ownerPartyId"/></index>
+        <seed-data>
+            <!-- Contact Book Visibility -->
+            <moqui.basic.EnumerationType description="Contact Book Visibility" enumTypeId="ContactBookVisibility"/>
+            <moqui.basic.Enumeration enumId="CbvPersonal" description="Personal" sequenceNum="1" enumTypeId="ContactBookVisibility"/>
+            <moqui.basic.Enumeration enumId="CbvShared" description="Shared" sequenceNum="2" enumTypeId="ContactBookVisibility"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ContactBookGroup" package="mantle.party.contact" cache="never">
+        <description>A group (label) inside a contact book; a party may be in any number of its book's groups.</description>
+        <field name="contactBookGroupId" type="id" is-pk="true"/>
+        <field name="contactBookId" type="id"/>
+        <field name="groupName" type="text-medium"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <relationship type="one" related="mantle.party.contact.ContactBook" short-alias="contactBook"/>
+        <relationship type="many" related="mantle.party.contact.ContactBookGroupParty" short-alias="parties">
+            <key-map field-name="contactBookGroupId"/></relationship>
+        <index name="CNTBK_GRP_BOOK"><index-field name="contactBookId"/></index>
+    </entity>
+
+    <entity entity-name="ContactBookGroupParty" package="mantle.party.contact" cache="never">
+        <description>A party in a contact book group. A label is on or off, so removing it deletes the row; fromDate is when
+            it was added.</description>
+        <field name="contactBookGroupId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <relationship type="one" related="mantle.party.contact.ContactBookGroup" short-alias="group"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <index name="CNTBK_GRP_PTY_PARTY"><index-field name="partyId"/></index>
+    </entity>
+
+    <entity entity-name="ContactBookParty" package="mantle.party.contact" cache="never">
+        <description>A party in a contact book, from fromDate until thruDate (removing it sets thruDate); isFavorite stars it
+            in that book.</description>
+        <field name="contactBookId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="isFavorite" type="text-indicator"/>
+        <field name="davName" type="text-medium"><description>The resource name a CardDAV client stored the card under
+            (mantle.party.ContactDavServices), when it is not partyId.vcf</description></field>
+        <field name="davUid" type="text-medium"><description>The card's UID as the client wrote it, which the vCard served
+            for this book keeps</description></field>
+        <relationship type="one" related="mantle.party.contact.ContactBook" short-alias="contactBook"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <index name="CNTBK_PTY_PARTY"><index-field name="partyId"/></index>
+    </entity>
+
+    <entity entity-name="ContactBookShare" package="mantle.party.contact" cache="never">
+        <description>A shared contact book opened to a user (userId) or a user group (userGroupId) with a permission: view
+            (read and export), edit (members, groups and favorites) or manage (the book itself and its shares). Unsharing
+            sets thruDate.</description>
+        <field name="contactBookShareId" type="id" is-pk="true"/>
+        <field name="contactBookId" type="id"/>
+        <field name="userId" type="id"/>
+        <field name="userGroupId" type="id"/>
+        <field name="permissionEnumId" type="id"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="mantle.party.contact.ContactBook" short-alias="contactBook"/>
+        <relationship type="one" related="moqui.security.UserAccount" short-alias="user"/>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="userGroup"/>
+        <relationship type="one" title="ContactBookPermission" related="moqui.basic.Enumeration" short-alias="permission">
+            <key-map field-name="permissionEnumId"/></relationship>
+        <index name="CNTBK_SHARE_BOOK"><index-field name="contactBookId"/></index>
+        <index name="CNTBK_SHARE_USER"><index-field name="userId"/></index>
+        <index name="CNTBK_SHARE_GROUP"><index-field name="userGroupId"/></index>
+        <seed-data>
+            <!-- Contact Book Permission, each including the ones before it -->
+            <moqui.basic.EnumerationType description="Contact Book Permission" enumTypeId="ContactBookPermission"/>
+            <moqui.basic.Enumeration enumId="CbpView" description="View" sequenceNum="1" enumTypeId="ContactBookPermission"/>
+            <moqui.basic.Enumeration enumId="CbpEdit" description="Edit" sequenceNum="2" enumTypeId="ContactBookPermission"/>
+            <moqui.basic.Enumeration enumId="CbpManage" description="Manage" sequenceNum="3" enumTypeId="ContactBookPermission"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ContactMech" package="mantle.party.contact" short-alias="contactMechs" use="nontransactional" cache="never">
+        <field name="contactMechId" type="id" is-pk="true"/>
+        <field name="contactMechTypeEnumId" type="id"/>
+        <field name="dataSourceId" type="id"/>
+        <field name="infoString" type="text-medium"/>
+        <field name="gatewayCimId" type="text-short" ai-opt-out="true" enable-audit-log="update"/>
+        <field name="trustLevelEnumId" type="id"/>
+        <field name="validateMessage" type="text-medium"/>
+        <field name="paymentFraudEvidenceId" type="id"><description>Refer to evidence here if trustLevelEnumId is gray listed or black listed</description></field>
+        <field name="replacesContactMechId" type="id"><description>For update by copy-on-write this is the ID of the ContactMech it replaces</description></field>
+
+        <relationship type="one" title="ContactMechType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="contactMechTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.basic.DataSource"/>
+        <relationship type="one" title="ContactPaymentTrustLevel" related="moqui.basic.Enumeration" short-alias="trustLevel">
+            <key-map field-name="trustLevelEnumId"/></relationship>
+        <relationship type="one" related="mantle.account.payment.PaymentFraudEvidence" short-alias="fraudEvidence" mutable="true"/>
+
+        <relationship type="one-nofk" title="Replaces" related="mantle.party.contact.ContactMech" short-alias="replacesContactMech">
+            <key-map field-name="replacesContactMechId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.contact.TelecomNumber" short-alias="telecomNumber" mutable="true"/>
+        <relationship type="one-nofk" related="mantle.party.contact.PostalAddress" short-alias="postalAddress" mutable="true"/>
+        <relationship type="many" related="mantle.party.contact.PartyContactMech" short-alias="parties">
+            <key-map field-name="contactMechId"/></relationship>
+
+        <index name="CMECH_INFO_STRING"><index-field name="infoString"/></index>
+        <index name="CMECH_REPL_CMECH"><index-field name="replacesContactMechId"/></index>
+        
+        <seed-data>
+            <!-- NOTE: ContactMechType Enumerations defined above in CommunicationEventType entity -->
+
+            <!-- Contact/Payment Trust Level -->
+            <moqui.basic.EnumerationType description="Contact/Payment Trust Level" enumTypeId="ContactPaymentTrustLevel"/>
+            <moqui.basic.Enumeration enumId="CmtlNew" description="New Data" sequenceNum="1" enumTypeId="ContactPaymentTrustLevel"/>
+            <moqui.basic.Enumeration enumId="CmtlValid" description="Valid/Complete" sequenceNum="2" enumTypeId="ContactPaymentTrustLevel"/>
+            <moqui.basic.Enumeration enumId="CmtlVerified" description="Verified" sequenceNum="3" enumTypeId="ContactPaymentTrustLevel"/><!-- (with outbound contact or authorization) -->
+            <moqui.basic.Enumeration enumId="CmtlInvalid" description="Invalid" sequenceNum="6" enumTypeId="ContactPaymentTrustLevel"/>
+            <moqui.basic.Enumeration enumId="CmtlIncomplete" description="Incomplete" sequenceNum="7" enumTypeId="ContactPaymentTrustLevel"/>
+            <moqui.basic.Enumeration enumId="CmtlGreylisted" description="Greylisted" sequenceNum="8" enumTypeId="ContactPaymentTrustLevel"/>
+            <moqui.basic.Enumeration enumId="CmtlBlacklisted" description="Blacklisted" sequenceNum="9" enumTypeId="ContactPaymentTrustLevel"/>
+        </seed-data>
+        <master>
+            <detail relationship="telecomNumber"/>
+            <detail relationship="postalAddress">
+                <detail relationship="cityGeo"/>
+                <detail relationship="countyGeo"/>
+                <detail relationship="stateProvinceGeo"/>
+                <detail relationship="postalCodeGeo"/>
+                <detail relationship="countryGeo"/>
+                <detail relationship="telecomContactMech" use-master="default"/>
+                <detail relationship="emailContactMech"/>
+            </detail>
+        </master>
+    </entity>
+
+    <entity entity-name="ContactMechPurpose" package="mantle.party.contact" use="configuration" cache="true">
+        <field name="contactMechPurposeId" type="id" is-pk="true"/>
+        <field name="contactMechTypeEnumId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" title="ContactMechType" related="moqui.basic.Enumeration">
+            <key-map field-name="contactMechTypeEnumId"/></relationship>
+        <seed-data>
+            <ContactMechPurpose contactMechPurposeId="PostalPrimary" contactMechTypeEnumId="CmtPostalAddress"
+                    description="Postal - Primary"/>
+            <ContactMechPurpose contactMechPurposeId="PostalShippingDest" contactMechTypeEnumId="CmtPostalAddress"
+                    description="Postal - Shipping Destination"/>
+            <ContactMechPurpose contactMechPurposeId="PostalShippingOrigin" contactMechTypeEnumId="CmtPostalAddress"
+                    description="Postal - Shipping Origin"/>
+            <ContactMechPurpose contactMechPurposeId="PostalBilling" contactMechTypeEnumId="CmtPostalAddress"
+                    description="Postal - Billing (AP)"/>
+            <ContactMechPurpose contactMechPurposeId="PostalPayment" contactMechTypeEnumId="CmtPostalAddress"
+                    description="Postal - Payment (AR)"/>
+            <ContactMechPurpose contactMechPurposeId="PostalTax" contactMechTypeEnumId="CmtPostalAddress"
+                    description="Postal - Tax"/>
+            <ContactMechPurpose contactMechPurposeId="PostalGeneral" contactMechTypeEnumId="CmtPostalAddress"
+                    description="Postal - General Correspondence"/>
+            <ContactMechPurpose contactMechPurposeId="PostalPurchReturn" contactMechTypeEnumId="CmtPostalAddress"
+                    description="Postal - Purchase Return"/>
+            <ContactMechPurpose contactMechPurposeId="PostalPrevious" contactMechTypeEnumId="CmtPostalAddress"
+                    description="Postal - Previous"/>
+            <ContactMechPurpose contactMechPurposeId="PostalHome" contactMechTypeEnumId="CmtPostalAddress"
+                    description="Postal - Home"/>
+            <ContactMechPurpose contactMechPurposeId="PostalWork" contactMechTypeEnumId="CmtPostalAddress"
+                    description="Postal - Work"/>
+            <ContactMechPurpose contactMechPurposeId="PostalRetailStore" contactMechTypeEnumId="CmtPostalAddress"
+                    description="Postal - Retail Store"/>
+
+            <ContactMechPurpose contactMechPurposeId="PhonePrimary" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Primary"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneShippingDest" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Shipping Destination"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneShippingOrigin" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Shipping Origin"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneShippingFax" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Shipping Fax"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneBilling" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Billing (AP)"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneBillingFax" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Billing Fax (AP)"/>
+            <ContactMechPurpose contactMechPurposeId="PhonePayment" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Payment (AR)"/>
+            <ContactMechPurpose contactMechPurposeId="PhonePaymentFax" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Payment Fax (AR)"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneTax" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Tax"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneDid" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Direct Inward Dialing"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneHome" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Home"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneWork" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Work"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneFax" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Fax"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneMobile" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Mobile"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneAssistant" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Assistant"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneQuick" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Quick Calls"/>
+            <ContactMechPurpose contactMechPurposeId="PhoneRetailStore" contactMechTypeEnumId="CmtTelecomNumber"
+                    description="Phone - Retail Store"/>
+
+            <ContactMechPurpose contactMechPurposeId="EmailPrimary" contactMechTypeEnumId="CmtEmailAddress"
+                    description="Email - Primary Address"/>
+            <!-- a person's work address at their employer: the work identity People's directory shows (IronStone People design
+                §4 Employees; impl-people P2), never EmailPrimary, which may be a personal address -->
+            <ContactMechPurpose contactMechPurposeId="EmailWork" contactMechTypeEnumId="CmtEmailAddress"
+                    description="Email - Work"/>
+            <ContactMechPurpose contactMechPurposeId="EmailShippingDest" contactMechTypeEnumId="CmtEmailAddress"
+                    description="Email - Shipping Destination"/>
+            <ContactMechPurpose contactMechPurposeId="EmailShippingOrigin" contactMechTypeEnumId="CmtEmailAddress"
+                    description="Email - Shipping Origin"/>
+            <ContactMechPurpose contactMechPurposeId="EmailBilling" contactMechTypeEnumId="CmtEmailAddress"
+                    description="Email - Billing (AP)"/>
+            <ContactMechPurpose contactMechPurposeId="EmailPayment" contactMechTypeEnumId="CmtEmailAddress"
+                    description="Email - Payment (AR)"/>
+            <ContactMechPurpose contactMechPurposeId="EmailOther" contactMechTypeEnumId="CmtEmailAddress"
+                    description="Email - Other"/>
+            <ContactMechPurpose contactMechPurposeId="EmailSupport" contactMechTypeEnumId="CmtEmailAddress"
+                    description="Email - Support"/>
+            <ContactMechPurpose contactMechPurposeId="EmailOrder" contactMechTypeEnumId="CmtEmailAddress"
+                    description="Email - Order Notification"/>
+            <ContactMechPurpose contactMechPurposeId="EmailMarketing" contactMechTypeEnumId="CmtEmailAddress"
+                    description="Email - Marketing"/>
+            <ContactMechPurpose contactMechPurposeId="EmailRetailStore" contactMechTypeEnumId="CmtEmailAddress"
+                    description="Email - Retail Store"/>
+
+            <ContactMechPurpose contactMechPurposeId="WebUrlPrimary" contactMechTypeEnumId="CmtWebAddress"
+                    description="Website URL - Primary"/>
+            <ContactMechPurpose contactMechPurposeId="WebUrlPayment" contactMechTypeEnumId="CmtWebAddress"
+                    description="Website URL - Payment (AR)"/>
+            <ContactMechPurpose contactMechPurposeId="WebRetailStore" contactMechTypeEnumId="CmtWebAddress"
+                    description="Website URL - Retail Store"/>        
+            <ContactMechPurpose contactMechPurposeId="WebUrlICal" contactMechTypeEnumId="CmtWebAddress"
+                    description="Website URL - iCal"/>
+
+            <ContactMechPurpose contactMechPurposeId="WebUrlFacebook" contactMechTypeEnumId="CmtWebAddress"
+                    description="Website URL - Facebook"/>
+            <ContactMechPurpose contactMechPurposeId="WebUrlInstagram" contactMechTypeEnumId="CmtWebAddress"
+                    description="Website URL - Instagram"/>
+            <ContactMechPurpose contactMechPurposeId="WebUrlLinkedIn" contactMechTypeEnumId="CmtWebAddress"
+                    description="Website URL - LinkedIn"/>
+            <ContactMechPurpose contactMechPurposeId="WebUrlSnapchat" contactMechTypeEnumId="CmtWebAddress"
+                    description="Website URL - Snapchat"/>
+            <ContactMechPurpose contactMechPurposeId="WebUrlTikTok" contactMechTypeEnumId="CmtWebAddress"
+                    description="Website URL - TikTok"/>
+            <ContactMechPurpose contactMechPurposeId="WebUrlTwitter" contactMechTypeEnumId="CmtWebAddress"
+                    description="Website URL - Twitter"/>                  
+                  
+
+
+            <!-- General 'Other' purpose, mainly needed because PartyContactMech.contactMechPurposeId is a PK field, needs a non-null value -->
+            <ContactMechPurpose contactMechPurposeId="Other" contactMechTypeEnumId="" description="Other"/>
+
+            <ContactMechPurpose contactMechPurposeId="IpAddressClient" contactMechTypeEnumId="CmtIpAddress"
+                    description="IP Address - Client"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PartyContactMech" package="mantle.party.contact" use="nontransactional" cache="never">
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="contactMechId" type="id" is-pk="true"/>
+        <field name="contactMechPurposeId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="extension" type="text-short"/>
+        <field name="comments" type="text-medium"/>
+        <field name="allowSolicitation" type="text-indicator"/>
+        <field name="usedSince" type="date"/>
+        <field name="usedUntil" type="date"/>
+        <field name="verifyCode" type="text-medium" enable-audit-log="true"/>
+        <field name="verifyCodeDate" type="date-time"/>
+        <field name="verifyCodeAttempts" type="number-integer"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.contact.ContactMech" short-alias="contactMech" mutable="true"/>
+        <relationship type="one" related="mantle.party.contact.ContactMechPurpose" short-alias="purpose"/>
+        <relationship type="one-nofk" related="mantle.party.contact.PostalAddress" short-alias="postalAddress" mutable="true"/>
+        <relationship type="one-nofk" related="mantle.party.contact.TelecomNumber" short-alias="telecomNumber" mutable="true"/>
+    </entity>
+
+    <entity entity-name="PostalAddress" package="mantle.party.contact" use="nontransactional" cache="never">
+        <field name="contactMechId" type="id" is-pk="true"/>
+        <field name="toName" type="text-medium"/>
+        <field name="attnName" type="text-medium"/>
+        <field name="address1" type="text-medium"/>
+        <field name="address2" type="text-medium"/>
+        <field name="unitNumber" type="text-medium"/>
+        <field name="directions" type="text-long"/>
+        <field name="city" type="text-medium"/>
+        <field name="cityGeoId" type="id"/>
+        <field name="schoolDistrictGeoId" type="id"/>
+        <field name="countyGeoId" type="id"/>
+        <field name="stateProvinceGeoId" type="id"/>
+        <field name="countryGeoId" type="id"/>
+        <field name="postalCode" type="text-short"/>
+        <field name="postalCodeExt" type="text-short"/>
+        <field name="postalCodeGeoId" type="id"/>
+        <field name="geoPointId" type="id"/>
+        <field name="commercial" type="text-indicator"/>
+        <field name="accessCode" type="text-short"/>
+        <field name="telecomContactMechId" type="id"/>
+        <field name="emailContactMechId" type="id"/>
+        <field name="shipGatewayAddressId" type="text-medium"/>
+        <relationship type="one" related="mantle.party.contact.ContactMech"/>
+        <relationship type="one" title="City" related="moqui.basic.Geo" short-alias="cityGeo">
+            <key-map field-name="cityGeoId"/></relationship>
+        <relationship type="one" title="SchoolDistrict" related="moqui.basic.Geo">
+            <key-map field-name="schoolDistrictGeoId"/></relationship>
+        <relationship type="one" title="County" related="moqui.basic.Geo" short-alias="countyGeo">
+            <key-map field-name="countyGeoId"/></relationship>
+        <relationship type="one" title="StateProvince" related="moqui.basic.Geo" short-alias="stateProvinceGeo">
+            <key-map field-name="stateProvinceGeoId"/></relationship>
+        <relationship type="one" title="Country" related="moqui.basic.Geo" short-alias="countryGeo">
+            <key-map field-name="countryGeoId"/></relationship>
+        <relationship type="one" title="PostalCode" related="moqui.basic.Geo" short-alias="postalCodeGeo">
+            <key-map field-name="postalCodeGeoId"/></relationship>
+        <relationship type="one" related="GeoPoint" short-alias="geoPoint"/>
+        <relationship type="one-nofk" title="Telecom" related="mantle.party.contact.ContactMech" short-alias="telecomContactMech" mutable="true">
+            <key-map field-name="telecomContactMechId"/></relationship>
+        <relationship type="one" title="Telecom" related="mantle.party.contact.TelecomNumber" mutable="true">
+            <key-map field-name="telecomContactMechId"/></relationship>
+        <relationship type="one" title="Email" related="mantle.party.contact.ContactMech" short-alias="emailContactMech" mutable="true">
+            <key-map field-name="emailContactMechId"/></relationship>
+        <index name="CITY_IDX"><index-field name="city"/></index>
+        <index name="POSTAL_CODE_IDX"><index-field name="postalCode"/></index>
+    </entity>
+
+    <entity entity-name="TelecomNumber" package="mantle.party.contact" use="nontransactional" cache="never">
+        <field name="contactMechId" type="id" is-pk="true"/>
+        <field name="countryCode" type="text-short"/>
+        <field name="areaCode" type="text-short"/>
+        <field name="contactNumber" type="text-short"/>
+        <field name="askForName" type="text-medium"/>
+        <relationship type="one" related="mantle.party.contact.ContactMech"/>
+        <index name="AREA_CONTACT_IDX"><index-field name="areaCode"/><index-field name="contactNumber"/></index>
+    </entity>
+
+    <!-- ========================================================= -->
+    <!-- mantle.party.time -->
+    <!-- ========================================================= -->
+    <entity entity-name="TimePeriod" package="mantle.party.time" use="transactional" cache="never">
+        <description>For configurable time periods used in accounting, sales quotas, etc.</description>
+        <field name="timePeriodId" type="id" is-pk="true"/>
+        <field name="parentPeriodId" type="id"/>
+        <field name="previousPeriodId" type="id"/>
+        <field name="timePeriodTypeId" type="id" not-null="true"/>
+        <field name="partyId" type="id" not-null="true"><description>The Party that owns the TimePeriod, generally an Internal Organization.</description></field>
+        <field name="periodNum" type="number-integer"/>
+        <field name="periodName" type="text-medium"/>
+        <field name="fromDate" type="date" not-null="true"><description>The first day of the period.</description></field>
+        <field name="thruDate" type="date" not-null="true"><description>The last day of the period.</description></field>
+        <field name="isClosed" type="text-indicator" default="'N'" enable-audit-log="update"/>
+        <relationship type="one" title="Parent" related="mantle.party.time.TimePeriod" short-alias="parent">
+            <key-map field-name="parentPeriodId" related="timePeriodId"/></relationship>
+        <relationship type="one" title="Previous" related="mantle.party.time.TimePeriod" short-alias="previous">
+            <key-map field-name="previousPeriodId" related="timePeriodId"/></relationship>
+        <relationship type="one" related="mantle.party.time.TimePeriodType" short-alias="type"/>
+        <index name="TIMEPER_TP_PTY_FR" unique="true"><index-field name="timePeriodTypeId"/><index-field name="partyId"/>
+            <index-field name="fromDate"/></index>
+    </entity>
+
+    <entity entity-name="TimePeriodType" package="mantle.party.time" use="configuration" cache="true">
+        <field name="timePeriodTypeId" type="id" is-pk="true"/>
+        <field name="periodPurposeEnumId" type="id"/>
+        <field name="parentPeriodTypeId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <field name="periodLength" type="number-decimal"/>
+        <field name="lengthUomId" type="id"/>
+        <relationship type="one" title="TimePeriodPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="periodPurposeEnumId"/></relationship>
+        <relationship type="one" title="Parent" related="mantle.party.time.TimePeriodType" short-alias="parentPeriodType">
+            <key-map field-name="parentPeriodTypeId"/></relationship>
+        <relationship type="one" title="Length" related="moqui.basic.Uom" short-alias="lengthUom">
+            <key-map field-name="lengthUomId" related="uomId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Time Period Purpose" enumTypeId="TimePeriodPurpose"/>
+            <moqui.basic.Enumeration enumId="Fiscal" description="Fiscal" enumTypeId="TimePeriodPurpose"/>
+            <moqui.basic.Enumeration enumId="Payroll" description="Payroll" enumTypeId="TimePeriodPurpose"/>
+            <moqui.basic.Enumeration enumId="Sales" description="Sales" enumTypeId="TimePeriodPurpose"/>
+            <moqui.basic.Enumeration enumId="Tax" description="Tax" enumTypeId="TimePeriodPurpose"/>
+
+            <mantle.party.time.TimePeriodType description="Fiscal Year" timePeriodTypeId="FiscalYear"
+                    periodPurposeEnumId="Fiscal" periodLength="1" lengthUomId="TF_yr"/>
+            <mantle.party.time.TimePeriodType description="Fiscal Quarter" timePeriodTypeId="FiscalQuarter"
+                    parentPeriodTypeId="FiscalYear" periodPurposeEnumId="Fiscal" periodLength="3" lengthUomId="TF_mon"/>
+            <mantle.party.time.TimePeriodType description="Fiscal Month" timePeriodTypeId="FiscalMonth"
+                    parentPeriodTypeId="FiscalQuarter" periodPurposeEnumId="Fiscal" periodLength="1" lengthUomId="TF_mon"/>
+            <mantle.party.time.TimePeriodType description="Fiscal Bi-Week" timePeriodTypeId="FiscalBiWeek"
+                    parentPeriodTypeId="FiscalMonth" periodPurposeEnumId="Fiscal" periodLength="2" lengthUomId="TF_wk"/>
+            <mantle.party.time.TimePeriodType description="Fiscal Week" timePeriodTypeId="FiscalWeek"
+                    parentPeriodTypeId="FiscalMonth" periodPurposeEnumId="Fiscal" periodLength="1" lengthUomId="TF_wk"/>
+
+            <mantle.party.time.TimePeriodType description="Payroll Year" timePeriodTypeId="PayrollYear"
+                    periodPurposeEnumId="Payroll" periodLength="1" lengthUomId="TF_yr"/>
+            <mantle.party.time.TimePeriodType description="Payroll Semi-Year" timePeriodTypeId="PayrollSemiYear"
+                    parentPeriodTypeId="PayrollYear" periodPurposeEnumId="Payroll" periodLength="6" lengthUomId="TF_mon"/>
+            <mantle.party.time.TimePeriodType description="Payroll Quarter" timePeriodTypeId="PayrollQuarter"
+                    parentPeriodTypeId="PayrollYear" periodPurposeEnumId="Payroll" periodLength="3" lengthUomId="TF_mon"/>
+            <mantle.party.time.TimePeriodType description="Payroll Month" timePeriodTypeId="PayrollMonth"
+                    parentPeriodTypeId="PayrollQuarter" periodPurposeEnumId="Payroll" periodLength="1" lengthUomId="TF_mon"/>
+            <mantle.party.time.TimePeriodType description="Payroll Semi-Month" timePeriodTypeId="PayrollSemiMonth"
+                    parentPeriodTypeId="PayrollMonth" periodPurposeEnumId="Payroll" periodLength="0.5" lengthUomId="TF_mon"/>
+            <mantle.party.time.TimePeriodType description="Payroll Bi-Week" timePeriodTypeId="PayrollBiWeek"
+                    parentPeriodTypeId="PayrollMonth" periodPurposeEnumId="Payroll" periodLength="2" lengthUomId="TF_wk"/>
+            <mantle.party.time.TimePeriodType description="Payroll Week" timePeriodTypeId="PayrollWeek"
+                    parentPeriodTypeId="PayrollMonth" periodPurposeEnumId="Payroll" periodLength="1" lengthUomId="TF_wk"/>
+
+            <mantle.party.time.TimePeriodType description="Sales Year" timePeriodTypeId="SalesYear"
+                    periodPurposeEnumId="Sales" periodLength="1" lengthUomId="TF_yr"/>
+            <mantle.party.time.TimePeriodType description="Sales Quarter" timePeriodTypeId="SalesQuarter"
+                    parentPeriodTypeId="SalesYear" periodPurposeEnumId="Sales" periodLength="3" lengthUomId="TF_mon"/>
+            <mantle.party.time.TimePeriodType description="Sales Month" timePeriodTypeId="SalesMonth"
+                    parentPeriodTypeId="SalesQuarter" periodPurposeEnumId="Sales" periodLength="1" lengthUomId="TF_mon"/>
+
+            <mantle.party.time.TimePeriodType description="Tax Year" timePeriodTypeId="TaxYear"
+                    periodPurposeEnumId="Tax" periodLength="1" lengthUomId="TF_yr"/>
+            <mantle.party.time.TimePeriodType description="Tax Quarter" timePeriodTypeId="TaxQuarter"
+                    parentPeriodTypeId="TaxYear" periodPurposeEnumId="Tax" periodLength="3" lengthUomId="TF_mon"/>
+            <mantle.party.time.TimePeriodType description="Tax Month" timePeriodTypeId="TaxMonth"
+                    parentPeriodTypeId="TaxQuarter" periodPurposeEnumId="Tax" periodLength="1" lengthUomId="TF_mon"/>
+        </seed-data>
+    </entity>
+</entities>

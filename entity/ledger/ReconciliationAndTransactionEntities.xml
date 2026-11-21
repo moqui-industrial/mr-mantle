@@ -1,0 +1,518 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!-- mantle.ledger.reconciliation -->
+    <!-- ========================================================= -->
+    <entity entity-name="GlReconciliation" package="mantle.ledger.reconciliation" cache="never">
+        <field name="glReconciliationId" type="id" is-pk="true"/>
+        <field name="glReconciliationName" type="text-medium"/>
+        <field name="description" type="text-medium"/>
+        <field name="glAccountId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="reconciledBalance" type="currency-amount"/>
+        <field name="openingBalance" type="currency-amount"/>
+        <field name="reconciledDate" type="date-time"/>
+        <relationship type="one" related="mantle.ledger.account.GlAccount"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" title="GlReconciliation" related="moqui.basic.StatusItem"/>
+        <seed-data>
+            <!-- GlReconciliation Status -->
+            <moqui.basic.StatusType statusTypeId="GlReconciliation" description="GL Reconciliation Status"/>
+            <moqui.basic.StatusItem statusId="GLREC_CREATED" statusTypeId="GlReconciliation" sequenceNum="1" description="Created"/>
+            <moqui.basic.StatusItem statusId="GLREC_RECONCILED" statusTypeId="GlReconciliation" sequenceNum="2" description="Reconciled"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="GLREC_CREATED" toStatusId="GLREC_RECONCILED" transitionName="Set Created to Reconciled"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="GlReconciliationEntry" package="mantle.ledger.reconciliation" cache="never">
+        <field name="glReconciliationId" type="id" is-pk="true"/>
+        <field name="acctgTransId" type="id" is-pk="true"/>
+        <field name="acctgTransEntrySeqId" type="id" is-pk="true"/>
+        <field name="reconciledAmount" type="currency-amount"/>
+        <relationship type="one" related="mantle.ledger.reconciliation.GlReconciliation"/>
+        <relationship type="one-nofk" related="mantle.ledger.transaction.AcctgTrans"/>
+        <relationship type="one" related="mantle.ledger.transaction.AcctgTransEntry">
+            <key-map field-name="acctgTransId"/><key-map field-name="acctgTransEntrySeqId"/></relationship>
+    </entity>
+
+    <entity entity-name="AccountingCloseRun" package="mantle.ledger.transaction" cache="never">
+        <description>One close of an organization's fiscal period (CloseServices.close#Period): who closed it, why, the
+            checklist it passed, the closing transactions it posted and the totals of the summary rows it stored. A
+            reopen (reopen#Period) marks the run reopened with its reason and keeps it; the next close is a new run.</description>
+        <field name="closeRunId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="timePeriodId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="closedByUserId" type="id"/>
+        <field name="closedDate" type="date-time"/>
+        <field name="closeReason" type="text-medium"/>
+        <field name="operationKey" type="text-short"/>
+        <field name="checklistJson" type="text-very-long"><description>The checklist rows at close</description></field>
+        <field name="closingAcctgTransIds" type="text-long">
+            <description>The closing transactions, comma separated</description></field>
+        <field name="netIncomeGlAccountId" type="id"/>
+        <field name="summaryAccountCount" type="number-integer"/>
+        <field name="summaryDebitTotal" type="currency-amount"/>
+        <field name="summaryCreditTotal" type="currency-amount"/>
+        <field name="reopenedByUserId" type="id" enable-audit-log="true"/>
+        <field name="reopenedDate" type="date-time" enable-audit-log="true"/>
+        <field name="reopenReason" type="text-medium" enable-audit-log="true"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.party.time.TimePeriod"/>
+        <relationship type="one" title="AccountingCloseRun" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one-nofk" title="NetIncome" related="mantle.ledger.account.GlAccount">
+            <key-map field-name="netIncomeGlAccountId" related="glAccountId"/></relationship>
+        <index name="ACCTG_CLOSE_RUN_PERIOD"><index-field name="timePeriodId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType statusTypeId="AccountingCloseRun" description="Period close"/>
+            <moqui.basic.StatusItem statusId="CrnClosing" description="Closing" sequenceNum="0"
+                    statusTypeId="AccountingCloseRun"/>
+            <moqui.basic.StatusItem statusId="CrnClosed" description="Closed" sequenceNum="1"
+                    statusTypeId="AccountingCloseRun"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrnClosing" toStatusId="CrnClosed"
+                    transitionName="Close"/>
+            <moqui.basic.StatusItem statusId="CrnReopened" description="Reopened" sequenceNum="2"
+                    statusTypeId="AccountingCloseRun"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrnClosed" toStatusId="CrnReopened"
+                    transitionName="Reopen"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="AccountingPeriodRun" package="mantle.ledger.transaction" cache="never">
+        <description>A period calculation of one kind (PeriodRunKind: depreciation, project cost and later kinds) for an
+            organization and period: previewed by PeriodRunServices.preview#Run, which stores its results and the
+            version of its calculation, then posted by its kind's post service. Recalculating supersedes the earlier
+            preview of the same kind, organization and period. A failed source is a failed result; the others stand.</description>
+        <field name="periodRunId" type="id" is-pk="true"/>
+        <field name="runKindEnumId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="timePeriodId" type="id"/>
+        <field name="effectiveDate" type="date"><description>The book day of the postings</description></field>
+        <field name="currencyUomId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="calculationVersion" type="text-long"><description>A hash of the results; posting takes it and
+            refuses a run whose results changed</description></field>
+        <field name="sourceSelectionJson" type="text-long">
+            <description>The sources the user chose, when not all</description></field>
+        <field name="totalAmount" type="currency-amount"/>
+        <field name="resultCount" type="number-integer"/>
+        <field name="failedCount" type="number-integer"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="postedByUserId" type="id" enable-audit-log="true"/>
+        <field name="postedDate" type="date-time" enable-audit-log="true"/>
+        <field name="supersededByRunId" type="id"/>
+        <field name="reversedByRunId" type="id"/>
+        <field name="reverseOfRunId" type="id"/>
+        <relationship type="one" title="PeriodRunKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="runKindEnumId"/></relationship>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.party.time.TimePeriod"/>
+        <relationship type="one" title="AccountingPeriodRun" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="many" related="mantle.ledger.transaction.AccountingPeriodRunResult" short-alias="results">
+            <key-map field-name="periodRunId"/></relationship>
+        <index name="ACCTG_PERIOD_RUN_ORG"><index-field name="organizationPartyId"/><index-field name="timePeriodId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType statusTypeId="AccountingPeriodRun" description="Period run"/>
+            <moqui.basic.StatusItem statusId="PrnPreview" description="Preview" sequenceNum="1"
+                    statusTypeId="AccountingPeriodRun"/>
+            <moqui.basic.StatusItem statusId="PrnPosted" description="Posted" sequenceNum="2"
+                    statusTypeId="AccountingPeriodRun"/>
+            <moqui.basic.StatusItem statusId="PrnPartial" description="Posted with failures" sequenceNum="3"
+                    statusTypeId="AccountingPeriodRun"/>
+            <moqui.basic.StatusItem statusId="PrnFailed" description="Failed" sequenceNum="4"
+                    statusTypeId="AccountingPeriodRun"/>
+            <moqui.basic.StatusItem statusId="PrnSuperseded" description="Recalculated" sequenceNum="5"
+                    statusTypeId="AccountingPeriodRun"/>
+            <moqui.basic.StatusItem statusId="PrnReversed" description="Reversed" sequenceNum="6"
+                    statusTypeId="AccountingPeriodRun"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnPreview" toStatusId="PrnPosted"
+                    transitionName="Post"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnPreview" toStatusId="PrnPartial"
+                    transitionName="Post with failures"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnPreview" toStatusId="PrnFailed"
+                    transitionName="Fail"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnPreview" toStatusId="PrnSuperseded"
+                    transitionName="Recalculate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnPosted" toStatusId="PrnReversed"
+                    transitionName="Reverse"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="AccountingPeriodRunResult" package="mantle.ledger.transaction" cache="never">
+        <description>One source of a period run (an asset, a time entry): its amount and accounts, or why it failed, and
+            the transaction that posted it and any that reversed it.</description>
+        <field name="periodRunId" type="id" is-pk="true"/>
+        <field name="resultSeqId" type="id" is-pk="true"/>
+        <field name="sourceEntityName" type="text-medium"/>
+        <field name="sourceId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <field name="amount" type="currency-amount"/>
+        <field name="debitGlAccountId" type="id"/>
+        <field name="creditGlAccountId" type="id"/>
+        <field name="statusId" type="id"/>
+        <field name="failureCode" type="text-short"/>
+        <field name="failureMessage" type="text-long"/>
+        <field name="acctgTransId" type="id"/>
+        <field name="reversalAcctgTransId" type="id"/>
+        <relationship type="one" related="mantle.ledger.transaction.AccountingPeriodRun"/>
+        <relationship type="one" title="AccountingPeriodRunResult" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one-nofk" related="mantle.ledger.transaction.AcctgTrans"/>
+        <seed-data>
+            <moqui.basic.StatusType statusTypeId="AccountingPeriodRunResult" description="Period run result"/>
+            <moqui.basic.StatusItem statusId="PrrReady" description="Ready" sequenceNum="1"
+                    statusTypeId="AccountingPeriodRunResult"/>
+            <moqui.basic.StatusItem statusId="PrrFailed" description="Failed" sequenceNum="2"
+                    statusTypeId="AccountingPeriodRunResult"/>
+            <moqui.basic.StatusItem statusId="PrrPosted" description="Posted" sequenceNum="3"
+                    statusTypeId="AccountingPeriodRunResult"/>
+            <moqui.basic.StatusItem statusId="PrrReversed" description="Reversed" sequenceNum="4"
+                    statusTypeId="AccountingPeriodRunResult"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrrReady" toStatusId="PrrPosted"
+                    transitionName="Post"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrrReady" toStatusId="PrrFailed"
+                    transitionName="Fail"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrrPosted" toStatusId="PrrReversed"
+                    transitionName="Reverse"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="JournalPreview" package="mantle.ledger.transaction" cache="never">
+        <field name="previewId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="acctgTransId" type="id" enable-audit-log="true"/>
+        <field name="userId" type="id" enable-audit-log="true"/>
+        <field name="inputFingerprint" type="text-long" enable-audit-log="true"/>
+        <field name="expiresDate" type="date-time" enable-audit-log="true"/>
+        <field name="glJournalId" type="id"/>
+        <field name="requestJson" type="text-very-long"/>
+        <field name="resultJson" type="text-very-long"/>
+    </entity>
+
+    <entity entity-name="AcctgTransTemplate" package="mantle.ledger.transaction" cache="never">
+        <field name="acctgTransTemplateId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="templateName" type="text-medium" enable-audit-log="true"/>
+        <field name="acctgTransTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="amountUomId" type="id" enable-audit-log="true"/>
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="isPublished" type="text-indicator" enable-audit-log="true"/>
+        <field name="templateFamilyId" type="id" enable-audit-log="true"/>
+        <field name="replacesTemplateId" type="id" enable-audit-log="true"/>
+        <field name="templateVersion" type="number-integer" enable-audit-log="true"/>
+    </entity>
+
+    <entity entity-name="AcctgTransTemplateEntry" package="mantle.ledger.transaction" cache="never">
+        <field name="acctgTransTemplateId" type="id" is-pk="true"/>
+        <field name="entrySeqId" type="id" is-pk="true"/>
+        <field name="glAccountId" type="id" enable-audit-log="true"/>
+        <field name="debitCreditFlag" type="text-indicator" enable-audit-log="true"/>
+        <field name="amount" type="currency-amount" enable-audit-log="true"/>
+        <field name="amountParameter" type="text-short" enable-audit-log="true"/>
+        <field name="facilityId" type="id" enable-audit-log="true"/>
+        <field name="costCenterId" type="id" enable-audit-log="true"/>
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="assetId" type="id" enable-audit-log="true"/>
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+    </entity>
+
+    <entity entity-name="AcctgTransContent" package="mantle.ledger.transaction" cache="never">
+        <field name="acctgTransContentId" type="id" is-pk="true"/>
+        <field name="acctgTransId" type="id" enable-audit-log="true"/>
+        <field name="contentTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="contentDate" type="date-time" enable-audit-log="true"/>
+        <field name="contentLocation" type="text-long" enable-audit-log="true"/>
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+        <field name="userId" type="id" enable-audit-log="true"/>
+    </entity>
+
+    <!-- ========================================================= -->
+    <!-- mantle.ledger.transaction -->
+    <!-- ========================================================= -->
+    <entity entity-name="AcctgTrans" package="mantle.ledger.transaction" short-alias="acctgTrans" use="transactional" cache="never">
+        <field name="acctgTransId" type="id" is-pk="true"/>
+        <field name="acctgTransTypeEnumId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <field name="transactionDate" type="date-time" enable-audit-log="update"/>
+        <field name="isPosted" type="text-indicator" enable-audit-log="true"/>
+        <field name="postedDate" type="date-time" enable-audit-log="update"/>
+        <field name="scheduledPostingDate" type="date-time"/>
+        <field name="glJournalId" type="id"/>
+        <field name="glFiscalTypeEnumId" type="id"/>
+        <field name="voucherRef" type="text-short"/>
+        <field name="voucherDate" type="date-time"/>
+        <field name="groupStatusId" type="id"/>
+        <field name="amountUomId" type="id"><description>The unit of account (base) currency, must match PartyAcctgPreference.baseCurrencyUomId</description></field>
+        <field name="localCurrencyUomId" type="id"><description>The local currency for the Organization, must match PartyAcctgPreference.localCurrencyUomId</description></field>
+        <field name="originalCurrencyUomId" type="id"><description>The original currency for the invoice, payment, etc - the currency used to interact with the external Party</description></field>
+
+        <field name="assetId" type="id"/>
+        <field name="assetIssuanceId" type="id"/>
+        <field name="assetReceiptId" type="id"/>
+        <field name="physicalInventoryId" type="id"/>
+        <field name="otherPartyId" type="id"/>
+        <field name="invoiceId" type="id"/>
+        <field name="paymentId" type="id"/>
+        <field name="paymentApplicationId" type="id"/>
+        <field name="toInvoiceId" type="id"/>
+        <field name="toPaymentId" type="id"/>
+        <field name="finAccountTransId" type="id"/>
+        <field name="shipmentId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="theirAcctgTransId" type="text-short"/>
+        <field name="reversedByAcctgTransId" type="id"/>
+        <field name="reverseOfAcctgTransId" type="id"/>
+
+        <relationship type="one" title="AcctgTransType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="acctgTransTypeEnumId"/></relationship>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" related="mantle.ledger.transaction.GlJournal" short-alias="journal"/>
+        <relationship type="one" title="GlFiscalType" related="moqui.basic.Enumeration" short-alias="fiscalType">
+            <key-map field-name="glFiscalTypeEnumId"/></relationship>
+        <relationship type="one" title="Group" related="moqui.basic.StatusItem" short-alias="groupStatus">
+            <key-map field-name="groupStatusId"/></relationship>
+        <relationship type="one" title="Amount" related="moqui.basic.Uom" short-alias="amountUom">
+            <key-map field-name="amountUomId"/></relationship>
+        <relationship type="one" title="LocalCurrency" related="moqui.basic.Uom" short-alias="localCurrencyUom">
+            <key-map field-name="localCurrencyUomId"/></relationship>
+        <relationship type="one" title="OriginalCurrency" related="moqui.basic.Uom" short-alias="originalCurrencyUom">
+            <key-map field-name="originalCurrencyUomId"/></relationship>
+
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" related="mantle.product.issuance.AssetIssuance" short-alias="assetIssuance"/>
+        <relationship type="one" related="mantle.product.receipt.AssetReceipt" short-alias="assetReceipt"/>
+        <relationship type="one" related="mantle.product.asset.PhysicalInventory" short-alias="physicalInventory"/>
+        <relationship type="one" title="Other" related="mantle.party.Party" short-alias="otherParty">
+            <key-map field-name="otherPartyId"/></relationship>
+        <relationship type="one" related="mantle.account.invoice.Invoice" short-alias="invoice"/>
+        <relationship type="one" related="mantle.account.payment.Payment" short-alias="payment"/>
+        <relationship type="one" related="mantle.account.payment.PaymentApplication" short-alias="paymentApplication"/>
+        <relationship type="one" title="To" related="mantle.account.invoice.Invoice" short-alias="toInvoice">
+            <key-map field-name="toInvoiceId"/></relationship>
+        <relationship type="one" title="To" related="mantle.account.payment.Payment" short-alias="toPayment">
+            <key-map field-name="toPaymentId"/></relationship>
+        <relationship type="one" related="mantle.account.financial.FinancialAccountTrans" short-alias="financialAccountTrans"/>
+        <relationship type="one" related="mantle.shipment.Shipment" short-alias="shipment"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="ReversedBy" related="mantle.ledger.transaction.AcctgTrans" short-alias="reversedBy">
+            <key-map field-name="reversedByAcctgTransId" related="acctgTransId"/></relationship>
+        <relationship type="one" title="ReverseOf" related="mantle.ledger.transaction.AcctgTrans" short-alias="reverseOf">
+            <key-map field-name="reverseOfAcctgTransId" related="acctgTransId"/></relationship>
+
+        <relationship type="many" related="mantle.ledger.transaction.AcctgTransEntry" short-alias="entries">
+            <key-map field-name="acctgTransId"/></relationship>
+
+        <index name="ACCTG_TRANS_TX_DATE"><index-field name="transactionDate"/></index>
+        
+        <seed-data>
+            <!-- Accounting Transaction Type -->
+            <moqui.basic.EnumerationType description="Accounting Transaction Type" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttAmortization" description="Amortization" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttDepreciation" description="Depreciation" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttCapitalization" description="Capitalization" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttPeriodClosing" description="Period Closing Adjustment" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttNetIncomeClosing" description="Net Income Period Closing" enumTypeId="AcctgTransType"/>
+
+            <moqui.basic.Enumeration enumId="AttInternal" description="Internal" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttExternal" description="External" enumTypeId="AcctgTransType"/>
+
+            <moqui.basic.Enumeration enumId="AttObligation" description="Obligation" parentEnumId="AttExternal" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttCreditLine" description="Credit Line" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttNote" description="Note" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttOtherObligation" description="Other Obligation" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttSales" description="Sales" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttTaxDue" description="Tax Due" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+
+            <!-- Payment TX Types -->
+            <moqui.basic.Enumeration enumId="AttPayment" description="Payment" parentEnumId="AttExternal" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttDisbursement" description="Disbursement" parentEnumId="AttPayment" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttReceipt" description="Receipt" parentEnumId="AttPayment" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttPaymentAdjust" description="Payment Adjustment" parentEnumId="AttPayment" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttIncomingPayment" description="Incoming Payment" enumTypeId="AcctgTransType"/><!-- (Receipt) -->
+            <moqui.basic.Enumeration enumId="AttOutgoingPayment" description="Outgoing Payment" enumTypeId="AcctgTransType"/><!-- (Disbursement) -->
+            <!-- PaymentApplication TX Types -->
+            <moqui.basic.Enumeration enumId="AttIncomingPaymentAp" description="Incoming Payment Application" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttOutgoingPaymentAp" description="Outgoing Payment Application" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttPaymentInOutAppl" description="Payment In/Out Application" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttInvoiceInOutAppl" description="Invoice AR/AP Application" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttPaymentApplied" description="Payment Application" enumTypeId="AcctgTransType"/>
+            <!-- Invoice TX Types -->
+            <moqui.basic.Enumeration enumId="AttSalesInvoice" description="Sales Invoice" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/><!-- (to Customer) -->
+            <moqui.basic.Enumeration enumId="AttCustRtnInvoice" description="Customer Return Invoice" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttPurchaseInvoice" description="Purchase Invoice" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/><!-- (from Vendor) -->
+            <moqui.basic.Enumeration enumId="AttVendRtnInvoice" description="Supplier Return Invoice" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttCreditMemo" description="Customer Credit Memo" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttVendCreditMemo" description="Supplier Credit Memo" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttPayrollInvoice" description="Payroll Invoice" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttTaxInvoice" description="Tax Invoice" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttGarnishmentInvoice" description="Garnishment Invoice" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttCommissionInvoice" description="Commission Invoice" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttInvoiceAdjust" description="Invoice Adjustment" parentEnumId="AttObligation" enumTypeId="AcctgTransType"/>
+            <!-- Asset/Inventory TX Types -->
+            <moqui.basic.Enumeration enumId="AttAssetReceipt" description="Asset Receipt" parentEnumId="AttExternal" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttAssetIssuance" description="Asset Issuance" parentEnumId="AttExternal" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttAssetVariance" description="Asset Variance" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttInventoryReceipt" description="Inventory Receipt" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttInventoryIssuance" description="Inventory Issuance" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttInventoryVariance" description="Inventory Variance" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttSalesInventory" description="Sales Inventory" parentEnumId="AttExternal" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttReturnInventory" description="Return Inventory" parentEnumId="AttExternal" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttManufacturing" description="Manufacturing" enumTypeId="AcctgTransType"/>
+            <!-- FinancialAccount TX Types -->
+            <moqui.basic.Enumeration enumId="AttFinancialDeposit" description="Fin. Account Deposit" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttFinancialWithdrawal" description="Fin. Account Withdrawal" enumTypeId="AcctgTransType"/>
+            <moqui.basic.Enumeration enumId="AttFinancialAdjustment" description="Fin. Account Adjustment" enumTypeId="AcctgTransType"/>
+
+            <moqui.basic.Enumeration description="Acc TX Types Invoice" enumId="EngAccTxTypesInvoice" enumTypeId="EnumGroup">
+                <groupMembers enumId="AttSalesInvoice"/><groupMembers enumId="AttCustRtnInvoice"/><groupMembers enumId="AttPurchaseInvoice"/>
+                <groupMembers enumId="AttVendRtnInvoice"/><groupMembers enumId="AttPayrollInvoice"/><groupMembers enumId="AttTaxInvoice"/>
+                <groupMembers enumId="AttGarnishmentInvoice"/><groupMembers enumId="AttCommissionInvoice"/>
+                <groupMembers enumId="AttInvoiceAdjust"/>
+            </moqui.basic.Enumeration>
+            <moqui.basic.Enumeration description="Acc TX Types Payable" enumId="EngAccTxTypesPayable" enumTypeId="EnumGroup">
+                <groupMembers enumId="AttCustRtnInvoice"/><groupMembers enumId="AttPurchaseInvoice"/>
+                <groupMembers enumId="AttPayrollInvoice"/><groupMembers enumId="AttTaxInvoice"/>
+                <groupMembers enumId="AttGarnishmentInvoice"/><groupMembers enumId="AttCommissionInvoice"/>
+                <groupMembers enumId="AttInvoiceAdjust"/>
+            </moqui.basic.Enumeration>
+            <moqui.basic.Enumeration description="Acc TX Types Receivable" enumId="EngAccTxTypesReceivable" enumTypeId="EnumGroup">
+                <groupMembers enumId="AttSalesInvoice"/><groupMembers enumId="AttVendRtnInvoice"/>
+                <groupMembers enumId="AttInvoiceAdjust"/>
+            </moqui.basic.Enumeration>
+
+            <!-- GL Fiscal Type -->
+            <moqui.basic.EnumerationType description="GL Fiscal Type" enumTypeId="GlFiscalType"/>
+            <moqui.basic.Enumeration description="Actual" enumId="GLFT_ACTUAL" enumTypeId="GlFiscalType"/>
+            <moqui.basic.Enumeration description="Budget" enumId="GLFT_BUDGET" enumTypeId="GlFiscalType"/>
+            <moqui.basic.Enumeration description="Forecast" enumId="GLFT_FORECAST" enumTypeId="GlFiscalType"/>
+            <moqui.basic.Enumeration description="Plan" enumId="GLFT_PLAN" enumTypeId="GlFiscalType"/>
+            <moqui.basic.Enumeration description="Scenario" enumId="GLFT_SCENARIO" enumTypeId="GlFiscalType"/>
+
+            <!-- Accounting Transaction Result - used on various records to track auto post result -->
+            <moqui.basic.EnumerationType description="Accounting Transaction Result" enumTypeId="AcctgTransResult"/>
+            <moqui.basic.Enumeration enumId="AtrSuccess" description="Success" enumTypeId="AcctgTransResult"/>
+            <moqui.basic.Enumeration enumId="AtrNoAcctgPreference" description="No Accounting Preference" enumTypeId="AcctgTransResult"/>
+            <moqui.basic.Enumeration enumId="AtrNoAcquireCost" description="No Acquire Cost" enumTypeId="AcctgTransResult"/><!-- for AssetReceipt/Issuance/etc -->
+            <moqui.basic.Enumeration enumId="AtrNoTransReason" description="No Transaction Reason" enumTypeId="AcctgTransResult"/><!-- for FinancialAccountTrans -->
+            <moqui.basic.Enumeration enumId="AtrPaymentNotPosted" description="Payment Not Posted" enumTypeId="AcctgTransResult"/><!-- for PaymentApplication -->
+        </seed-data>
+        <master>
+            <detail relationship="type"/><detail relationship="organization"/><detail relationship="journal"/>
+            <detail relationship="fiscalType"/><detail relationship="groupStatus"/><detail relationship="amountUom"/>
+            <detail relationship="originalCurrencyUom"/>
+            <detail relationship="asset"/><detail relationship="assetIssuance"/><detail relationship="assetReceipt"/>
+            <detail relationship="physicalInventory"/><detail relationship="otherParty"/>
+            <detail relationship="invoice"/><detail relationship="payment"/><detail relationship="paymentApplication"/>
+            <detail relationship="financialAccountTrans"/><detail relationship="shipment"/>
+            <detail relationship="workEffort"/><detail relationship="reversedBy"/><detail relationship="reverseOf"/>
+
+            <detail relationship="entries">
+                <detail relationship="glAccountType"/><detail relationship="glAccount"/>
+                <detail relationship="reconcileStatus"/>
+                <detail relationship="product"/><detail relationship="asset"/>
+            </detail>
+        </master>
+    </entity>
+
+    <entity entity-name="AcctgTransEntry" package="mantle.ledger.transaction" use="transactional" cache="never">
+        <field name="acctgTransId" type="id" is-pk="true"/>
+        <field name="acctgTransEntrySeqId" type="id" is-pk="true"/>
+        <field name="debitCreditFlag" type="text-indicator"><description>If D is a debit, if C is a credit.</description></field>
+        <field name="amount" type="currency-amount" enable-audit-log="update"/>
+        <field name="localCurrencyAmount" type="currency-amount" enable-audit-log="update"/>
+        <field name="originalCurrencyAmount" type="currency-amount"/>
+        <field name="description" type="text-medium"/>
+        <field name="voucherRef" type="text-short"/>
+        <field name="glAccountTypeEnumId" type="id"/>
+        <field name="glAccountId" type="id" enable-audit-log="update"/>
+        <field name="dueDate" type="date"/>
+        <field name="reconcileStatusId" type="id" default="'AterNot'"/>
+        <field name="settlementTermId" type="id"/>
+        <field name="isSummary" type="text-indicator"><description>Set to Y if this is a summary entry from a sub-ledger.</description></field>
+
+        <field name="productId" type="id"/>
+        <field name="externalProductId" type="id"/>
+        <field name="assetId" type="id"/>
+        <field name="invoiceItemSeqId" type="id"/>
+
+        <relationship type="one" related="mantle.ledger.transaction.AcctgTrans" short-alias="trans"/>
+        <relationship type="one" title="GlAccountType" related="moqui.basic.Enumeration" short-alias="glAccountType">
+            <key-map field-name="glAccountTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.ledger.account.GlAccount" short-alias="glAccount"/>
+        <relationship type="one" title="AcctgTransEntryReconcile" related="moqui.basic.StatusItem" short-alias="reconcileStatus">
+            <key-map field-name="reconcileStatusId"/></relationship>
+        <relationship type="one" related="mantle.account.invoice.SettlementTerm" short-alias="settlementTerm"/>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+
+        <seed-data>
+            <!-- Accounting Transaction Entry Reconcile Status -->
+            <moqui.basic.StatusType description="Accounting Transaction Entry Reconcile Status" statusTypeId="AcctgTransEntryReconcile"/>
+            <moqui.basic.StatusItem description="Not Reconciled" sequenceNum="1" statusId="AterNot" statusTypeId="AcctgTransEntryReconcile"/>
+            <moqui.basic.StatusItem description="Partly Reconciled" sequenceNum="2" statusId="AterPartly" statusTypeId="AcctgTransEntryReconcile"/>
+            <moqui.basic.StatusItem description="Reconciled" sequenceNum="3" statusId="AterRec" statusTypeId="AcctgTransEntryReconcile"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AterNot" toStatusId="AterPartly" transitionName="Partly Reconcile"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AterNot" toStatusId="AterRec" transitionName="Reconcile"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AterPartly" toStatusId="AterRec" transitionName="Reconcile"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AterPartly" toStatusId="AterNot" transitionName="Unreconcile"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AterRec" toStatusId="AterNot" transitionName="Unreconcile"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="GlJournal" package="mantle.ledger.transaction" use="transactional" cache="never">
+        <field name="glJournalId" type="id" is-pk="true"/>
+        <field name="glJournalTypeEnumId" type="id"/>
+        <field name="glJournalName" type="text-medium"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="isPosted" type="text-indicator"/>
+        <field name="postedDate" type="date-time"/>
+        <relationship type="one" title="GlJournalType" related="moqui.basic.Enumeration" short-alias="glJournalTypeEnum">
+            <key-map field-name="glJournalTypeEnumId"/></relationship>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organizationParty">
+            <key-map field-name="organizationPartyId"/></relationship>
+        <seed-data>
+            <!-- GL Journal Type -->
+            <moqui.basic.EnumerationType description="GL Journal Type" enumTypeId="GlJournalType"/>
+            <moqui.basic.Enumeration enumId="GLJRNL_ERROR" description="Error Journal" enumTypeId="GlJournalType"/>
+            <moqui.basic.Enumeration enumId="GLJRNL_MANUAL" description="Manual Transactions Journal" enumTypeId="GlJournalType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PostingOperation" package="mantle.ledger.transaction" cache="never">
+        <description>The shared CX-POSTING transaction boundary: one operation key and request hash, checked and stored in the posting transaction. Identical retries return the stored result; changed requests are refused.</description>
+        <field name="operationKey" type="id" is-pk="true"/>
+        <field name="operationType" type="text-short" enable-audit-log="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="userId" type="id" enable-audit-log="true"/>
+        <field name="submittedDate" type="date-time" enable-audit-log="true"/>
+        <field name="requestHash" type="text-long" enable-audit-log="true"/>
+        <field name="previewId" type="id" enable-audit-log="true"/>
+        <field name="previewFingerprint" type="text-long" enable-audit-log="true"/>
+        <field name="status" type="text-short" enable-audit-log="true"/>
+        <field name="resultEntityName" type="text-medium" enable-audit-log="true"/>
+        <field name="resultId" type="id" enable-audit-log="true"/>
+        <field name="completedDate" type="date-time" enable-audit-log="true"/>
+    </entity>
+</entities>

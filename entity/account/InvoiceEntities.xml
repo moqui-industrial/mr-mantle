@@ -1,0 +1,1200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!-- mantle.account.invoice -->
+    <!-- ========================================================= -->
+    <entity entity-name="Invoice" package="mantle.account.invoice" short-alias="invoices" cache="never" optimistic-lock="true">
+        <field name="invoiceId" type="id" is-pk="true"/>
+        <field name="invoiceTypeEnumId" type="id"/>
+        <field name="fromPartyId" type="id" enable-audit-log="update"/>
+        <field name="toPartyId" type="id" enable-audit-log="update"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="billingAccountId" type="id"/>
+        <field name="invoiceDate" type="date-time" enable-audit-log="update"/>
+        <field name="dueDate" type="date-time" enable-audit-log="update"/>
+        <field name="settlementTermId" type="id"/>
+        <field name="paidDate" type="date-time"/>
+        <field name="invoiceMessage" type="text-long"/>
+        <field name="referenceNumber" type="text-medium" enable-audit-log="update">
+            <description>Vendor or other invoice number.</description></field>
+        <field name="otherPartyOrderId" type="text-short" enable-audit-log="update"/>
+        <field name="description" type="text-medium"/>
+        <field name="currencyUomId" type="id"><description>The original (external) currency</description></field>
+        <!-- maybe better not to track these here on Invoice (or Payment, etc) because would be redundant with AcctgTrans and would need the 2 currency UOMs for from and to parties when both are internal orgs
+        <field name="baseCurrencyUomId" type="id"><description>The unit of account (base) currency used to post to the GL, must match PartyAcctgPreference.baseCurrencyUomId</description></field>
+        <field name="localCurrencyUomId" type="id"><description>The local (internal) currency, also used to post to the GL, must match PartyAcctgPreference.localCurrencyUomId</description></field>
+        -->
+        <field name="overrideOrgPartyId" type="id"><description>Used to specify the organization override rather than
+            using the fromPartyId and/or toPartyId (depending on which is an internal org).</description></field>
+
+        <field name="productStoreId" type="id"><description>For sales invoices processed through a ProductStore, copied from order if applicable</description></field>
+        <field name="partyRelationshipId" type="id"><description>For Payroll invoices, points to Employment record</description></field>
+        <field name="timePeriodId" type="id"><description>For Payroll invoices, points to Payroll TimePeriod</description></field>
+        <field name="acctgTransResultEnumId" type="id"/>
+        <field name="systemMessageRemoteId" type="id"/>
+        <field name="externalId" type="text-short"><description>ID for the invoice in the direct upstream system it came from if it came from an external system</description></field>
+        <field name="originId" type="text-short"><description>ID for the invoice in the original system it came from if not the direct upstream system</description></field>
+
+        <field name="invoiceTotal" type="currency-amount"/>
+        <field name="appliedPaymentsTotal" type="currency-amount">
+            <description>Total of all PaymentApplication records by invoiceId or toInvoiceId, ie includes payments and invoices applied to/from this invoice.</description></field>
+        <field name="unpaidTotal" type="currency-amount"/>
+
+        <relationship type="one" title="InvoiceType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="invoiceTypeEnumId"/></relationship>
+        <relationship type="one" title="From" related="mantle.party.Party" short-alias="fromParty">
+            <key-map field-name="fromPartyId"/></relationship>
+        <relationship type="one-nofk" title="From" related="mantle.party.Organization" short-alias="fromOrganization">
+            <key-map field-name="fromPartyId"/></relationship>
+        <relationship type="one-nofk" title="From" related="mantle.party.Person" short-alias="fromPerson">
+            <key-map field-name="fromPartyId"/></relationship>
+        <relationship type="many" title="From" related="mantle.party.PartyRole" short-alias="fromRoles">
+            <key-map field-name="fromPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="To" related="mantle.party.Party" short-alias="toParty">
+            <key-map field-name="toPartyId"/></relationship>
+        <relationship type="one-nofk" title="To" related="mantle.party.Organization" short-alias="toOrganization">
+            <key-map field-name="toPartyId"/></relationship>
+        <relationship type="one-nofk" title="To" related="mantle.party.Person" short-alias="toPerson">
+            <key-map field-name="toPartyId"/></relationship>
+        <relationship type="many" title="To" related="mantle.party.PartyRole" short-alias="toRoles">
+            <key-map field-name="toPartyId" related="partyId"/></relationship>
+        <relationship type="many" title="To" related="mantle.party.PartyClassificationAppl" short-alias="toClasses">
+            <key-map field-name="toPartyId" related="partyId"/></relationship>
+
+        <relationship type="one" title="Invoice" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one" related="mantle.account.billing.BillingAccount" short-alias="billingAccount"/>
+        <relationship type="one" related="mantle.account.invoice.SettlementTerm" short-alias="settlementTerm"/>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId"/></relationship>
+        <relationship type="one" title="OverrideOrg" related="mantle.party.Party" short-alias="overrideOrgParty">
+            <key-map field-name="overrideOrgPartyId"/></relationship>
+
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="productStore"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one" related="mantle.party.time.TimePeriod" short-alias="timePeriod"/>
+        <relationship type="one" title="AcctgTransResult" related="moqui.basic.Enumeration" short-alias="acctgTransResultEnum">
+            <key-map field-name="acctgTransResultEnumId"/></relationship>
+        <relationship type="one" related="moqui.service.message.SystemMessageRemote" short-alias="systemMessageRemote"/>
+
+        <relationship type="many" related="mantle.account.invoice.InvoiceItem" short-alias="items">
+            <key-map field-name="invoiceId"/></relationship>
+        <relationship type="many" related="mantle.account.payment.PaymentApplication" short-alias="paymentApplications">
+            <key-map field-name="invoiceId"/></relationship>
+        <relationship type="many" title="To" related="mantle.account.payment.PaymentApplication" short-alias="toPaymentApplications">
+            <key-map field-name="invoiceId" related="toInvoiceId"/></relationship>
+        <relationship type="many" related="mantle.ledger.transaction.AcctgTrans" short-alias="acctgTrans">
+            <key-map field-name="invoiceId"/></relationship>
+
+        <index name="INVOICE_EXTERNAL"><index-field name="externalId"/></index>
+        <index name="INVOICE_ORIGIN"><index-field name="originId"/></index>
+
+        <seed-data>
+            <!-- Invoice Type -->
+            <moqui.basic.EnumerationType description="Invoice Type" enumTypeId="InvoiceType"/>
+            <moqui.basic.Enumeration description="Sales/Purchase" enumId="InvoiceSales" enumTypeId="InvoiceType"/>
+            <moqui.basic.Enumeration description="Return" enumId="InvoiceReturn" enumTypeId="InvoiceType"/>
+            <moqui.basic.Enumeration description="Payroll Employee" enumId="InvoicePayroll" enumTypeId="InvoiceType" relatedEnumId="PtPayrollPayment"/>
+            <moqui.basic.Enumeration description="Payroll Other" enumId="InvoicePayrollOther" enumTypeId="InvoiceType" relatedEnumId="PtPayrollOtherPayment"/>
+            <moqui.basic.Enumeration description="Tax" enumId="InvoiceTax" enumTypeId="InvoiceType"/>
+            <moqui.basic.Enumeration description="Garnishment" enumId="InvoiceGarnishment" enumTypeId="InvoiceType"/>
+            <moqui.basic.Enumeration description="Commission" enumId="InvoiceCommission" enumTypeId="InvoiceType"/>
+            <moqui.basic.Enumeration description="Credit Memo" enumId="InvoiceCreditMemo" enumTypeId="InvoiceType"/>
+            <moqui.basic.Enumeration description="Template" enumId="InvoiceTemplate" enumTypeId="InvoiceType"/>
+
+            <!-- ========== Invoice Status ========== -->
+
+            <moqui.basic.StatusType description="Invoice Status" statusTypeId="Invoice"/>
+            <!-- Outgoing Invoices (Receivable) -->
+            <moqui.basic.StatusItem description="In-Process" sequenceNum="1" statusId="InvoiceInProcess" statusTypeId="Invoice"/>
+            <moqui.basic.StatusItem description="Finalized" sequenceNum="2" statusId="InvoiceFinalized" statusTypeId="Invoice"/>
+            <moqui.basic.StatusItem description="Sent" sequenceNum="3" statusId="InvoiceSent" statusTypeId="Invoice"/>
+            <moqui.basic.StatusItem description="Acknowledged" sequenceNum="4" statusId="InvoiceAcked" statusTypeId="Invoice"/>
+            <moqui.basic.StatusItem description="Payment Received" sequenceNum="5" statusId="InvoicePmtRecvd" statusTypeId="Invoice"/>
+            <moqui.basic.StatusItem description="Write Off" sequenceNum="9" statusId="InvoiceWriteOff" statusTypeId="Invoice"/>
+            <!-- Incoming Invoices (Payable) -->
+            <moqui.basic.StatusItem description="Incoming" sequenceNum="10" statusId="InvoiceIncoming" statusTypeId="Invoice"/>
+            <moqui.basic.StatusItem description="Received" sequenceNum="11" statusId="InvoiceReceived" statusTypeId="Invoice"/>
+            <moqui.basic.StatusItem description="Approved" sequenceNum="12" statusId="InvoiceApproved" statusTypeId="Invoice"/>
+            <moqui.basic.StatusItem description="Payment Sent" sequenceNum="13" statusId="InvoicePmtSent" statusTypeId="Invoice"/>
+            <moqui.basic.StatusItem description="Billed Through" sequenceNum="15" statusId="InvoiceBilledThrough" statusTypeId="Invoice"/>
+            <!-- For Outgoing and Incoming -->
+            <moqui.basic.StatusItem description="Cancelled" sequenceNum="99" statusId="InvoiceCancelled" statusTypeId="Invoice"/>
+
+            <!-- The basic process is: In Process, Finalized/Approved, Sent (optional), Payment Received or Write Off -->
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceInProcess" toStatusId="InvoiceFinalized" transitionName="Finalize"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceFinalized" toStatusId="InvoiceSent" transitionName="Send"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceFinalized" toStatusId="InvoicePmtRecvd" transitionName="Receive Payment"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceSent" toStatusId="InvoicePmtRecvd" transitionName="Receive Payment"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceSent" toStatusId="InvoiceAcked" transitionName="Acknowledge"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceAcked" toStatusId="InvoicePmtRecvd" transitionName="Receive Payment"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoicePmtRecvd" toStatusId="InvoiceWriteOff" transitionName="Write Off"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceWriteOff" toStatusId="InvoicePmtRecvd" transitionName="Receive Payment"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceInProcess" toStatusId="InvoiceCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceFinalized" toStatusId="InvoiceCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceSent" toStatusId="InvoiceCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoicePmtRecvd" toStatusId="InvoiceCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceWriteOff" toStatusId="InvoiceCancelled" transitionName="Cancel"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoicePmtRecvd" toStatusId="InvoiceFinalized" transitionName="Unpay"/>
+
+            <!-- if changes are needed after Finalized or Sent then go back to In Process -->
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceSent" toStatusId="InvoiceInProcess" transitionName="Resume Changes"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceFinalized" toStatusId="InvoiceInProcess" transitionName="Resume Changes"/>
+
+            <!-- Incoming invoices should start in Received and then move to Approved, then Payment Sent -->
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceIncoming" toStatusId="InvoiceReceived" transitionName="Receive"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceIncoming" toStatusId="InvoiceApproved" transitionName="Approve" userPermissionId="INVOICE_APPROVE"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceReceived" toStatusId="InvoiceApproved" transitionName="Approve" userPermissionId="INVOICE_APPROVE"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceApproved" toStatusId="InvoiceReceived" transitionName="Resume Changes"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceApproved" toStatusId="InvoicePmtSent" transitionName="Payment Already Sent"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoicePmtSent" toStatusId="InvoiceBilledThrough" transitionName="Bill Through"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoicePmtSent" toStatusId="InvoiceApproved" transitionName="Unpay"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceIncoming" toStatusId="InvoiceCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceReceived" toStatusId="InvoiceCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoiceApproved" toStatusId="InvoiceCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="InvoicePmtSent" toStatusId="InvoiceCancelled" transitionName="Cancel"/>
+
+            <!-- ========== Receivable Invoice StatusFlow ========== -->
+            <!-- NOTE 2019-03-08: on existing databases (deployed with code from before 2019-03-08) load the data from here down to support new status flows -->
+
+            <moqui.basic.StatusFlow statusFlowId="InvoiceReceivable" statusTypeId="Invoice" description="Invoice Receivable"/>
+            <!-- available statuses in flow -->
+            <moqui.basic.StatusFlowItem statusFlowId="InvoiceReceivable" statusId="InvoiceInProcess"/>
+            <moqui.basic.StatusFlowItem statusFlowId="InvoiceReceivable" statusId="InvoiceFinalized"/>
+            <moqui.basic.StatusFlowItem statusFlowId="InvoiceReceivable" statusId="InvoiceSent"/>
+            <moqui.basic.StatusFlowItem statusFlowId="InvoiceReceivable" statusId="InvoiceAcked"/>
+            <moqui.basic.StatusFlowItem statusFlowId="InvoiceReceivable" statusId="InvoicePmtRecvd"/>
+            <moqui.basic.StatusFlowItem statusFlowId="InvoiceReceivable" statusId="InvoiceWriteOff"/>
+            <moqui.basic.StatusFlowItem statusFlowId="InvoiceReceivable" statusId="InvoiceCancelled"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceInProcess" toStatusId="InvoiceFinalized" transitionSequence="1" transitionName="Finalize"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceInProcess" toStatusId="InvoiceCancelled" transitionSequence="2" transitionName="Cancel"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceFinalized" toStatusId="InvoiceSent" transitionSequence="1" transitionName="Sent"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceFinalized" toStatusId="InvoicePmtRecvd" transitionSequence="2" transitionName="Payment Received"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceFinalized" toStatusId="InvoiceInProcess" transitionSequence="3" transitionName="Resume Changes"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceFinalized" toStatusId="InvoiceCancelled" transitionSequence="5" transitionName="Cancel"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceSent" toStatusId="InvoicePmtRecvd" transitionSequence="1" transitionName="Payment Received"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceSent" toStatusId="InvoiceAcked" transitionSequence="2" transitionName="Acknowledged"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceSent" toStatusId="InvoiceInProcess" transitionSequence="3" transitionName="Resume Changes"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceSent" toStatusId="InvoiceCancelled" transitionSequence="5" transitionName="Cancel"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceAcked" toStatusId="InvoiceSent" transitionSequence="1" transitionName="Un-acknowledge"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceAcked" toStatusId="InvoicePmtRecvd" transitionSequence="2" transitionName="Payment Received"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceAcked" toStatusId="InvoiceCancelled" transitionSequence="3" transitionName="Cancel"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceWriteOff" toStatusId="InvoicePmtRecvd" transitionSequence="1" transitionName="Payment Received"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoiceWriteOff" toStatusId="InvoiceCancelled" transitionSequence="2" transitionName="Cancel"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoicePmtRecvd" toStatusId="InvoiceFinalized" transitionSequence="1" transitionName="Unpay"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoicePmtRecvd" toStatusId="InvoiceCancelled" transitionSequence="2" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoicePmtRecvd" toStatusId="InvoiceWriteOff" transitionSequence="4" transitionName="Write Off"/>
+
+            <!-- Cross Org - Receivable Side, for invoices where both from and to parties are in role OrgInternal -->
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceReceivable" statusId="InvoicePmtSent" toStatusId="InvoicePmtRecvd" transitionSequence="1" transitionName="Payment Received"/>
+
+            <!-- ========== Payable Invoice StatusFlow ========== -->
+
+            <moqui.basic.StatusFlow statusFlowId="InvoicePayable" statusTypeId="Invoice" description="Invoice Payable"/>
+            <!-- available statuses in flow -->
+            <moqui.basic.StatusFlowItem statusFlowId="InvoicePayable" statusId="InvoiceIncoming"/>
+            <moqui.basic.StatusFlowItem statusFlowId="InvoicePayable" statusId="InvoiceReceived"/>
+            <moqui.basic.StatusFlowItem statusFlowId="InvoicePayable" statusId="InvoiceAcked"/>
+            <moqui.basic.StatusFlowItem statusFlowId="InvoicePayable" statusId="InvoiceApproved"/>
+            <moqui.basic.StatusFlowItem statusFlowId="InvoicePayable" statusId="InvoicePmtSent"/>
+            <moqui.basic.StatusFlowItem statusFlowId="InvoicePayable" statusId="InvoiceBilledThrough"/>
+            <moqui.basic.StatusFlowItem statusFlowId="InvoicePayable" statusId="InvoiceCancelled"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceIncoming" toStatusId="InvoiceReceived" transitionSequence="1" transitionName="Receive"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceIncoming" toStatusId="InvoiceApproved" transitionSequence="2" transitionName="Approve" userPermissionId="INVOICE_APPROVE"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceIncoming" toStatusId="InvoiceCancelled" transitionSequence="3" transitionName="Cancel"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceReceived" toStatusId="InvoiceAcked" transitionSequence="1" transitionName="Acknowledged"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceReceived" toStatusId="InvoiceApproved" transitionSequence="2" transitionName="Approve" userPermissionId="INVOICE_APPROVE"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceReceived" toStatusId="InvoiceCancelled" transitionSequence="3" transitionName="Cancel"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceAcked" toStatusId="InvoiceApproved" transitionSequence="1" transitionName="Approve" userPermissionId="INVOICE_APPROVE"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceAcked" toStatusId="InvoiceCancelled" transitionSequence="2" transitionName="Cancel"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceApproved" toStatusId="InvoicePmtSent" transitionSequence="1" transitionName="Payment Sent"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceApproved" toStatusId="InvoiceReceived" transitionSequence="2" transitionName="Resume Changes"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceApproved" toStatusId="InvoiceCancelled" transitionSequence="3" transitionName="Cancel"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoicePmtSent" toStatusId="InvoiceBilledThrough" transitionSequence="1" transitionName="Billed Through"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoicePmtSent" toStatusId="InvoiceApproved" transitionSequence="2" transitionName="Unpay"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoicePmtSent" toStatusId="InvoiceCancelled" transitionSequence="3" transitionName="Cancel"/>
+
+            <!-- Cross Org - Payable Side, for invoices where both from and to parties are in role OrgInternal -->
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceFinalized" toStatusId="InvoiceReceived" transitionSequence="1" transitionName="Receive"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceFinalized" toStatusId="InvoiceApproved" transitionSequence="2" transitionName="Approve" userPermissionId="INVOICE_APPROVE"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceSent" toStatusId="InvoiceReceived" transitionSequence="1" transitionName="Receive"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoicePayable" statusId="InvoiceSent" toStatusId="InvoiceApproved" transitionSequence="2" transitionName="Approve" userPermissionId="INVOICE_APPROVE"/>
+
+            <!-- ========== Special (hidden) Invoice StatusFlow ========== -->
+            <moqui.basic.StatusFlow statusFlowId="InvoiceSpecial" statusTypeId="Invoice" description="Invoice Special"/>
+            <!-- for manual un-cancel -->
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceSpecial" statusId="InvoiceCancelled" toStatusId="InvoiceInProcess" transitionName="Uncancel Receivable"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceSpecial" statusId="InvoiceCancelled" toStatusId="InvoiceReceived" transitionName="Uncancel Payable"/>
+            <!-- for reverse#Invoice, handled internally only -->
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceSpecial" statusId="InvoiceInProcess" toStatusId="InvoiceIncoming" transitionName="Reverse to Payable"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceSpecial" statusId="InvoiceIncoming" toStatusId="InvoiceInProcess" transitionName="Reverse to Receivable"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="InvoiceSpecial" statusId="InvoiceReceived" toStatusId="InvoiceInProcess" transitionName="Reverse to Receivable"/>
+
+            <!--
+            - TODO: InvoicePmtRecvd => InvoiceFinalized (Unpay) crosses Payable invoice statuses where from and to parties are in role OrgInternal
+              - SECA rule (AccountingLedger.secas.xml) handles specific status changes
+              - current code won't revert#InvoicePost for this status change, but it should revert ONLY the Payable side posting
+                (to party OrgInternal) and not Receivable (from party OrgInternal) - weird case with both in same system...
+
+            - X GL Posting on any transition to Finalized or Approved statuses.
+            - X Reverse GL Posting on Finalized/Approved/Sent/Payment* to Cancelled
+            - X Reverse GL Posting on Finalized/Sent to In Process
+            - TODO: GL Postings on transition to Write Off, and on Write Off to Payment
+            - X On Payment* to Finalized/Approved/Cancelled, unapply Payment(s)
+            -->
+        </seed-data>
+        <master>
+            <detail relationship="type"/>
+            <detail relationship="status"/>
+            <detail relationship="currencyUom"/>
+            <detail relationship="fromParty" use-master="basic"/>
+            <detail relationship="toParty" use-master="basic"/>
+            <detail relationship="items">
+                <detail relationship="type"/>
+                <detail relationship="product"/>
+                <detail relationship="quantityUom"/>
+                <detail relationship="details"/>
+                <detail relationship="orderItemBillings"/>
+                <detail relationship="shipmentItemSources"/>
+                <detail relationship="issuances"/>
+                <detail relationship="receipts"/>
+            </detail>
+            <detail relationship="paymentApplications"/>
+            <detail relationship="toPaymentApplications"/>
+        </master>
+    </entity>
+
+    <entity entity-name="InvoiceSystemMessage" package="mantle.account.invoice" cache="never">
+        <field name="invoiceId" type="id" is-pk="true"/>
+        <field name="systemMessageId" type="id" is-pk="true"/>
+        <field name="externalId" type="text-short"/>
+        <field name="originId" type="text-short"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <relationship type="one" related="moqui.service.message.SystemMessage"/>
+    </entity>
+
+    <entity entity-name="InvoiceContactMech" package="mantle.account.invoice" cache="never">
+        <field name="invoiceId" type="id" is-pk="true"/>
+        <field name="contactMechPurposeId" type="id" is-pk="true"/>
+        <field name="contactMechId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <relationship type="one" related="mantle.party.contact.ContactMechPurpose"/>
+        <relationship type="one" related="mantle.party.contact.ContactMech"/>
+        <relationship type="one-nofk" related="mantle.party.contact.PostalAddress"/>
+        <relationship type="one-nofk" related="mantle.party.contact.TelecomNumber"/>
+    </entity>
+
+    <entity entity-name="InvoiceContent" package="mantle.account.invoice" cache="never">
+        <field name="invoiceContentId" type="id" is-pk="true"/>
+        <field name="invoiceId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <relationship type="one" title="InvoiceContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <seed-data>
+            <!-- Invoice Content Type -->
+            <moqui.basic.EnumerationType description="Invoice Content Type" enumTypeId="InvoiceContentType"/>
+            <moqui.basic.Enumeration enumId="IctInvoiceDocument" description="Invoice Document" enumTypeId="InvoiceContentType"/>
+            <moqui.basic.Enumeration enumId="IctReceipt" description="Receipt" enumTypeId="InvoiceContentType"/>
+            <moqui.basic.Enumeration enumId="IctItemImage" description="Item Image" enumTypeId="InvoiceContentType"/>
+            <moqui.basic.Enumeration enumId="IctNote" description="Note" enumTypeId="InvoiceContentType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="InvoiceEmailMessage" package="mantle.account.invoice" cache="never">
+        <field name="invoiceId" type="id" is-pk="true"/>
+        <field name="emailMessageId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <relationship type="one" related="moqui.basic.email.EmailMessage"/>
+    </entity>
+
+    <entity entity-name="InvoiceItem" package="mantle.account.invoice" cache="never">
+        <field name="invoiceId" type="id" is-pk="true"/>
+        <field name="invoiceItemSeqId" type="id" is-pk="true"/>
+        <field name="parentItemSeqId" type="id"/>
+        <field name="itemTypeEnumId" type="id" enable-audit-log="update"/>
+        <field name="overrideGlAccountId" type="id" enable-audit-log="update"><description>The override or actual glAccountId used for the
+            AcctgTransEntry based on the InvoiceItem. If empty the glAccountId will be determined based on configuration
+            or custom code.</description></field>
+        <field name="assetId" type="id"><description>For sale of a particular asset, required for fixed assets</description></field>
+        <field name="productId" type="id" enable-audit-log="update"/>
+        <field name="otherPartyProductId" type="text-short"/>
+        <field name="parentInvoiceId" type="id"/>
+        <field name="parentInvoiceItemSeqId" type="id"/>
+        <field name="taxableFlag" type="text-indicator"/>
+        <field name="quantity" type="number-decimal" enable-audit-log="update"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="amount" type="currency-precise" enable-audit-log="update"/>
+        <field name="description" type="text-medium"/>
+        <field name="itemDate" type="date-time" enable-audit-log="update"/>
+        <field name="isAdjustment" type="text-indicator"/>
+        <field name="salesOpportunityId" type="id"/>
+        <field name="taxAuthorityId" type="id"/>
+        <field name="payrollAdjustmentId" type="id"/>
+        <field name="finAccountId" type="id"/>
+        <field name="finAccountTransId" type="id"/>
+        <field name="billThruVendorName" type="text-medium">
+            <description>For tracking purposes when there is no associated bill through invoice with InvoiceItemAssoc records</description></field>
+        <field name="billThruVendorRef" type="text-short"/>
+        <field name="taxAuthorityRateId" type="id">
+            <description>For a calculated tax line, the rate version applied.</description></field>
+        <field name="taxableAmount" type="currency-precise">
+            <description>For a calculated tax line, its base.</description></field>
+        <field name="taxPercentage" type="number-decimal"><description>For a calculated tax line, its rate.</description></field>
+        <field name="taxRoundingAmount" type="currency-precise"><description>For a calculated tax line, its amount less the
+            unrounded tax.</description></field>
+        <field name="taxCalculated" type="text-indicator"><description>Y for a tax line a tax gateway calculated
+            (calculate#InvoiceSalesTax), which a new calculation replaces; manual tax lines are left as they
+            are.</description></field>
+
+        <relationship type="one" related="mantle.account.invoice.Invoice" short-alias="invoice"/>
+        <relationship type="one-nofk" title="Parent" related="mantle.account.invoice.InvoiceItem" short-alias="parent">
+            <key-map field-name="invoiceId"/><key-map field-name="parentItemSeqId" related="invoiceItemSeqId"/></relationship>
+        <relationship type="many" title="Child" related="mantle.account.invoice.InvoiceItem" short-alias="children">
+            <key-map field-name="invoiceId"/><key-map field-name="invoiceItemSeqId" related="parentItemSeqId"/></relationship>
+        <relationship type="one" title="ItemType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="itemTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" title="OtherParent" related="mantle.account.invoice.InvoiceItem" short-alias="otherParent">
+            <key-map field-name="parentInvoiceId" related="invoiceId"/>
+            <key-map field-name="parentInvoiceItemSeqId" related="invoiceItemSeqId"/>
+        </relationship>
+        <relationship type="one" title="Override" related="mantle.ledger.account.GlAccount" short-alias="overrideGlAccount">
+            <key-map field-name="overrideGlAccountId"/></relationship>
+
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId"/></relationship>
+        <relationship type="one" related="mantle.sales.opportunity.SalesOpportunity" short-alias="salesOpportunity"/>
+        <relationship type="one" related="mantle.other.tax.TaxAuthority" short-alias="taxAuthority"/>
+        <relationship type="one" related="mantle.other.tax.TaxAuthorityRate" short-alias="taxAuthorityRate"/>
+        <relationship type="one" related="mantle.humanres.employment.PayrollAdjustment" short-alias="payrollAdjustment"/>
+        <relationship type="one" related="mantle.account.financial.FinancialAccount" short-alias="financialAccount"/>
+        <relationship type="one" related="mantle.account.financial.FinancialAccountTrans" short-alias="financialAccountTrans"/>
+
+        <relationship type="many" related="mantle.account.invoice.InvoiceItemDetail" short-alias="details">
+            <key-map field-name="invoiceId"/><key-map field-name="invoiceItemSeqId"/></relationship>
+        <relationship type="many" related="mantle.order.OrderItemBilling" short-alias="orderItemBillings">
+            <key-map field-name="invoiceId"/><key-map field-name="invoiceItemSeqId"/></relationship>
+        <relationship type="many" related="mantle.shipment.ShipmentItemSource" short-alias="shipmentItemSources">
+            <key-map field-name="invoiceId"/><key-map field-name="invoiceItemSeqId"/></relationship>
+
+        <relationship type="many" related="mantle.product.issuance.AssetIssuance" short-alias="issuances">
+            <key-map field-name="invoiceId"/><key-map field-name="invoiceItemSeqId"/></relationship>
+        <relationship type="many" related="mantle.product.receipt.AssetReceipt" short-alias="receipts">
+            <key-map field-name="invoiceId"/><key-map field-name="invoiceItemSeqId"/></relationship>
+    </entity>
+
+    <entity entity-name="InvoiceItemDetail" package="mantle.account.invoice" cache="never">
+        <field name="invoiceItemDetailId" type="id" is-pk="true"/>
+        <field name="invoiceId" type="id" not-null="true"/>
+        <field name="invoiceItemSeqId" type="id" not-null="true"/>
+        <field name="facilityId" type="id"/>
+        <field name="assetId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="quantity" type="number-decimal"/>
+
+        <relationship type="one-nofk" related="mantle.account.invoice.Invoice" short-alias="invoice"/>
+        <relationship type="one" related="mantle.account.invoice.InvoiceItem" short-alias="invoiceItem"/>
+        <relationship type="one" related="mantle.facility.Facility" short-alias="facility"/>
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+    </entity>
+
+    <entity entity-name="InvoiceItemAssoc" package="mantle.account.invoice" cache="never">
+        <field name="invoiceItemAssocId" type="id" is-pk="true"/>
+        <field name="invoiceId" type="id"/>
+        <field name="invoiceItemSeqId" type="id"/>
+        <field name="toInvoiceId" type="id"/>
+        <field name="toInvoiceItemSeqId" type="id"/>
+        <field name="invoiceItemAssocTypeEnumId" type="id"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="fromPartyId" type="id"/>
+        <field name="toPartyId" type="id"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="amount" type="currency-amount"/>
+        <relationship type="one" title="InvoiceItemAssocType" related="moqui.basic.Enumeration">
+            <key-map field-name="invoiceItemAssocTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.account.invoice.InvoiceItem">
+            <key-map field-name="invoiceId"/><key-map field-name="invoiceItemSeqId"/></relationship>
+        <relationship type="one" title="To" related="mantle.account.invoice.InvoiceItem">
+            <key-map field-name="toInvoiceId" related="invoiceId"/>
+            <key-map field-name="toInvoiceItemSeqId" related="invoiceItemSeqId"/>
+        </relationship>
+        <relationship type="one" title="From" related="mantle.party.Party">
+            <key-map field-name="fromPartyId"/></relationship>
+        <relationship type="one" title="To" related="mantle.party.Party">
+            <key-map field-name="toPartyId"/></relationship>
+        <seed-data>
+            <!-- Invoice Item Assoc Type -->
+            <moqui.basic.EnumerationType description="Invoice Item Assoc Type" enumTypeId="InvoiceItemAssocType"/>
+            <moqui.basic.Enumeration description="Commission" enumId="IiatCommission" enumTypeId="InvoiceItemAssocType"/>
+            <moqui.basic.Enumeration description="Withdraw" enumId="IiatWithdraw" enumTypeId="InvoiceItemAssocType"/>
+            <moqui.basic.Enumeration description="Bill Through" enumId="IiatBillThrough" enumTypeId="InvoiceItemAssocType"/>
+            <moqui.basic.Enumeration description="Related" enumId="IiatRelated" enumTypeId="InvoiceItemAssocType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="InvoiceParty" package="mantle.account.invoice" cache="never">
+        <field name="invoiceId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.RoleType"/>
+    </entity>
+
+    <entity entity-name="InvoiceTerm" package="mantle.account.invoice" cache="never">
+        <field name="invoiceId" type="id" is-pk="true"/>
+        <field name="invoiceItemSeqId" type="id" is-pk="true"/>
+        <field name="settlementTermId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice">
+            <key-map field-name="invoiceId"/></relationship>
+        <relationship type="one-nofk" related="mantle.account.invoice.InvoiceItem">
+            <key-map field-name="invoiceId"/><key-map field-name="invoiceItemSeqId"/></relationship>
+        <relationship type="one" related="mantle.account.invoice.SettlementTerm"/>
+    </entity>
+
+    <entity entity-name="SettlementTerm" package="mantle.account.invoice" cache="true">
+        <field name="settlementTermId" type="id" is-pk="true"/>
+        <field name="termTypeEnumId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <field name="termValue" type="number-decimal"/>
+        <field name="termValueUomId" type="id"/>
+        <field name="orderPmtServiceRegisterId" type="id"><description>Use ServiceRegister.serviceTypeEnumId = 'SettleTermOrderPmt';
+                service will receive in-parameters: orderId, orderPartSeqId, and settlementTermId</description></field>
+        <relationship type="one" title="TermType" related="moqui.basic.Enumeration">
+            <key-map field-name="termTypeEnumId"/></relationship>
+        <relationship type="one" title="TermValue" related="moqui.basic.Uom">
+            <key-map field-name="termValueUomId"/></relationship>
+        <relationship type="one" related="moqui.service.ServiceRegister" short-alias="orderPmtServiceRegister">
+            <key-map field-name="orderPmtServiceRegisterId"/></relationship>
+        <seed-data>
+            <!-- Term Type; these are used for AgreementTerm as well -->
+            <moqui.basic.EnumerationType description="Term Type" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Financial" enumId="TtFinancial" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Payment (net days)" parentEnumId="TtFinancial" enumId="TtFinPaymentDays" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Payment net days, part 1" parentEnumId="TtFinPaymentDays" enumId="TtFinPaymentDaysPt1" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Payment net days, part 2" parentEnumId="TtFinPaymentDays" enumId="TtFinPaymentDaysPt2" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Payment net days, part 3" parentEnumId="TtFinPaymentDays" enumId="TtFinPaymentDaysPt3" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Payment (discounted if paid within specified days)" parentEnumId="TtFinancial" enumId="TtFinPaymentDisc" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Payment (due on specified day of current month)" parentEnumId="TtFinancial" enumId="TtFinPaymentDayCurMonth" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Payment (due on specified day of next month)" parentEnumId="TtFinancial" enumId="TtFinPaymentDayNextMonth" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Late Fee (percent)" parentEnumId="TtFinancial" enumId="TtFinLateFee" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Penalty For Collection Agency" parentEnumId="TtFinancial" enumId="TtFinCollection" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Non-Returnable Sales Item" parentEnumId="TtFinancial" enumId="TtFinNotReturnable" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incentive" enumId="TtIncentive" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Legal" enumId="TtLegal" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Threshold" enumId="TtThreshold" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Clause For Renewal" enumId="TtClauseForRenewal" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Agreement Termination" enumId="TtAgreementTermination" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Indemnification" enumId="TtIndemnification" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Non-Compete" enumId="TtNonCompete" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Exclusive Relationship" enumId="TtExclusive" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Commission" enumId="TtCommission" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Commission Term Fixed Per Unit" parentEnumId="TtCommission" enumId="TtCommissionFixed" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Commission Term Variable" parentEnumId="TtCommission" enumId="TtCommissionVariable" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Commission Term Minimum Per Unit" parentEnumId="TtCommission" enumId="TtCommissionMin" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Commission Term Maximum Per Unit" parentEnumId="TtCommission" enumId="TtCommissionMax" enumTypeId="TermType"/>
+
+            <!-- Incoterms as of 2010; see https://en.wikipedia.org/wiki/Incoterms -->
+            <moqui.basic.Enumeration description="Incoterm" enumId="TtInco" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Ex Works" parentEnumId="TtInco" enumId="TtEXW" enumCode="EXW" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Free Carrier" parentEnumId="TtInco" enumId="TtFCA" enumCode="FCA" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Free Alongside Ship" parentEnumId="TtInco" enumId="TtFAS" enumCode="FAS" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Free On Board" parentEnumId="TtInco" enumId="TtFOB" enumCode="FOB" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Cost and Freight" parentEnumId="TtInco" enumId="TtCFR" enumCode="CFR" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Cost, Insurance and Freight" parentEnumId="TtInco" enumId="TtCIF" enumCode="CIF" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Carriage Paid To" parentEnumId="TtInco" enumId="TtCPT" enumCode="CPT" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Carriage and Insurance Paid to" parentEnumId="TtInco" enumId="TtCIP" enumCode="CIP" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Delivered Duty Paid" parentEnumId="TtInco" enumId="TtDDP" enumCode="DDP" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Delivered at Place" parentEnumId="TtInco" enumId="TtDAP" enumCode="DAP" enumTypeId="TermType"/>
+            <!-- Incoterms deprecated in 2010: "Delivered at Frontier" - DAF, "Delivered Ex Ship" - DES,
+                "Delivered Ex Quay" - DEQ, "Delivered Duty Unpaid" - DDU, "Delivered at Terminal" - DAT -->
+            <!-- NOTE: in general DDU => DAP, especially for fulfill to customer -->
+            <moqui.basic.Enumeration description="Incoterm Delivered At Frontier" parentEnumId="TtInco" enumId="TtDAF" enumCode="DAF" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Delivered Ex Ship" parentEnumId="TtInco" enumId="TtDES" enumCode="DES" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Delivered Ex Quay" parentEnumId="TtInco" enumId="TtDEQ" enumCode="DEQ" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Delivered Duty Unpaid" parentEnumId="TtInco" enumId="TtDDU" enumCode="DDU" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Incoterm Delivered at Terminal" parentEnumId="TtInco" enumId="TtDAT" enumCode="DAT" enumTypeId="TermType"/>
+
+            <moqui.basic.Enumeration description="Purchasing" enumId="TtPurchasing" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Preferred Freight" enumId="TtFreight" enumTypeId="TermType"/>
+            <moqui.basic.Enumeration description="Other" enumId="TtOther" enumTypeId="TermType"/>
+
+            <moqui.basic.Enumeration description="Payment Term Types" enumId="EngPaymentTermType" enumTypeId="EnumGroup"/>
+            <moqui.basic.EnumGroupMember enumGroupEnumId="EngPaymentTermType" enumId="TtFinPaymentDays"/>
+            <moqui.basic.EnumGroupMember enumGroupEnumId="EngPaymentTermType" enumId="TtFinPaymentDisc"/>
+            <moqui.basic.EnumGroupMember enumGroupEnumId="EngPaymentTermType" enumId="TtFinPaymentDayCurMonth"/>
+            <moqui.basic.EnumGroupMember enumGroupEnumId="EngPaymentTermType" enumId="TtFinPaymentDayNextMonth"/>
+
+            <!-- NOTE: SettlementTerm is not an Enumeration because it needs additional fields -->
+            <mantle.account.invoice.SettlementTerm settlementTermId="Immediate" termTypeEnumId="TtFinPaymentDays"
+                    description="Immediate (Due on Delivery)" termValue="0" termValueUomId="TF_day"/>
+            <mantle.account.invoice.SettlementTerm settlementTermId="Net10" termTypeEnumId="TtFinPaymentDays"
+                    description="Net Due in 10 Days" termValue="10" termValueUomId="TF_day"/>
+            <mantle.account.invoice.SettlementTerm settlementTermId="Net15" termTypeEnumId="TtFinPaymentDays"
+                    description="Net Due in 15 Days" termValue="15" termValueUomId="TF_day"/>
+            <mantle.account.invoice.SettlementTerm settlementTermId="Net30" termTypeEnumId="TtFinPaymentDays"
+                    description="Net Due in 30 Days" termValue="30" termValueUomId="TF_day"/>
+            <mantle.account.invoice.SettlementTerm settlementTermId="Net60" termTypeEnumId="TtFinPaymentDays"
+                    description="Net Due in 60 Days" termValue="60" termValueUomId="TF_day"/>
+            <mantle.account.invoice.SettlementTerm settlementTermId="Net90" termTypeEnumId="TtFinPaymentDays"
+                    description="Net Due in 90 Days" termValue="90" termValueUomId="TF_day"/>
+            <mantle.account.invoice.SettlementTerm settlementTermId="Net15thCur" termTypeEnumId="TtFinPaymentDayCurMonth"
+                    description="Net Due on 15th of Current Month" termValue="15"/>
+            <mantle.account.invoice.SettlementTerm settlementTermId="NetLastCur" termTypeEnumId="TtFinPaymentDayCurMonth"
+                    description="Net Due on Last Day of Current Month" termValue="31"/>
+            <mantle.account.invoice.SettlementTerm settlementTermId="Net1stNext" termTypeEnumId="TtFinPaymentDayNextMonth"
+                    description="Net Due on 1st of Next Month" termValue="1"/>
+            <mantle.account.invoice.SettlementTerm settlementTermId="Net15thNext" termTypeEnumId="TtFinPaymentDayNextMonth"
+                    description="Net Due on 15th of Next Month" termValue="15"/>
+            <mantle.account.invoice.SettlementTerm settlementTermId="NetLastNext" termTypeEnumId="TtFinPaymentDayNextMonth"
+                    description="Net Due on Last Day of Next Month" termValue="31"/>
+
+            <mantle.account.invoice.SettlementTerm settlementTermId="Net30Disc2Pct10" termTypeEnumId="TtFinPaymentDisc"
+                    description="Net Due in 30 Days, 2% Discount within 10 Days" termValue="30" termValueUomId="TF_day"/>
+            <mantle.account.invoice.SettlementTerm settlementTermId="Net45Disc2Pct15" termTypeEnumId="TtFinPaymentDisc"
+                    description="Net Due in 45 Days, 2% Discount within 15 Days" termValue="45" termValueUomId="TF_day"/>
+
+            <!-- ServiceRegisterType -->
+            <moqui.basic.Enumeration description="Settlement Term - Generate Order Payments" enumId="SettleTermOrderPmt" enumTypeId="ServiceRegisterType"/>
+        </seed-data>
+    </entity>
+
+    <!-- ========== Collections ========== -->
+    <entity entity-name="CollectionActivity" package="mantle.account.invoice" cache="never">
+        <description>A collection contact or next action of an organization with a customer. The activity itself is a
+            WorkEffort (a call, email or to-do, linked to the customer by WorkEffortRecord, so it shows on the customer's
+            record and in the collector's Today); this row adds the organization and the outcome.</description>
+        <field name="workEffortId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="customerPartyId" type="id"/>
+        <field name="outcomeEnumId" type="id"/>
+        <field name="invoiceIds" type="text-long"><description>The invoices it is about, comma separated.</description></field>
+        <relationship type="one" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one" title="CollectionOutcome" related="moqui.basic.Enumeration">
+            <key-map field-name="outcomeEnumId" related="enumId"/></relationship>
+        <index name="COLLECTION_ACTIVITY_CUSTOMER">
+            <index-field name="organizationPartyId"/><index-field name="customerPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Collection Outcome" enumTypeId="CollectionOutcome"/>
+            <moqui.basic.Enumeration enumId="CaoReached" enumTypeId="CollectionOutcome" sequenceNum="1"
+                    description="Reached the customer"/>
+            <moqui.basic.Enumeration enumId="CaoNoAnswer" enumTypeId="CollectionOutcome" sequenceNum="2" description="No answer"/>
+            <moqui.basic.Enumeration enumId="CaoLeftMessage" enumTypeId="CollectionOutcome" sequenceNum="3"
+                    description="Left a message"/>
+            <moqui.basic.Enumeration enumId="CaoPromised" enumTypeId="CollectionOutcome" sequenceNum="4"
+                    description="Promised to pay"/>
+            <moqui.basic.Enumeration enumId="CaoDisputed" enumTypeId="CollectionOutcome" sequenceNum="5"
+                    description="Disputed invoices"/>
+            <moqui.basic.Enumeration enumId="CaoDisputeResolved" enumTypeId="CollectionOutcome" sequenceNum="6"
+                    description="Dispute resolved"/>
+            <moqui.basic.Enumeration enumId="CaoNextAction" enumTypeId="CollectionOutcome" sequenceNum="9"
+                    description="Next action"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="CollectionPromise" package="mantle.account.invoice" cache="never">
+        <description>A customer's promise to pay an organization an amount by a date, with the invoices it covers. It is
+            kept when the customer's payments received from its date through the promised day reach the amount, and broken
+            when the day passes first; it never marks an invoice paid.</description>
+        <field name="collectionPromiseId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="customerPartyId" type="id"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="amount" type="currency-amount" enable-audit-log="true"/>
+        <field name="promisedDate" type="date" enable-audit-log="true"/>
+        <field name="invoiceIds" type="text-long"><description>The invoices it covers, comma separated.</description></field>
+        <field name="note" type="text-medium"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="workEffortId" type="id"><description>The collection activity that recorded it.</description></field>
+        <relationship type="one" title="CollectionPromise" related="moqui.basic.StatusItem">
+            <key-map field-name="statusId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <index name="COLLECTION_PROMISE_CUSTOMER">
+            <index-field name="organizationPartyId"/><index-field name="customerPartyId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Collection Promise" statusTypeId="CollectionPromise"/>
+            <moqui.basic.StatusItem statusId="CprOpen" statusTypeId="CollectionPromise" sequenceNum="1" description="Open"/>
+            <moqui.basic.StatusItem statusId="CprCancelled" statusTypeId="CollectionPromise" sequenceNum="9"
+                    description="Cancelled"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CprOpen" toStatusId="CprCancelled"
+                    transitionName="Cancel"/>
+        </seed-data>
+    </entity>
+
+    <!-- ========== Dunning ========== -->
+    <entity entity-name="DunningLevel" package="mantle.account.invoice" cache="never">
+        <description>A level of an organization's payment reminders, as effective-dated rows with audit-logged fields: from
+            how many days overdue it applies, how many days must pass before the same customer gets this level again, the
+            email template and whether disputed invoices are left out (CollectionServices.store#Level).</description>
+        <field name="dunningLevelId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="sequenceNum" type="number-integer" enable-audit-log="true"/>
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+        <field name="daysOverdueFrom" type="number-integer" enable-audit-log="true"/>
+        <field name="cadenceDays" type="number-integer" enable-audit-log="true"/>
+        <field name="emailTemplateId" type="id" enable-audit-log="true"/>
+        <field name="excludeDisputed" type="text-indicator" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <field name="previousLevelId" type="id"><description>The row this one replaced.</description></field>
+        <relationship type="one" related="moqui.basic.email.EmailTemplate"/>
+        <index name="DUNNING_LEVEL_ORG"><index-field name="organizationPartyId"/><index-field name="fromDate"/></index>
+    </entity>
+
+    <entity entity-name="DunningRun" package="mantle.account.invoice" cache="never">
+        <description>A reminder run of an organization as of a day: its notices, previewed, then sent. Sending again sends
+            only the notices not yet sent.</description>
+        <field name="dunningRunId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="asOfDate" type="date"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="sentByUserId" type="id"/>
+        <field name="sentDate" type="date-time"/>
+        <field name="incomplete" type="text-indicator"><description>Y when more overdue invoices were found than one run
+            takes.</description></field>
+        <relationship type="one" title="DunningRun" related="moqui.basic.StatusItem">
+            <key-map field-name="statusId"/></relationship>
+        <relationship type="many" related="mantle.account.invoice.DunningNotice" short-alias="notices">
+            <key-map field-name="dunningRunId"/></relationship>
+        <index name="DUNNING_RUN_ORG"><index-field name="organizationPartyId"/><index-field name="createdDate"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Dunning Run" statusTypeId="DunningRun"/>
+            <moqui.basic.StatusItem statusId="DrnPreview" statusTypeId="DunningRun" sequenceNum="1" description="Preview"/>
+            <moqui.basic.StatusItem statusId="DrnPartial" statusTypeId="DunningRun" sequenceNum="2"
+                    description="Partly sent"/>
+            <moqui.basic.StatusItem statusId="DrnSent" statusTypeId="DunningRun" sequenceNum="3" description="Sent"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="DrnPreview" toStatusId="DrnPartial"
+                    transitionName="Send"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="DrnPreview" toStatusId="DrnSent"
+                    transitionName="Send"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="DrnPartial" toStatusId="DrnSent"
+                    transitionName="Send"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="DunningNotice" package="mantle.account.invoice" cache="never">
+        <description>A reminder of a run: one customer, currency and level, the overdue invoices it names (invoiceIds) and
+            their amount, its key (organization, customer, currency and level: a customer is not reminded at the same
+            level again within the level's cadence), the recipients and the outcome of sending it. A row with status
+            DntExcluded names invoices left out and why (disputed, held by a promise, covered by credits, sent
+            recently).</description>
+        <field name="dunningRunId" type="id" is-pk="true"/>
+        <field name="noticeSeqId" type="id" is-pk="true"/>
+        <field name="customerPartyId" type="id"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="dunningLevelId" type="id"/>
+        <field name="levelSequenceNum" type="number-integer"/>
+        <field name="invoiceIds" type="text-long"/>
+        <field name="overdueAmount" type="currency-amount"/>
+        <field name="oldestDueDate" type="date"/>
+        <field name="noticeKey" type="text-medium"/>
+        <field name="statusId" type="id"/>
+        <field name="excludedReason" type="text-medium"/>
+        <field name="toAddresses" type="text-medium"/>
+        <field name="emailMessageId" type="id"/>
+        <field name="errorMessage" type="text-medium"/>
+        <field name="sentDate" type="date-time"/>
+        <relationship type="one" related="mantle.account.invoice.DunningRun"/>
+        <relationship type="one" related="mantle.account.invoice.DunningLevel"/>
+        <relationship type="one" title="DunningNotice" related="moqui.basic.StatusItem">
+            <key-map field-name="statusId"/></relationship>
+        <index name="DUNNING_NOTICE_KEY"><index-field name="noticeKey"/><index-field name="statusId"/></index>
+        <index name="DUNNING_NOTICE_CUSTOMER"><index-field name="customerPartyId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Dunning Notice" statusTypeId="DunningNotice"/>
+            <moqui.basic.StatusItem statusId="DntPending" statusTypeId="DunningNotice" sequenceNum="1" description="To send"/>
+            <moqui.basic.StatusItem statusId="DntSent" statusTypeId="DunningNotice" sequenceNum="2" description="Sent"/>
+            <moqui.basic.StatusItem statusId="DntFailed" statusTypeId="DunningNotice" sequenceNum="3" description="Failed"/>
+            <moqui.basic.StatusItem statusId="DntExcluded" statusTypeId="DunningNotice" sequenceNum="4"
+                    description="Left out"/>
+            <!-- marked before its email is sent, in a transaction of its own, so a retry never sends it again; a notice
+                left sending is checked by hand -->
+            <moqui.basic.StatusItem statusId="DntSending" statusTypeId="DunningNotice" sequenceNum="5" description="Sending"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="DntPending" toStatusId="DntSent"
+                    transitionName="Send"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="DntPending" toStatusId="DntFailed"
+                    transitionName="Fail"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="DntPending" toStatusId="DntExcluded"
+                    transitionName="Leave out"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="DntFailed" toStatusId="DntSent"
+                    transitionName="Send"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="DntFailed" toStatusId="DntExcluded"
+                    transitionName="Leave out"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="DntPending" toStatusId="DntSending"
+                    transitionName="Send"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="DntFailed" toStatusId="DntSending"
+                    transitionName="Send"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="DntSending" toStatusId="DntSent"
+                    transitionName="Sent"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="DntSending" toStatusId="DntFailed"
+                    transitionName="Fail"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="DntSending" toStatusId="DntExcluded"
+                    transitionName="Leave out"/>
+        </seed-data>
+    </entity>
+
+    <!-- ========== Recurring invoices ========== -->
+    <entity entity-name="InvoiceSchedule" package="mantle.account.invoice" cache="never">
+        <description>An invoice-only cadence (rent, a retainer, a recurring supplier bill): the template invoice whose lines
+            each occurrence copies into a new draft, the interval, the first and last days and the next day due. A change
+            applies to the occurrences not yet made; each made occurrence keeps its invoice. Order-based recurring billing
+            stays on the order (OrderHeader.recurCronExpression and the create_RecurringOrders job).</description>
+        <field name="invoiceScheduleId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="partyId" type="id" enable-audit-log="true"><description>The customer, or the supplier of a recurring
+            bill.</description></field>
+        <field name="templateInvoiceId" type="id" enable-audit-log="true"/>
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+        <field name="intervalUomId" type="id" enable-audit-log="true"><description>TF_wk, TF_mon or TF_yr.</description></field>
+        <field name="intervalQuantity" type="number-integer" enable-audit-log="true"/>
+        <field name="startDate" type="date" enable-audit-log="true"/>
+        <field name="endDate" type="date" enable-audit-log="true"/>
+        <field name="nextDate" type="date"><description>The day of the next occurrence to make.</description></field>
+        <field name="settlementTermId" type="id" enable-audit-log="true"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" title="Template" related="mantle.account.invoice.Invoice">
+            <key-map field-name="templateInvoiceId" related="invoiceId"/></relationship>
+        <relationship type="one" title="Interval" related="moqui.basic.Uom">
+            <key-map field-name="intervalUomId" related="uomId"/></relationship>
+        <relationship type="one" related="mantle.account.invoice.SettlementTerm"/>
+        <relationship type="one" title="InvoiceSchedule" related="moqui.basic.StatusItem">
+            <key-map field-name="statusId"/></relationship>
+        <index name="INVOICE_SCHEDULE_DUE"><index-field name="statusId"/><index-field name="nextDate"/></index>
+        <index name="INVOICE_SCHEDULE_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Invoice Schedule" statusTypeId="InvoiceSchedule"/>
+            <moqui.basic.StatusItem statusId="IschActive" statusTypeId="InvoiceSchedule" sequenceNum="1" description="Active"/>
+            <moqui.basic.StatusItem statusId="IschPaused" statusTypeId="InvoiceSchedule" sequenceNum="2" description="Paused"/>
+            <moqui.basic.StatusItem statusId="IschEnded" statusTypeId="InvoiceSchedule" sequenceNum="3" description="Ended"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="IschActive" toStatusId="IschPaused"
+                    transitionName="Pause"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="IschPaused" toStatusId="IschActive"
+                    transitionName="Resume"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="IschActive" toStatusId="IschEnded"
+                    transitionName="End"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="IschPaused" toStatusId="IschEnded"
+                    transitionName="End"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="InvoiceScheduleOccurrence" package="mantle.account.invoice" cache="never">
+        <description>One period of a schedule, keyed by its day: the draft invoice it made, or why making it failed. A
+            period makes one invoice however often generation is retried.</description>
+        <field name="invoiceScheduleId" type="id" is-pk="true"/>
+        <field name="occurrenceDate" type="date" is-pk="true"/>
+        <field name="invoiceId" type="id"/>
+        <field name="statusId" type="id"/>
+        <field name="errorMessage" type="text-medium"/>
+        <field name="attemptCount" type="number-integer"/>
+        <field name="lastAttemptDate" type="date-time"/>
+        <relationship type="one" related="mantle.account.invoice.InvoiceSchedule"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <relationship type="one" title="InvoiceScheduleOccurrence" related="moqui.basic.StatusItem">
+            <key-map field-name="statusId"/></relationship>
+        <seed-data>
+            <moqui.basic.StatusType description="Invoice Schedule Occurrence" statusTypeId="InvoiceScheduleOccurrence"/>
+            <moqui.basic.StatusItem statusId="IsoGenerated" statusTypeId="InvoiceScheduleOccurrence" sequenceNum="1"
+                    description="Made"/>
+            <moqui.basic.StatusItem statusId="IsoFailed" statusTypeId="InvoiceScheduleOccurrence" sequenceNum="2"
+                    description="Failed"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="InvoiceHold" package="mantle.account.invoice" cache="never">
+        <description>A hold on a bill: while it is open (no releasedDate) the bill is not approved and no payment is applied
+            to it. Placed by hold#Invoice, a release asked for by request#HoldRelease and released by another user through
+            release#InvoiceHold.</description>
+        <field name="invoiceHoldId" type="id" is-pk="true"/>
+        <field name="invoiceId" type="id" enable-audit-log="true"/>
+        <field name="holdReasonEnumId" type="id" enable-audit-log="true"/>
+        <field name="holdComment" type="text-medium" enable-audit-log="true"/>
+        <field name="reviewDate" type="date-time" enable-audit-log="true">
+            <description>When the hold is to be reviewed or released; it is not released by itself.</description></field>
+        <field name="placedByUserId" type="id" enable-audit-log="true"/>
+        <field name="placedDate" type="date-time" enable-audit-log="true"/>
+        <field name="releaseRequestedByUserId" type="id" enable-audit-log="true"/>
+        <field name="releaseRequestedDate" type="date-time" enable-audit-log="true"/>
+        <field name="releaseRequestNote" type="text-medium" enable-audit-log="true"/>
+        <field name="releasedByUserId" type="id" enable-audit-log="true"/>
+        <field name="releasedDate" type="date-time" enable-audit-log="true"/>
+        <field name="releaseComment" type="text-medium" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <relationship type="one" title="InvoiceHoldReason" related="moqui.basic.Enumeration">
+            <key-map field-name="holdReasonEnumId" related="enumId"/>
+        </relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Invoice Hold Reason" enumTypeId="InvoiceHoldReason"/>
+            <moqui.basic.Enumeration description="Match exception" enumId="IhrMatchException" enumTypeId="InvoiceHoldReason"
+                    sequenceNum="1"/>
+            <moqui.basic.Enumeration description="AP review" enumId="IhrApReview" enumTypeId="InvoiceHoldReason" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Supplier dispute" enumId="IhrSupplierDispute" enumTypeId="InvoiceHoldReason"
+                    sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Bank detail change" enumId="IhrBankChange" enumTypeId="InvoiceHoldReason"
+                    sequenceNum="4"/>
+        </seed-data>
+        <index name="INVOICE_HOLD_INVOICE"><index-field name="invoiceId"/><index-field name="releasedDate"/></index>
+    </entity>
+
+<!-- Payment terms and payment runs: a term's installment and early-payment discount lines, the due schedule an invoice
+    keeps from its term when it is issued, and the supplier payment runs that pay due bills
+    (mantle.ledger.SetupServices.store#SettlementTerm, mantle.account.PaymentRunServices). -->
+    <entity entity-name="SettlementTermLine" package="mantle.account.invoice" cache="never">
+        <description>One portion of a payment term, as effective-dated rows: a share of the invoice due a number of days
+            after the invoice date, and an early-payment discount taken when paid within its days. A term without lines in
+            effect is one portion due on its own date with no discount. A change ends the lines in effect and starts the
+            next (store#SettlementTerm); an issued invoice keeps its own InvoiceDueSchedule.</description>
+        <field name="settlementTermLineId" type="id" is-pk="true"/>
+        <field name="settlementTermId" type="id" enable-audit-log="true"/>
+        <field name="sequenceNum" type="number-integer" enable-audit-log="true"/>
+        <field name="portionPercent" type="number-decimal" enable-audit-log="true">
+            <description>The share of the invoice total this line makes due; a term's lines in effect add up to
+                100.</description></field>
+        <field name="daysBasis" type="number-integer" enable-audit-log="true">
+            <description>Days after the invoice date the portion is due.</description></field>
+        <field name="discountPercent" type="number-decimal" enable-audit-log="true"/>
+        <field name="discountDays" type="number-integer" enable-audit-log="true">
+            <description>Days after the invoice date within which the discount may be taken.</description></field>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" related="mantle.account.invoice.SettlementTerm"/>
+        <index name="SETTLEMENT_TERM_LINE_TERM"><index-field name="settlementTermId"/><index-field name="fromDate"/></index>
+        <seed-data>
+            <!-- the seeded discount terms, described in SettlementTerm's text, as lines -->
+            <mantle.account.invoice.SettlementTermLine settlementTermLineId="Net30Disc2Pct10_1" settlementTermId="Net30Disc2Pct10"
+                    sequenceNum="1" portionPercent="100" daysBasis="30" discountPercent="2" discountDays="10"
+                    fromDate="2000-01-01 00:00:00.000"/>
+            <mantle.account.invoice.SettlementTermLine settlementTermLineId="Net45Disc2Pct15_1" settlementTermId="Net45Disc2Pct15"
+                    sequenceNum="1" portionPercent="100" daysBasis="45" discountPercent="2" discountDays="15"
+                    fromDate="2000-01-01 00:00:00.000"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="InvoiceDueSchedule" package="mantle.account.invoice" cache="never">
+        <description>What an issued invoice is due and when, written once when it is issued (finalized, or approved for a
+            bill) from its term's lines in effect on the invoice date: each portion's due date and amount, and the discount
+            and the last day it may be taken. A later change of the term never changes it. Aging, the workbenches, payment
+            runs and apply#Settlement read it (InvoiceServices.get#InvoiceDueSchedule). Its rows are not audit-logged: they are
+            written once at issue and removed only when the invoice goes back for changes (Resume Changes), both recorded
+            in the invoice's own status audit log.</description>
+        <field name="invoiceId" type="id" is-pk="true"/>
+        <field name="scheduleSeqId" type="id" is-pk="true"/>
+        <field name="dueDate" type="date"><description>A calendar day: the invoice's book day and the
+            portion's days.</description></field>
+        <field name="amount" type="currency-amount"/>
+        <field name="discountDate" type="date">
+            <description>The last calendar day the discount may be taken.</description></field>
+        <field name="discountAmount" type="currency-amount"/>
+        <field name="settlementTermId" type="id"/>
+        <field name="settlementTermLineId" type="id"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <relationship type="one" related="mantle.account.invoice.SettlementTerm"/>
+        <relationship type="one-nofk" related="mantle.account.invoice.SettlementTermLine"/>
+    </entity>
+
+<!-- Accounting's customer and supplier pages (mantle.account.PortalServices): a supplier's bill submissions, the
+    organization's gateway for invoice payment, and a hosted gateway page's address. -->
+    <entity entity-name="SupplierBillSubmission" package="mantle.account.invoice" cache="never">
+        <description>A supplier's bill submitted from a public page (submit#SupplierBill): its order, reference and the
+            incoming draft bill it made or found. A repeat of the operation, or of the supplier's reference, answers this
+            row. The file is scanned before the bill is made, and its name and size are kept here.</description>
+        <field name="submissionId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="supplierPartyId" type="id"/>
+        <field name="orderId" type="id"/>
+        <field name="capabilityId" type="id"/>
+        <field name="operationId" type="text-short"/>
+        <field name="referenceNumber" type="text-medium"/>
+        <field name="invoiceId" type="id"/>
+        <field name="attached" type="text-indicator"/>
+        <field name="filename" type="text-medium"/>
+        <field name="byteSize" type="number-integer"/>
+        <field name="receivedDate" type="date-time"/>
+        <field name="submittedByUserId" type="id"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <relationship type="one" related="mantle.order.OrderHeader"/>
+        <relationship type="one" related="mantle.party.ExternalAccessCapability"/>
+        <index name="SUPP_BILL_SUB_REF"><index-field name="organizationPartyId"/><index-field name="supplierPartyId"/>
+            <index-field name="referenceNumber"/></index>
+        <index name="SUPP_BILL_SUB_OP"><index-field name="operationId"/></index>
+    </entity>
+
+<!-- Bill matching (mantle.account.InvoiceMatchServices): a bill's lines matched to purchase order lines and their accepted
+    receipts, the match policy of an organization as effective-dated rows, and the matches a source change has made
+    stale. -->
+    <entity entity-name="InvoiceMatchPolicy" package="mantle.account.invoice" cache="never">
+        <description>How an organization matches its suppliers' bills, as effective-dated rows: a change ends the row in
+            effect and starts the next (store#MatchPolicy). A row for a product wins over one for a category of the
+            product, which wins over the organization's row (no product and no category). A match line keeps the row it
+            applied.</description>
+        <field name="invoiceMatchPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="productCategoryId" type="id" enable-audit-log="true"/>
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="billBasisEnumId" type="id" enable-audit-log="true">
+            <description>ImbReceived: a bill line matches the accepted quantity of the order line's receipts (three-way);
+                ImbOrdered: the ordered quantity (two-way).</description></field>
+        <field name="receiptRequired" type="text-indicator" enable-audit-log="true">
+            <description>Y: on the ordered basis a line whose order line has no accepted receipt is a match
+                exception.</description>
+        </field>
+        <field name="serviceAcceptanceRequired" type="text-indicator" enable-audit-log="true">
+            <description>The service-acceptance rule (impl-manufacturing P14): Y or empty, on the received basis a service
+                line (a PtService product) matches the quantity its ServiceAcceptance rows accepted, since a service has no
+                receipt; N, a service line matches its ordered quantity.</description>
+        </field>
+        <field name="quantityTolerancePercent" type="number-decimal" enable-audit-log="true"/>
+        <field name="quantityToleranceQuantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="priceTolerancePercent" type="number-decimal" enable-audit-log="true"/>
+        <field name="priceToleranceAmount" type="currency-precise" enable-audit-log="true"/>
+        <field name="varianceActionEnumId" type="id" enable-audit-log="true">
+            <description>ImaHold: a variance outside tolerance holds the bill (IhrMatchException); ImaWarn: it is named and
+                the bill is not held.</description></field>
+        <field name="selfBillingDefault" type="text-indicator" enable-audit-log="true">
+            <description>Y: a supplier's first profile row takes self-billing unless the change says otherwise
+                (store#SupplierProfile).</description></field>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/>
+        </relationship>
+        <relationship type="one" related="mantle.product.category.ProductCategory"/>
+        <relationship type="one" related="mantle.product.Product"/>
+        <relationship type="one" title="InvoiceMatchBasis" related="moqui.basic.Enumeration">
+            <key-map field-name="billBasisEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" title="InvoiceMatchAction" related="moqui.basic.Enumeration">
+            <key-map field-name="varianceActionEnumId" related="enumId"/>
+        </relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Invoice Match Basis" enumTypeId="InvoiceMatchBasis"/>
+            <moqui.basic.Enumeration description="Accepted receipts (three-way)" enumId="ImbReceived"
+                    enumTypeId="InvoiceMatchBasis" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Ordered quantity (two-way)" enumId="ImbOrdered"
+                    enumTypeId="InvoiceMatchBasis" sequenceNum="2"/>
+            <moqui.basic.EnumerationType description="Invoice Match Variance Action" enumTypeId="InvoiceMatchAction"/>
+            <moqui.basic.Enumeration description="Hold the bill" enumId="ImaHold" enumTypeId="InvoiceMatchAction"
+                    sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Warn only" enumId="ImaWarn" enumTypeId="InvoiceMatchAction"
+                    sequenceNum="2"/>
+        </seed-data>
+        <index name="INV_MATCH_POLICY_ORG"><index-field name="organizationPartyId"/><index-field name="fromDate"/></index>
+    </entity>
+
+    <entity entity-name="InvoiceMatch" package="mantle.account.invoice" cache="never">
+        <description>A bill's applied match (apply#InvoiceMatch, apply#LegacyMatches): its lines are the allocations to
+            order lines and receipts, written also as OrderItemBilling. Unapplying ends it (ImUnapplied) and reverses the
+            billing links; a bill has at most one applied match. A source change marks it stale (staleDate, by
+            queue#MatchReevaluation) until the re-evaluation job evaluates it again.</description>
+        <field name="invoiceMatchId" type="id" is-pk="true"/>
+        <field name="invoiceId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="resultEnumId" type="id" enable-audit-log="true"/>
+        <field name="resultText" type="text-long"/>
+        <field name="isLegacy" type="text-indicator"><description>Y: linked by the legacy backfill from existing billing
+            and receipt evidence.</description></field>
+        <field name="appliedDate" type="date-time"/>
+        <field name="appliedByUserId" type="id"/>
+        <field name="evaluatedDate" type="date-time"/>
+        <field name="staleDate" type="date-time"/>
+        <field name="staleReason" type="text-medium"/>
+        <field name="unappliedDate" type="date-time"/>
+        <field name="unappliedByUserId" type="id"/>
+        <field name="invoiceHoldId" type="id"><description>The match exception hold the match placed, if any.</description>
+        </field>
+        <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/>
+        </relationship>
+        <relationship type="one" title="InvoiceMatch" related="moqui.basic.StatusItem">
+            <key-map field-name="statusId"/>
+        </relationship>
+        <relationship type="one" title="InvoiceMatchResult" related="moqui.basic.Enumeration">
+            <key-map field-name="resultEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="many" related="mantle.account.invoice.InvoiceMatchLine">
+            <key-map field-name="invoiceMatchId"/>
+        </relationship>
+        <seed-data>
+            <moqui.basic.StatusType description="Invoice Match" statusTypeId="InvoiceMatch"/>
+            <moqui.basic.StatusItem description="Applied" sequenceNum="1" statusId="ImApplied" statusTypeId="InvoiceMatch"/>
+            <moqui.basic.StatusItem description="Unapplied" sequenceNum="2" statusId="ImUnapplied" statusTypeId="InvoiceMatch"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ImApplied" toStatusId="ImUnapplied"
+                    transitionName="Unapply"/>
+            <moqui.basic.EnumerationType description="Invoice Match Result" enumTypeId="InvoiceMatchResult"/>
+            <moqui.basic.Enumeration description="Matched" enumId="ImrMatched" enumTypeId="InvoiceMatchResult" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Partly matched" enumId="ImrPartial" enumTypeId="InvoiceMatchResult"
+                    sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Exception" enumId="ImrException" enumTypeId="InvoiceMatchResult"
+                    sequenceNum="3"/>
+        </seed-data>
+        <index name="INV_MATCH_INVOICE"><index-field name="invoiceId"/><index-field name="statusId"/></index>
+        <index name="INV_MATCH_STALE"><index-field name="staleDate"/></index>
+    </entity>
+
+    <entity entity-name="InvoiceMatchLine" package="mantle.account.invoice" cache="never">
+        <description>One line of a match: a bill line's quantity allocated to an order line, and to one of its receipts on
+            the received basis, with the snapshot it was checked against (ordered, accepted, held and earlier billed
+            quantity, the prices), the policy row applied and the line's exception; or a bill line with no source, named
+            as an exception. orderItemBillingId is the billing link it wrote or updated; previousQuantity the link's
+            quantity before (null when the match created it), which unapply restores.</description>
+        <field name="invoiceMatchId" type="id" is-pk="true"/>
+        <field name="invoiceMatchLineSeqId" type="id" is-pk="true"/>
+        <field name="invoiceId" type="id"/>
+        <field name="invoiceItemSeqId" type="id"/>
+        <field name="orderId" type="id"/>
+        <field name="orderItemSeqId" type="id"/>
+        <field name="assetReceiptId" type="id"/>
+        <field name="shipmentId" type="id"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="invoiceQuantity" type="number-decimal"/>
+        <field name="invoiceUnitAmount" type="currency-precise"/>
+        <field name="orderQuantity" type="number-decimal"/>
+        <field name="orderUnitAmount" type="currency-precise"/>
+        <field name="acceptedQuantity" type="number-decimal"/>
+        <field name="heldQuantity" type="number-decimal"><description>Accepted quantity still held for inspection, left out
+            of the match (CX-QUALITY's get#SourceInspectionStatus).</description></field>
+        <field name="priorBilledQuantity" type="number-decimal"/>
+        <field name="priceVariance" type="currency-precise"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="billBasisEnumId" type="id"/>
+        <field name="invoiceMatchPolicyId" type="id"/>
+        <field name="exceptionEnumId" type="id"/>
+        <field name="exceptionCodes" type="text-medium"><description>Every exception code of the line, comma-separated;
+            the re-evaluation holds a bill again only for a code not recorded here.</description></field>
+        <field name="exceptionText" type="text-medium"/>
+        <field name="orderItemBillingId" type="id"/>
+        <field name="previousQuantity" type="number-decimal"/>
+        <field name="receiptLinked" type="text-indicator"><description>Y: the match set the receipt's invoice, which unapply
+            clears.</description></field>
+        <relationship type="one" related="mantle.account.invoice.InvoiceMatch"/>
+        <relationship type="one" related="mantle.account.invoice.InvoiceItem"/>
+        <relationship type="one" related="mantle.order.OrderItem"/>
+        <relationship type="one" related="mantle.product.receipt.AssetReceipt"/>
+        <relationship type="one" related="mantle.account.invoice.InvoiceMatchPolicy"/>
+        <relationship type="one" title="InvoiceMatchException" related="moqui.basic.Enumeration">
+            <key-map field-name="exceptionEnumId" related="enumId"/>
+        </relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Invoice Match Exception" enumTypeId="InvoiceMatchException"/>
+            <moqui.basic.Enumeration description="Quantity variance" enumId="MeQuantityVariance"
+                    enumTypeId="InvoiceMatchException" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Price variance" enumId="MePriceVariance" enumTypeId="InvoiceMatchException"
+                    sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Missing receipt" enumId="MeMissingReceipt"
+                    enumTypeId="InvoiceMatchException" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Inspection hold" enumId="MeInspectionHold"
+                    enumTypeId="InvoiceMatchException" sequenceNum="4"/>
+            <moqui.basic.Enumeration description="Source changed" enumId="MeSourceChanged"
+                    enumTypeId="InvoiceMatchException" sequenceNum="5"/>
+            <moqui.basic.Enumeration description="No order source" enumId="MeNoSource" enumTypeId="InvoiceMatchException"
+                    sequenceNum="6"/>
+            <moqui.basic.Enumeration description="Ambiguous evidence" enumId="MeAmbiguous"
+                    enumTypeId="InvoiceMatchException" sequenceNum="7"/>
+        </seed-data>
+        <index name="INV_MATCH_LN_RECEIPT"><index-field name="assetReceiptId"/></index>
+        <index name="INV_MATCH_LN_ORDER"><index-field name="orderId"/><index-field name="orderItemSeqId"/></index>
+    </entity>
+
+<!-- Inventory valuation and landed costs (mantle.ledger.AssetBookServices preview#/post#LandedCost,
+    mantle.product.InventoryReportServices run#InventoryValuation), and the scrap account of a count variance. -->
+    <entity entity-name="LandedCostAllocation" package="mantle.account.invoice" cache="never">
+        <description>One receipt line's share of a landed cost charge (a freight, duty or broker line of a bill), posted
+            by post#LandedCost: the share of the receipt's stock still on hand raised that asset's cost, the share
+            already issued went to cost of goods sold or production variance, and the charge account was credited. A
+            charge line is allocated once (LcaPosted); its rows keep the basis and amounts it was allocated by.</description>
+        <field name="landedCostAllocationId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="invoiceId" type="id"/>
+        <field name="invoiceItemSeqId" type="id"/>
+        <field name="assetReceiptId" type="id"/>
+        <field name="assetId" type="id"/>
+        <field name="shipmentId" type="id"/>
+        <field name="productId" type="id"/>
+        <field name="statusId" type="id"/>
+        <field name="basisEnumId" type="id"/>
+        <field name="basisValue" type="number-decimal"><description>The receipt line's measure in the basis: its
+            accepted quantity, value, weight or volume</description></field>
+        <field name="amount" type="currency-amount"/>
+        <field name="onHandQuantity" type="number-decimal"/>
+        <field name="issuedQuantity" type="number-decimal"/>
+        <field name="onHandAmount" type="currency-amount"/>
+        <field name="issuedAmount" type="currency-amount"/>
+        <field name="amountUomId" type="id"/>
+        <field name="previousUnitCost" type="currency-precise"/>
+        <field name="newUnitCost" type="currency-precise"/>
+        <field name="assetGlAccountId" type="id"/>
+        <field name="issuedGlAccountId" type="id"/>
+        <field name="chargeGlAccountId" type="id"/>
+        <field name="accountingDate" type="date"/>
+        <field name="acctgTransId" type="id"/>
+        <field name="operationKey" type="id"/>
+        <field name="postedByUserId" type="id"/>
+        <field name="postedDate" type="date-time"/>
+        <field name="changeReason" type="text-medium"/>
+        <relationship type="one" related="mantle.account.invoice.InvoiceItem"/>
+        <relationship type="one" related="mantle.product.receipt.AssetReceipt"/>
+        <relationship type="one" related="mantle.product.asset.Asset"/>
+        <relationship type="one" related="mantle.ledger.transaction.AcctgTrans"/>
+        <relationship type="one" title="LandedCostBasis" related="moqui.basic.Enumeration">
+            <key-map field-name="basisEnumId"/></relationship>
+        <relationship type="one" title="LandedCostAllocation" related="moqui.basic.StatusItem">
+            <key-map field-name="statusId"/></relationship>
+        <index name="LCA_INVOICE_ITEM"><index-field name="invoiceId"/><index-field name="invoiceItemSeqId"/></index>
+        <index name="LCA_RECEIPT"><index-field name="assetReceiptId"/></index>
+    </entity>
+</entities>

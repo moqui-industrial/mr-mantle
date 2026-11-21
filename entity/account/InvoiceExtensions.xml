@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <extend-entity entity-name="Invoice" package="mantle.account.invoice">
+        <field name="disputedDate" type="date-time" enable-audit-log="true">
+            <description>When the customer disputed the invoice; a disputed invoice is left out of dunning until the dispute
+                is resolved.</description></field>
+        <field name="disputeNote" type="text-medium" enable-audit-log="true"/>
+    </extend-entity>
+
+    <extend-entity entity-name="Invoice" package="mantle.account.invoice">
+        <field name="exchangeRate" type="text-short" enable-audit-log="update">
+            <description>The decimal rate the invoice posted at, to exchangeRateToUomId; kept so its applications and
+                adjustments use the same rate. Later rate changes affect later documents only.</description></field>
+        <field name="exchangeRateDate" type="date-time" enable-audit-log="update"/>
+        <field name="exchangeRateSource" type="text-medium" enable-audit-log="update"/>
+        <field name="exchangeRateToUomId" type="id" enable-audit-log="update"/>
+    </extend-entity>
+
+    <extend-entity entity-name="InvoiceItem" package="mantle.account.invoice">
+        <field name="costCenterId" type="id" enable-audit-log="update">
+            <description>The cost center the line posts to, else its order line's.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="Invoice" package="mantle.account.invoice">
+        <field name="openingSetupRunId" type="id" enable-audit-log="true">
+            <description>An open invoice or bill imported at cutover by import#OpenItems (the opening flag): issued at
+                its own document and due dates, posted on the opening day against the migration clearing
+                account.</description>
+        </field>
+        <relationship type="one" title="Opening" related="mantle.ledger.config.AccountingSetupRun">
+            <key-map field-name="openingSetupRunId" related="setupRunId"/>
+        </relationship>
+        <index name="INVOICE_OPENING_RUN">
+            <index-field name="openingSetupRunId"/>
+        </index>
+    </extend-entity>
+
+    <extend-entity entity-name="Invoice" package="mantle.account.invoice">
+        <field name="accountingDate" type="date" enable-audit-log="update"/>
+        <field name="draftedByUserId" type="id" enable-audit-log="update"/>
+        <field name="approvedByUserId" type="id" enable-audit-log="true"/>
+        <field name="approvedDate" type="date-time" enable-audit-log="true"/>
+        <field name="approvedSourceVersion" type="text-long" enable-audit-log="true"/>
+        <field name="isSelfApproved" type="text-indicator" enable-audit-log="true"/>
+        <field name="draftChangedByUserIds" type="text-long"><description>Each user who changed the draft's header or lines
+            (store#InvoiceDraft, store#InvoiceDraftItem, delete#InvoiceDraftItem), comma separated: none of them approves it
+            unless the organization allows self-approval (SEC-BOS-126)</description></field>
+        <field name="creditForInvoiceId" type="id" enable-audit-log="true"/>
+        <field name="workflowSourceKey" type="text-medium" enable-audit-log="true"/>
+        <field name="financeOrganizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="financeDirection" type="text-short" enable-audit-log="true"/>
+        <relationship type="one" title="CreditFor" related="mantle.account.invoice.Invoice">
+            <key-map field-name="creditForInvoiceId" related="invoiceId"/>
+        </relationship>
+        <index name="INVOICE_WORKFLOW_SOURCE"><index-field name="workflowSourceKey"/></index>
+    </extend-entity>
+
+    <extend-entity entity-name="InvoiceContent" package="mantle.account.invoice">
+        <field name="isImmutable" type="text-indicator" default="'N'">
+            <description>Y for an issued file: the PDF send#Invoice froze and each supporting copy it sent.</description></field>
+    </extend-entity>
+
+    <!-- Accounting's payroll-origin projection (AC-23, mantle/account/PayrollOrigin.js; the People P27 review): the mark every finance
+        read filters on, so a view of these entities carries it and a list, export or report leaves payroll-origin rows to holders
+        of PAYROLL_VIEW with no join to People. Set by the finalization (its invoices) and by entity/PayrollOrigin.eecas.xml (a
+        payroll payment, a payment applied to a marked invoice or payment, a transaction of either); never taken off. -->
+    <extend-entity entity-name="Invoice" package="mantle.account.invoice">
+        <field name="payrollOrigin" type="text-indicator"><description>Y: an invoice a pay run's finalization made (net pay, a
+            payee's amounts, a receivable from a person), read with PAYROLL_VIEW alone</description></field>
+        <index name="INVOICE_PAYROLL_ORIGIN"><index-field name="payrollOrigin"/></index>
+    </extend-entity>
+</entities>

@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!--  - mantle.ledger.account -->
+    <!--  - mantle.ledger.config -->
+    <!--  - mantle.ledger.reconciliation -->
+    <!--  - mantle.ledger.transaction -->
+    <!-- ========================================================= -->
+    <!-- ========================================================= -->
+    <!-- mantle.ledger.account -->
+    <!-- ========================================================= -->
+    <entity entity-name="GlAccount" package="mantle.ledger.account" use="configuration" cache="true">
+        <field name="glAccountId" type="id" is-pk="true"/>
+        <field name="parentGlAccountId" type="id"/>
+        <field name="glAccountTypeEnumId" type="id"><description>Optional. The 'type' of account, used in posting (GL mapping) configuration</description></field>
+        <field name="glAccountClassEnumId" type="id"><description>Required. The account classification such as Revenue, Expense, Asset, etc.
+            Used for report structure and to determine if account is a debit or credit account.</description></field>
+        <field name="isDebit" type="text-indicator"><description>Y if account class is a Debit class, otherwise a Credit;
+            determined automatically by class and saved here</description></field>
+        <field name="isTemporary" type="text-indicator"><description>Y if account is a temporary (income statement) account,
+            determined automatically by class and saved here</description></field>
+        <field name="glResourceTypeEnumId" type="id"/>
+        <field name="glXbrlClassEnumId" type="id"/>
+        <field name="accountCode" type="text-medium" default="glAccountId"/>
+        <field name="accountName" type="text-medium"/>
+        <field name="description" type="text-medium"/>
+        <field name="externalId" type="id"><description>ID of the account in an external system where the accounts are imported/exported</description></field>
+        <field name="disallowPosting" type="text-indicator"/>
+
+        <relationship type="one" title="Parent" related="mantle.ledger.account.GlAccount" short-alias="parent">
+            <key-map field-name="parentGlAccountId" related="glAccountId"/></relationship>
+        <relationship type="one" title="GlAccountType" related="moqui.basic.Enumeration" short-alias="typeEnum">
+            <key-map field-name="glAccountTypeEnumId"/></relationship>
+        <relationship type="one" title="GlAccountClass" related="moqui.basic.Enumeration" short-alias="classEnum">
+            <key-map field-name="glAccountClassEnumId"/></relationship>
+        <relationship type="one" title="GlResourceType" related="moqui.basic.Enumeration" short-alias="resourceTypeEnum">
+            <key-map field-name="glResourceTypeEnumId"/></relationship>
+        <relationship type="one" title="GlXbrlClass" related="moqui.basic.Enumeration">
+            <key-map field-name="glXbrlClassEnumId"/></relationship>
+
+        <index name="GLACCT_UNQCD" unique="true"><index-field name="accountCode"/></index>
+
+        <seed-data>
+            <moqui.basic.EnumerationType description="GL Account Class" enumTypeId="GlAccountClass"/>
+            <moqui.basic.Enumeration description="Resource" enumId="RESOURCE" enumTypeId="GlAccountClass"/>
+            <moqui.basic.Enumeration description="Non-Posting" enumId="NON_POSTING" parentEnumId="DEBIT" enumTypeId="GlAccountClass"/>
+            <moqui.basic.Enumeration description="Debit" enumId="DEBIT" enumTypeId="GlAccountClass"/>
+            <moqui.basic.Enumeration description="Credit" enumId="CREDIT" enumTypeId="GlAccountClass"/>
+
+            <moqui.basic.Enumeration description="GL Account Class Groups" enumId="EngGlClassGroups" enumTypeId="EnumGroup"/>
+            <moqui.basic.EnumerationType description="GL Account Type" enumTypeId="GlAccountType"/>
+
+            <!-- GL Resource Type -->
+            <moqui.basic.EnumerationType description="GL Resource Type" enumTypeId="GlResourceType"/>
+            <moqui.basic.Enumeration description="Money" enumId="GlrtMoney" enumTypeId="GlResourceType"/>
+            <moqui.basic.Enumeration description="Raw Material" enumId="GlrtRawMaterial" enumTypeId="GlResourceType"/>
+            <moqui.basic.Enumeration description="Labor" enumId="GlrtLabor" enumTypeId="GlResourceType"/>
+            <moqui.basic.Enumeration description="Service" enumId="GlrtService" enumTypeId="GlResourceType"/>
+            <moqui.basic.Enumeration description="Finished Good" enumId="GlrtFinishedGood" enumTypeId="GlResourceType"/>
+            <moqui.basic.Enumeration description="Delivered Good" enumId="GlrtDeliveredGood" enumTypeId="GlResourceType"/>
+
+            <!-- GL XBRL Class -->
+            <moqui.basic.EnumerationType description="GL XBRL Class" enumTypeId="GlXbrlClass"/>
+            <moqui.basic.Enumeration description="US GAAP" enumId="US_GAAP" enumTypeId="GlXbrlClass"/>
+            <moqui.basic.Enumeration description="IAS" enumId="IAS" enumTypeId="GlXbrlClass"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="GlAccountCategory" package="mantle.ledger.account">
+        <field name="glAccountCategoryId" type="id" is-pk="true"/>
+        <field name="categoryTypeEnumId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" title="GlAccountCategoryType" related="moqui.basic.Enumeration">
+            <key-map field-name="categoryTypeEnumId"/></relationship>
+        <seed-data>
+            <!-- GL Account Category Type -->
+            <moqui.basic.EnumerationType description="GL Account Category Type" enumTypeId="GlAccountCategoryType"/>
+            <moqui.basic.Enumeration enumId="COST_CENTER" description="Cost Center Category" enumTypeId="GlAccountCategoryType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="GlAccountCategoryMember" package="mantle.ledger.account">
+        <field name="glAccountId" type="id" is-pk="true"/>
+        <field name="glAccountCategoryId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="amountPercentage" type="number-decimal"/>
+        <relationship type="one" related="mantle.ledger.account.GlAccount"/>
+        <relationship type="one" related="mantle.ledger.account.GlAccountCategory"/>
+    </entity>
+
+    <entity entity-name="GlAccountGroup" package="mantle.ledger.account">
+        <description>A grouping of GlAccount records for purposes of reporting and populating forms such as tax forms.
+            It is structured so that each GlAccount can be a member of at most one group of each type.</description>
+        <field name="glAccountGroupId" type="id" is-pk="true"/>
+        <field name="groupTypeEnumId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" title="GlAccountGroupType" related="moqui.basic.Enumeration">
+            <key-map field-name="groupTypeEnumId"/></relationship>
+    </entity>
+
+    <entity entity-name="GlAccountGroupMember" package="mantle.ledger.account">
+        <field name="glAccountId" type="id" is-pk="true"/>
+        <field name="groupTypeEnumId" type="id" is-pk="true"/>
+        <field name="glAccountGroupId" type="id"/>
+        <relationship type="one" related="mantle.ledger.account.GlAccount"/>
+        <relationship type="one" title="GlAccountGroupType" related="moqui.basic.Enumeration">
+            <key-map field-name="groupTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.ledger.account.GlAccountGroup"/>
+    </entity>
+
+    <entity entity-name="GlAccountOrganization" package="mantle.ledger.account" use="transactional" cache="never">
+        <field name="glAccountId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="postedBalance" type="currency-amount"/>
+        <field name="balanceLastUpdated" type="date-time"/>
+        <relationship type="one" related="mantle.ledger.account.GlAccount"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
+    </entity>
+
+    <entity entity-name="GlAccountOrgTimePeriod" package="mantle.ledger.account" use="transactional" cache="never">
+        <field name="glAccountId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="timePeriodId" type="id" is-pk="true"/>
+        <field name="postedDebits" type="currency-amount"/>
+        <field name="postedCredits" type="currency-amount"/>
+        <field name="postedDebitsNoClosing" type="currency-amount"/>
+        <field name="postedCreditsNoClosing" type="currency-amount"/>
+        <field name="beginningBalance" type="currency-amount"/>
+        <field name="endingBalance" type="currency-amount"/>
+        <field name="balanceLastUpdated" type="date-time"/>
+        <relationship type="one" related="mantle.ledger.account.GlAccount"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" related="mantle.party.time.TimePeriod"/>
+    </entity>
+
+    <entity entity-name="GlAccountParty" package="mantle.ledger.account">
+        <field name="glAccountId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="mantle.ledger.account.GlAccount"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.RoleType"/>
+    </entity>
+
+    <entity entity-name="GlBudgetXref" package="mantle.ledger.account">
+        <field name="glAccountId" type="id" is-pk="true"/>
+        <field name="budgetItemTypeEnumId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="allocationPercentage" type="number-decimal"/>
+        <relationship type="one" related="mantle.ledger.account.GlAccount"/>
+        <relationship type="one" related="moqui.basic.Enumeration">
+            <description>(enumTypeId = BUDGET_ITEM_TYPE)</description>
+            <key-map field-name="budgetItemTypeEnumId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="GlAccountEnumAppl" package="mantle.ledger.account">
+        <description>Used to specify relevant GL Accounts for an Enumeration (expense, revenue, etc); not related to posting conf</description>
+        <field name="glAccountId" type="id" is-pk="true"/>
+        <field name="enumId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.ledger.account.GlAccount" short-alias="glAccount"/>
+        <relationship type="one" related="moqui.basic.Enumeration" short-alias="enum"/>
+    </entity>
+</entities>

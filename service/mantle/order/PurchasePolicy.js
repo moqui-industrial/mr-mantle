@@ -58,7 +58,7 @@ const fields = [
     },
     {name: "approvalGateEnabled", group: "controls", label: "Purchase approval gate", kind: "indicator", default: "N"},
     {name: "selfApprovalAllowed", group: "controls", label: "Buyers approve their own orders", kind: "indicator", default: "N"},
-    // P3: the commercial revision (PurchaseOrderEntities.xml, increment#OrderRevision)
+    // P3: the commercial revision (entity/order/OrderAndPurchaseAndReturnExtensions.xml, increment#OrderRevision)
     {
         name: "commercialRevisionOnly",
         group: "controls",
@@ -74,7 +74,7 @@ const fields = [
         kind: "PurchaseSubstitution",
         default: "PsbNotAllowed"
     },
-    // P14b: the buy conversion's route (ReplenishmentRouteEntities.xml, crosscut §4.2)
+    // P14b: the buy conversion's route (entity/order/OrderAndPurchaseAndReturnExtensions.xml, crosscut §4.2)
     {name: "planBuyToRequest", group: "controls", label: "Plan buys go to purchase requests", kind: "indicator", default: "N"}
 ]
 const fieldNames = fields.map(field => field.name)

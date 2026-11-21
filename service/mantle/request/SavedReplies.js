@@ -1,5 +1,5 @@
 // Saved replies on a case (design-customer-service §9 SavedReplies ReplyPreview, §3 CaseDetail, Cases BulkCaseAction;
-// impl-customer-service P5, CS-REPLIES, D24; SupportAssignmentEntities.xml). A saved reply is a Comms text block (the
+// impl-customer-service P5, CS-REPLIES, D24; entity/request/SupportEntities.xml). A saved reply is a Comms text block (the
 // framework's moqui.basic.email.EmailTextBlock: the user's own, or shared with a group the user is in now: a team's group or
 // the service-wide one) with its SavedReply facts (organization, language, variables) and SavedReplyAction rows. preview
 // resolves its variables for the case ({{customerName}} and the others of `variables`; one it does not know, or one with no

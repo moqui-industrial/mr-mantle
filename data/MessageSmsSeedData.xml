@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
-<!-- Comms' text messages (mr-boss impl-marketing P22; service/mantle/party/MessageSms.js, entity/MessageSmsEntities.xml): the channel,
+<!-- Comms' text messages (mr-boss impl-marketing P22; service/mantle/party/MessageSms.js, entity/party/PartyAndAgreementExtensions.xml): the channel,
     a STOP reply's consent source, suppression reason and source, and Marketing's Send SMS automation step. -->
 <entity-facade-xml type="seed">
     <moqui.basic.Enumeration enumId="MdcSms" description="Text message" sequenceNum="2" enumTypeId="MessageDeliveryChannel"/>

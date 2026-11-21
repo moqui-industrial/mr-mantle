@@ -5,7 +5,7 @@
 // it. And the planned hours of people with a schedule, which mantle.work.ResourceServices.get#PartyCapacity reads before their own
 // working hours and the timesheet policy (scheduledDays, F23).
 //
-// The records (PeopleScheduleEntities.xml):
+// The records (entity/humanres/RecruitmentAndScheduleEntities.xml):
 // - a schedule (WorkingSchedule) is an employer's dated working week in a time zone, with a holiday calendar; its lines
 //   (WorkingScheduleLine) are dated weekly intervals: a day of the week, a local start and end (an end at or before the start ends
 //   the next day) and an unpaid break. A schedule's lines in effect at the same time never overlap. A change of a line from a date

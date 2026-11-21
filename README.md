@@ -17,9 +17,11 @@ It has no screens of its own. To see it at work, run one of those applications.
 
 ## What is in it
 
-- **The Universal Data Model** (`entity/`): the entities, from party, product, order, shipment, facility and
-  inventory through work effort, request, human resources, the ledger and accounting, to marketing, the forum and
-  public sites. `data/` has their seed, install and demo data, including the demo company Ziziwork Industries.
+- **The Universal Data Model** (`entity/`): business entities grouped by package domain, with separate
+  `*Entities.xml`, `*Views.xml` and `*Extensions.xml` files. Entity ECA rules live directly under `entity/`.
+  Seed records usually live in `<seed-data>` blocks with their definitions. Seed-only `*Data.xml` extensions
+  place records that need a different load order. Root entity files load first, then each domain's files,
+  in name order. `data/` holds additional seed, install and demo data, including Ziziwork Industries.
 - **The Universal Service Library** (`service/mantle/<package>/`): the business logic, in service XML with
   JavaScript, by package: `account`, `ledger`, `order`, `party`, `product`, `facility`, `shipment`, `work`,
   `humanres`, `request`, `sales`, `marketing`, `forum`, `smithy`, `public`, `pass`, `search` and `other`. The ECA

@@ -2474,7 +2474,7 @@ General Order Placement and eCommerce Usage
             <set field="orderHeader.recurCronExpression" from="null"/>
             <set field="orderHeader.lastOrderedDate" from="null"/>
             <set field="orderHeader.recurAutoInvoice" from="null"/>
-            <!-- Sales' recurrence fields (impl-sales P16, entity/SalesRecurrenceEntities.xml) are a base's own, never a copy's -->
+            <!-- Sales' recurrence fields (impl-sales P16, entity/order/OrderAndPurchaseAndReturnExtensions.xml) are a base's own, never a copy's -->
             <script><![CDATA[
                 for (const field of ['recurTimeZone', 'recurFromDate', 'recurThruDate', 'recurPausedDate', 'recurResumedDate',
                         'recurAgreementId', 'recurRevision', 'recurFailureDate', 'recurFailureMessage', 'recurOccurrenceDate'])

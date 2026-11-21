@@ -1,0 +1,395 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!--  - mantle.account.billing -->
+    <!--  - mantle.account.financial -->
+    <!--  - mantle.account.invoice -->
+    <!--  - mantle.account.method -->
+    <!--  - mantle.account.payment -->
+    <!-- ========================================================= -->
+    <!-- ========================================================= -->
+    <!-- mantle.account.billing -->
+    <!-- ========================================================= -->
+    <entity entity-name="BillingAccount" package="mantle.account.billing">
+        <field name="billingAccountId" type="id" is-pk="true"/>
+        <field name="billToPartyId" type="id"/>
+        <field name="billFromPartyId" type="id"/>
+        <field name="accountLimit" type="currency-amount"/>
+        <field name="accountLimitUomId" type="id"/>
+        <field name="postalContactMechId" type="id"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="description" type="text-medium"/>
+        <field name="externalAccountId" type="id"/>
+        <relationship type="one" title="BillTo" related="mantle.party.Party">
+            <key-map field-name="billToPartyId"/></relationship>
+        <relationship type="one" title="AccountLimit" related="moqui.basic.Uom">
+            <key-map field-name="accountLimitUomId"/></relationship>
+        <relationship type="one" title="Postal" related="mantle.party.contact.ContactMech">
+            <key-map field-name="postalContactMechId"/></relationship>
+        <relationship type="one" related="mantle.party.contact.PostalAddress">
+            <key-map field-name="postalContactMechId"/></relationship>
+    </entity>
+
+    <entity entity-name="BillingAccountParty" package="mantle.account.billing">
+        <field name="billingAccountId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="mantle.account.billing.BillingAccount"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.RoleType"/>
+    </entity>
+
+    <entity entity-name="BillingAccountTerm" package="mantle.account.billing">
+        <field name="billingAccountTermId" type="id" is-pk="true"/>
+        <field name="billingAccountId" type="id"/>
+        <field name="termTypeEnumId" type="id"/>
+        <field name="termValue" type="number-decimal"/>
+        <field name="termUomId" type="id"/>
+        <relationship type="one" title="BillingAccountTermType" related="moqui.basic.Enumeration">
+            <key-map field-name="termTypeEnumId"/></relationship>
+        <relationship type="one" title="Term" related="moqui.basic.Uom">
+            <key-map field-name="termUomId"/></relationship>
+        <relationship type="one" related="mantle.account.billing.BillingAccount"/>
+        <seed-data>
+            <!-- Billing Account Term Type -->
+            <moqui.basic.EnumerationType description="Billing Account Term Type" enumTypeId="BillingAccountTermType"/>
+        </seed-data>
+    </entity>
+
+<!-- Customer credit, collections, dunning and recurring invoices (mantle.account.CreditServices, CollectionServices and
+    RecurringInvoiceServices): an organization's credit policy per customer and the decisions releasing credit holds;
+    collection activities, payment promises and disputes; dunning levels, runs and notices; invoice-only schedules and
+    their occurrences. -->
+    <!-- ========== Credit ========== -->
+    <entity entity-name="CustomerCreditPolicy" package="mantle.account.billing" cache="never">
+        <description>An organization's credit policy for a customer, or its default for customers without their own (no
+            customerPartyId), as effective-dated rows with audit-logged fields: the limit on exposure in the policy currency,
+            the most days an unpaid invoice may be overdue, and whether going over warns or holds the order. A change ends
+            the row in effect and starts the next (CreditServices.store#Policy, store#Defaults).</description>
+        <field name="customerCreditPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="customerPartyId" type="id" enable-audit-log="true"/>
+        <field name="currencyUomId" type="id" enable-audit-log="true"/>
+        <field name="creditLimit" type="currency-amount" enable-audit-log="true">
+            <description>The most exposure allowed; empty for no amount limit.</description></field>
+        <field name="overdueDaysLimit" type="number-integer" enable-audit-log="true">
+            <description>The most days the oldest unpaid invoice may be past due; empty for no limit.</description></field>
+        <field name="actionEnumId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Customer" related="mantle.party.Party">
+            <key-map field-name="customerPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one" title="CreditPolicyAction" related="moqui.basic.Enumeration">
+            <key-map field-name="actionEnumId" related="enumId"/></relationship>
+        <index name="CUSTOMER_CREDIT_POLICY_KEY">
+            <index-field name="organizationPartyId"/><index-field name="customerPartyId"/><index-field name="fromDate"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Credit Policy Action" enumTypeId="CreditPolicyAction"/>
+            <moqui.basic.Enumeration enumId="CpaWarn" enumTypeId="CreditPolicyAction" sequenceNum="1" description="Warn"/>
+            <moqui.basic.Enumeration enumId="CpaHold" enumTypeId="CreditPolicyAction" sequenceNum="2" description="Hold"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="CreditHoldDecision" package="mantle.account.billing" cache="never">
+        <description>A credit manager's decision on an order held for credit: the order (and part), the decision, its reason,
+            who decided and when, how long it stands, and the exposure and limit the decision was made on.</description>
+        <field name="creditHoldDecisionId" type="id" is-pk="true"/>
+        <field name="orderId" type="id"/>
+        <field name="orderPartSeqId" type="id"/>
+        <field name="orderHoldReasonId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="customerPartyId" type="id"/>
+        <field name="decisionEnumId" type="id"/>
+        <field name="reason" type="text-medium"/>
+        <field name="decidedByUserId" type="id"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="expireDate" type="date-time"/>
+        <field name="exposureAmount" type="currency-amount"/>
+        <field name="creditLimit" type="currency-amount"/>
+        <field name="currencyUomId" type="id"/>
+        <relationship type="one" related="mantle.order.OrderHeader"/>
+        <relationship type="one" related="mantle.order.OrderHoldReason"/>
+        <relationship type="one" title="CreditDecision" related="moqui.basic.Enumeration">
+            <key-map field-name="decisionEnumId" related="enumId"/></relationship>
+        <index name="CREDIT_HOLD_DECISION_CUSTOMER">
+            <index-field name="organizationPartyId"/><index-field name="customerPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Credit Decision" enumTypeId="CreditDecision"/>
+            <moqui.basic.Enumeration enumId="CrdRelease" enumTypeId="CreditDecision" sequenceNum="1" description="Released"/>
+        </seed-data>
+    </entity>
+
+    <!-- ========================================================= -->
+    <!-- mantle.account.financial -->
+    <!-- ========================================================= -->
+    <entity entity-name="FinancialAccount" package="mantle.account.financial" short-alias="financialAccounts" cache="never">
+        <field name="finAccountId" type="id" is-pk="true"/>
+        <field name="finAccountTypeId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="finAccountName" type="text-medium"/>
+        <field name="finAccountCode" type="text-medium" encrypt="true"/>
+        <field name="finAccountPin" type="text-medium" encrypt="true"/>
+        <field name="organizationPartyId" type="id">
+            <description>The internal organization Party that is liable for the account.</description></field>
+        <field name="ownerPartyId" type="id" enable-audit-log="update"/>
+        <field name="postToGlAccountId" type="id"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="isRefundable" type="text-indicator"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="negativeBalanceLimit" type="currency-amount" enable-audit-log="true" default="0">
+            <description>A positive number restricting how far the account can go negative, defaults to zero.</description></field>
+        <field name="actualBalance" type="currency-amount">
+            <description>Calculated as the sum of FinancialAccountTrans.amount</description></field>
+        <field name="availableBalance" type="currency-amount">
+            <description>Calculated as actualBalance minus sum of outstanding FinancialAccountAuth.amount</description></field>
+        <field name="replenishPaymentId" type="id"/>
+        <field name="replenishLevel" type="currency-amount"/>
+        <relationship type="one" related="mantle.account.financial.FinancialAccountType" short-alias="type">
+            <key-map field-name="finAccountTypeId"/></relationship>
+        <relationship type="one" title="FinancialAccount" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" title="Owner" related="mantle.party.Party" short-alias="owner">
+            <key-map field-name="ownerPartyId"/></relationship>
+        <relationship type="one" title="PostTo" related="mantle.ledger.account.GlAccount" short-alias="postToAccount">
+            <key-map field-name="postToGlAccountId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId"/></relationship>
+        <relationship type="one" title="Replenish" related="mantle.account.method.PaymentMethod" short-alias="replenishMethod">
+            <key-map field-name="replenishPaymentId"/></relationship>
+
+        <relationship type="many" related="mantle.account.financial.FinancialAccountAuth" short-alias="authorizations">
+            <key-map field-name="finAccountId"/></relationship>
+        <relationship type="many" related="mantle.account.financial.FinancialAccountTrans" short-alias="transactions">
+            <key-map field-name="finAccountId"/></relationship>
+        <relationship type="many" related="mantle.account.financial.FinancialAccountParty" short-alias="parties">
+            <key-map field-name="finAccountId"/></relationship>
+
+        <seed-data>
+            <!-- Financial Account Status -->
+            <moqui.basic.StatusType description="Financial Account Status" statusTypeId="FinancialAccount"/>
+            <moqui.basic.StatusItem description="Active" sequenceNum="1" statusId="FaActive" statusTypeId="FinancialAccount"/>
+            <!-- This is set automatically by the auto-replenishment code to allow one transaction to bring the balance below
+                zero and then if any other transactions are attempted during replenishment they will be rejected. -->
+            <moqui.basic.StatusItem description="Negative Pending Replenishment" sequenceNum="2" statusId="FaNegPendRepl" statusTypeId="FinancialAccount"/>
+            <!-- This is meant to be set manually by a company representative to freeze an account so further transactions are
+                not allowed. -->
+            <moqui.basic.StatusItem description="Manually Frozen" sequenceNum="3" statusId="FaManFrozen" statusTypeId="FinancialAccount"/>
+            <moqui.basic.StatusItem description="Cancelled" sequenceNum="9" statusId="FaCancelled" statusTypeId="FinancialAccount"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="FaActive" toStatusId="FaNegPendRepl" transitionName="Set Negative Pending Replenishment"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="FaActive" toStatusId="FaManFrozen" transitionName="Set Manually Frozen"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="FaActive" toStatusId="FaCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="FaNegPendRepl" toStatusId="FaActive" transitionName="Re-activate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="FaNegPendRepl" toStatusId="FaManFrozen" transitionName="Manually Freeze"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="FaNegPendRepl" toStatusId="FaCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="FaManFrozen" toStatusId="FaActive" transitionName="Re-activate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="FaManFrozen" toStatusId="FaCancelled" transitionName="Cancel"/>
+        </seed-data>
+        <master>
+            <detail relationship="type"/><detail relationship="status"/>
+            <detail relationship="organization"/><detail relationship="owner"/>
+            <detail relationship="postToAccount"/><detail relationship="currencyUom"/>
+            <detail relationship="replenishMethod"/>
+            <!-- don't include auth and trans, too many of them -->
+        </master>
+    </entity>
+
+    <entity entity-name="FinancialAccountAuth" package="mantle.account.financial" cache="never">
+        <field name="finAccountAuthId" type="id" is-pk="true"/>
+        <field name="finAccountId" type="id"/>
+        <field name="amount" type="currency-amount"/>
+        <field name="authorizationDate" type="date-time"/>
+        <field name="expireDate" type="date-time"/>
+        <field name="paymentId" type="id"/>
+        <relationship type="one" related="mantle.account.financial.FinancialAccount" short-alias="finAccount"/>
+        <relationship type="one" related="mantle.account.payment.Payment" short-alias="payment"/>
+    </entity>
+
+    <entity entity-name="FinancialAccountParty" package="mantle.account.financial">
+        <field name="finAccountId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="mantle.account.financial.FinancialAccount"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.RoleType"/>
+    </entity>
+
+    <entity entity-name="FinancialAccountTrans" package="mantle.account.financial" create-only="true" cache="never">
+        <field name="finAccountTransId" type="id" is-pk="true"/>
+        <field name="finAccountTransTypeEnumId" type="id"/>
+        <field name="finAccountId" type="id"/>
+        <field name="finAccountAuthId" type="id"><description>Only set for withdrawals based on an auth.</description></field>
+        <!-- don't want status, using create-only approach: <field name="statusId" type="id"/> -->
+        <field name="fromPartyId" type="id"/>
+        <field name="toPartyId" type="id"/>
+        <field name="glReconciliationId" type="id" create-only="false"/>
+        <field name="reasonEnumId" type="id"><description>Used to determine the balancing GlAccount to the one based
+            on FinancialAccount.finAccountTypeId.</description></field>
+        <field name="transactionDate" type="date-time"/>
+        <field name="entryDate" type="date-time"/>
+        <field name="amount" type="currency-amount"/>
+        <!-- TODO: remove postBalance and all code that uses it, invalid if new transactions don't have transactionDate later than all existing -->
+        <field name="postBalance" type="currency-amount"/>
+        <field name="paymentId" type="id"/>
+        <field name="invoiceId" type="id"/>
+        <field name="invoiceItemSeqId" type="id"><description>To be used along with invoiceId to point to an InvoiceItem that
+            this transaction is based on, such as a full or partial credit against a charge.</description></field>
+        <field name="orderId" type="id"/>
+        <field name="orderItemSeqId" type="id"><description>To be used along with orderId to point to an OrderItem that
+            represents the purchase of a product to add money to the account.</description></field>
+        <field name="otherFinAccountTransId" type="id" create-only="false"><description>For FinancialAccount transfer transaction pairs</description></field>
+        <field name="performedByUserId" type="id"/>
+        <field name="acctgTransResultEnumId" type="id" create-only="false"/>
+        <field name="reversedByTransId" type="id" create-only="false"/>
+        <field name="reverseOfTransId" type="id"/>
+        <field name="comments" type="text-medium"/>
+        <field name="externalId" type="text-short"/>
+
+        <relationship type="one" title="FinancialAccountTransType" related="moqui.basic.Enumeration" short-alias="finAccountTransTypeEnum">
+            <key-map field-name="finAccountTransTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.account.financial.FinancialAccount" short-alias="finAccount"/>
+        <relationship type="one" related="mantle.account.financial.FinancialAccountAuth" short-alias="finAccountAuth"/>
+        <!-- <relationship type="one" title="FinancialAccountTrans" related="moqui.basic.StatusItem" short-alias="status"/> -->
+        <relationship type="one" title="From" related="mantle.party.Party" short-alias="fromParty">
+            <key-map field-name="fromPartyId"/></relationship>
+        <relationship type="one" title="To" related="mantle.party.Party" short-alias="toParty">
+            <key-map field-name="toPartyId"/></relationship>
+        <relationship type="one" related="mantle.ledger.reconciliation.GlReconciliation" short-alias="glReconciliation"/>
+        <relationship type="one" title="FinancialAccountTransReason" related="moqui.basic.Enumeration" short-alias="reasonEnum">
+            <key-map field-name="reasonEnumId"/></relationship>
+        <relationship type="one" related="mantle.account.payment.Payment" short-alias="payment"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice" short-alias="invoice"/>
+        <relationship type="one-nofk" related="mantle.order.OrderHeader" short-alias="orderHeader"/>
+        <relationship type="one" related="mantle.order.OrderItem" short-alias="orderItem">
+            <key-map field-name="orderId"/><key-map field-name="orderItemSeqId"/></relationship>
+        <relationship type="one" title="PerformedBy" related="moqui.security.UserAccount" short-alias="performedByUser">
+            <key-map field-name="performedByUserId"/></relationship>
+        <relationship type="one" title="AcctgTransResult" related="moqui.basic.Enumeration" short-alias="acctgTransResultEnum">
+            <key-map field-name="acctgTransResultEnumId"/></relationship>
+        <relationship type="one" title="ReversedBy" related="mantle.account.financial.FinancialAccountTrans" short-alias="reversedBy">
+            <key-map field-name="reversedByTransId" related="finAccountTransId"/></relationship>
+        <relationship type="one" title="ReverseOf" related="mantle.account.financial.FinancialAccountTrans" short-alias="reverseOf">
+            <key-map field-name="reverseOfTransId" related="finAccountTransId"/></relationship>
+
+        <seed-data>
+            <!-- Financial Account Trans Type -->
+            <moqui.basic.EnumerationType description="Financial Account Trans Type" enumTypeId="FinancialAccountTransType"/>
+            <moqui.basic.Enumeration description="Deposit" enumId="FattDeposit" enumTypeId="FinancialAccountTransType"/>
+            <moqui.basic.Enumeration description="Withdraw" enumId="FattWithdraw" enumTypeId="FinancialAccountTransType"/>
+            <moqui.basic.Enumeration description="Adjustment" enumId="FattAdjustment" enumTypeId="FinancialAccountTransType"/>
+
+            <!-- Financial Account Trans Status -->
+            <!-- don't want status, using create-only approach:
+            <moqui.basic.StatusType statusTypeId="FinancialAccountTrans" description="Financial Account Trans Status"/>
+            <moqui.basic.StatusItem statusId="FatCreated" statusTypeId="FinancialAccountTrans" sequenceNum="1" description="Created"/>
+            <moqui.basic.StatusItem statusId="FatApproved" statusTypeId="FinancialAccountTrans" sequenceNum="2" description="Approved"/>
+            <moqui.basic.StatusItem statusId="FatCancelled" statusTypeId="FinancialAccountTrans" sequenceNum="9" description="Cancelled"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="FatCreated" toStatusId="FatApproved" transitionName="Approve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="FatCreated" toStatusId="FatCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="FatApproved" toStatusId="FatCancelled" transitionName="Cancel"/>
+            -->
+
+            <!-- Financial Account Trans Reason -->
+            <moqui.basic.EnumerationType description="Financial Account Trans Reason" enumTypeId="FinancialAccountTransReason"/>
+            <moqui.basic.Enumeration description="Purchase" enumId="FatrPurchase" enumTypeId="FinancialAccountTransReason"/>
+            <moqui.basic.Enumeration description="Initial Deposit" enumId="FatrInitDeposit" enumTypeId="FinancialAccountTransReason"/>
+            <moqui.basic.Enumeration description="Replenishment" enumId="FatrReplenish" enumTypeId="FinancialAccountTransReason"/>
+            <moqui.basic.Enumeration description="Refund" enumId="FatrRefund" enumTypeId="FinancialAccountTransReason"/>
+            <moqui.basic.Enumeration description="Disbursement" enumId="FatrDisbursement" enumTypeId="FinancialAccountTransReason"/>
+            <moqui.basic.Enumeration description="Account Transfer" enumId="FatrTransfer" enumTypeId="FinancialAccountTransReason"/>
+            <moqui.basic.Enumeration description="Customer Service Credit" enumId="FatrCsCredit" enumTypeId="FinancialAccountTransReason"/>
+            <moqui.basic.Enumeration description="Error Adjustment" enumId="FatrErrorAdjust" enumTypeId="FinancialAccountTransReason"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="FinancialAccountType" package="mantle.account.financial" use="configuration" cache="true">
+        <field name="finAccountTypeId" type="id" is-pk="true"/>
+        <field name="parentTypeId" type="id"/>
+        <field name="description" type="text-medium"/>
+
+        <field name="isRefundable" type="text-indicator"/>
+        <field name="accountCodeLength" type="number-integer"/>
+        <field name="requirePinCode" type="text-indicator"/>
+        <field name="pinCodeLength" type="number-integer"/>
+        <field name="accountValidDays" type="number-integer"/>
+        <field name="authValidDays" type="number-integer"/>
+
+        <field name="replenishMinBalance" type="currency-amount"/>
+        <field name="replenishThreshold" type="currency-amount"/>
+        <field name="replenishMethodEnumId" type="id"/>
+        <field name="replenishTypeEnumId" type="id"/>
+
+        <relationship type="one" title="Parent" related="mantle.account.financial.FinancialAccountType">
+            <key-map field-name="parentTypeId" related="finAccountTypeId"/></relationship>
+        <relationship type="one" title="FinancialAccountReplenishMethod" related="moqui.basic.Enumeration">
+            <key-map field-name="replenishMethodEnumId"/></relationship>
+        <relationship type="one" title="FinancialAccountReplenishType" related="moqui.basic.Enumeration">
+            <key-map field-name="replenishTypeEnumId"/></relationship>
+        <seed-data>
+            <!-- Financial Account Replenish Type -->
+            <moqui.basic.EnumerationType description="Financial Account Replenish Type" enumTypeId="FinancialAccountReplenishType"/>
+            <moqui.basic.Enumeration description="Automatic Replenish" enumId="FarpAutomatic" enumTypeId="FinancialAccountReplenishType"/>
+            <moqui.basic.Enumeration description="Manual Replenish" enumId="FarpManual" enumTypeId="FinancialAccountReplenishType"/>
+            <moqui.basic.Enumeration description="No Replenish" enumId="FarpNone" enumTypeId="FinancialAccountReplenishType"/>
+
+            <!-- Financial Account Replenish Method -->
+            <moqui.basic.EnumerationType description="Financial Account Replenish Method" enumTypeId="FinancialAccountReplenishMethod"/>
+            <moqui.basic.Enumeration description="Top-off" enumId="FarmTopOff" enumTypeId="FinancialAccountReplenishMethod"/>
+            <moqui.basic.Enumeration description="Replenish-level" enumId="FarmLevel" enumTypeId="FinancialAccountReplenishMethod"/>
+
+            <!-- Financial Account Type (NOTE: not an Enumeration because has additional fields) -->
+            <mantle.account.financial.FinancialAccountType description="Gift Card" finAccountTypeId="GiftCard"
+                    replenishTypeEnumId="FarpManual" isRefundable="Y"/>
+            <mantle.account.financial.FinancialAccountType description="Gift Certificate" finAccountTypeId="GiftCertificate"
+                    replenishTypeEnumId="FarpManual" isRefundable="N"/>
+            <mantle.account.financial.FinancialAccountType description="Deposit" finAccountTypeId="DepositAccount"
+                    replenishTypeEnumId="FarpManual" isRefundable="Y"/>
+            <mantle.account.financial.FinancialAccountType description="Customer Credit" finAccountTypeId="CustomerCredit"
+                    replenishTypeEnumId="FarpManual" isRefundable="Y" parentTypeId="DepositAccount"/>
+            <mantle.account.financial.FinancialAccountType description="Deposit Replenish" finAccountTypeId="Replenish"
+                    replenishTypeEnumId="FarpAutomatic" isRefundable="Y" parentTypeId="DepositAccount"/>
+            <!-- <mantle.account.financial.FinancialAccountType description="Investment" finAccountTypeId="Investment"
+                    replenishTypeEnumId="FarpManual" isRefundable="Y" parentTypeId="DepositAccount"/> -->
+            <!-- <mantle.account.financial.FinancialAccountType description="Bank" finAccountTypeId="BankAccount"
+                    replenishTypeEnumId="FarpManual" isRefundable="Y" parentTypeId="DepositAccount"/> -->
+            <mantle.account.financial.FinancialAccountType description="Service Credit" finAccountTypeId="ServiceCredit"
+                    replenishTypeEnumId="FarpManual" isRefundable="N"/>
+            <mantle.account.financial.FinancialAccountType description="Loan" finAccountTypeId="LoanAccount"
+                    replenishTypeEnumId="FarpManual" isRefundable="Y"/>
+            <mantle.account.financial.FinancialAccountType description="Employee Advance" finAccountTypeId="EmployeeAdvance"
+                    replenishTypeEnumId="FarpManual" isRefundable="Y" parentTypeId="LoanAccount"/>
+            <!-- <mantle.account.financial.FinancialAccountType description="Credit Card" finAccountTypeId="CreditCard"
+                    replenishTypeEnumId="FarpManual" isRefundable="Y" parentTypeId="LoanAccount"/> -->
+            <!-- <mantle.account.financial.FinancialAccountType description="Equity Line" finAccountTypeId="EquityLine"
+                    replenishTypeEnumId="FarpManual" isRefundable="Y" parentTypeId="LoanAccount"/> -->
+            <mantle.account.financial.FinancialAccountType description="Supplier Deposit" finAccountTypeId="SupplierDeposit"
+                    replenishTypeEnumId="FarpManual" isRefundable="Y"/>
+        </seed-data>
+    </entity>
+</entities>

@@ -2,7 +2,7 @@
 // store#PayrollProfile and get#Compensation, and EmploymentServices create#EmploymentSalary; IronStone People design §8.1,
 // §8 PayAssignments, §4 Employee360's Compensation; PE-08, PE-12; impl-people P23, F4, F33).
 //
-// The records (PeoplePayrollEntities.xml):
+// The records (entity/humanres/PayrollEntities.xml):
 // - a pay assignment (PayrollAssignment) puts an employment on a published structure and a pay group of its employer, in one
 //   currency, from a date: one primary per employment and date across every group (an overlap is refused, or with replaceCurrent
 //   the one in effect is ended on the date), a secondary one beside it for another structure; the employment's own values of the

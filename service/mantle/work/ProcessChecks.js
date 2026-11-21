@@ -1,7 +1,7 @@
 // Executing a process's steps (mantle.work.ProcessServices; IronStone Maintenance design §4.3, §3 ProcedureSteps, StepResponse and
 // ExecutionAmendment, §12 the completed checklist; impl-maintenance P7). An execution is a work order's root and its steps, made of
 // a procedure (instantiate#WorkProcess); each step carries its own copy of the step policy (required, response kind, reading and
-// bounds, evidence, comment, waiver). The facts are records of their own (entity/WorkProcessEntities.xml): a check per response
+// bounds, evidence, comment, waiver). The facts are records of their own (entity/work/EffortEntities.xml): a check per response
 // (WorkEffortCheck, its evidence WorkEffortCheckEvidence), a waiver (WorkEffortWaiver) and an amendment
 // (WorkEffortExecutionAmendment). The step guard: a step's status moves only here, by its response, a waiver, a skip with a reason,
 // or the root's close or cancel (closeExecution), as the generic task services refuse managed work (check#ManagedWork).

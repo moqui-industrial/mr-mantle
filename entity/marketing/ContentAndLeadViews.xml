@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- The blog posts of wiki spaces (find#BlogPosts): each WikiBlog with its page's space, path, published version and view
+        restriction, one row a post (WikiBlogFindView joins its categories, a row each, and leaves out a post with none). -->
+    <view-entity entity-name="BlogPostView" package="mantle.marketing.content">
+        <member-entity entity-alias="WKBG" entity-name="moqui.resource.wiki.WikiBlog"/>
+        <member-entity entity-alias="WKPG" entity-name="moqui.resource.wiki.WikiPage" join-from-alias="WKBG">
+            <key-map field-name="wikiPageId"/></member-entity>
+        <alias-all entity-alias="WKBG"/>
+        <alias entity-alias="WKPG" name="wikiSpaceId"/>
+        <alias entity-alias="WKPG" name="pagePath"/>
+        <alias entity-alias="WKPG" name="publishedVersionName"/>
+        <alias entity-alias="WKPG" name="restrictView"/>
+    </view-entity>
+
+    <!-- The handoff counts (design §10 Leads: MARKETING_VIEW alone gives aggregate handoff counts, F66): captures counted by the fields
+        selected (a rule, a campaign, the state, a joined lead), for Marketing's own records, never Sales'. -->
+    <view-entity entity-name="MarketingLeadCaptureCount" package="mantle.marketing.lead">
+        <member-entity entity-alias="CAP" entity-name="mantle.marketing.lead.MarketingLeadCapture"/>
+        <alias name="leadRuleId" entity-alias="CAP"/>
+        <alias name="organizationPartyId" entity-alias="CAP"/>
+        <alias name="publicationId" entity-alias="CAP"/>
+        <alias name="marketingCampaignId" entity-alias="CAP"/>
+        <alias name="statusEnumId" entity-alias="CAP"/>
+        <alias name="duplicate" entity-alias="CAP"/>
+        <alias name="captureCount" entity-alias="CAP" field="leadCaptureId" function="count" type="number-integer"/>
+    </view-entity>
+</entities>

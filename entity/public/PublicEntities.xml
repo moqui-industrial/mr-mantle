@@ -1,0 +1,438 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+  <entity entity-name="PublicSite" package="mantle.public">
+    <field name="siteId" type="id" is-pk="true"/>
+    <field name="name" type="text-medium"/>
+    <field name="state" type="id"/>
+    <field name="locale" type="id"/>
+    <field name="timeZone" type="id"/>
+    <field name="theme" type="text-long"/>
+    <field name="policyRevision" type="number-integer"/>
+    <field name="registrationMode" type="id"/>
+    <field name="approvalRequired" type="text-indicator"/>
+    <field name="generation" type="number-integer"/>
+    <field name="publishingWikiSpaceId" type="id"><description>Wiki space that receives editorial article drafts made from forum topics; empty disables article handoff.</description></field>
+    <field name="subscriptionUrl" type="text-medium"><description>Registered page where members manage a paid subscription; Forum links to it and implements no checkout.</description></field>
+  </entity>
+
+  <entity entity-name="PublicSiteHost" package="mantle.public">
+    <field name="hostname" type="text-medium" is-pk="true"/>
+    <field name="siteId" type="id"/>
+    <field name="canonical" type="text-indicator"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+  </entity>
+
+  <entity entity-name="PublicSiteApp" package="mantle.public">
+    <field name="siteId" type="id" is-pk="true"/>
+    <field name="appMountId" type="id" is-pk="true"/>
+    <field name="app" type="id"/>
+    <field name="pathPrefix" type="text-medium"/>
+    <field name="enabled" type="text-indicator"/>
+    <field name="targetId" type="id"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+  </entity>
+
+  <entity entity-name="PublicSiteParty" package="mantle.public">
+    <field name="siteId" type="id" is-pk="true"/>
+    <field name="partyId" type="id" is-pk="true"/>
+    <field name="state" type="id"/>
+    <field name="role" type="id"/>
+    <field name="joinedAt" type="date-time"/>
+    <field name="fromDate" type="date-time"/>
+    <field name="thruDate" type="date-time"/>
+    <field name="revision" type="number-integer"/>
+    <field name="guidelinesRevision" type="number-integer"/>
+    <field name="stateSetByPartyId" type="id"><description>Who last set state: the member (leave/join) or staff; staff suspensions and removals cannot be undone by rejoining.</description></field>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <relationship type="one" related="mantle.party.Party"/>
+    <index name="PASS_SITE_MEMBER_PAGE">
+      <index-field name="siteId"/>
+      <index-field name="state"/>
+      <index-field name="partyId"/>
+    </index>
+  </entity>
+
+  <entity entity-name="PublicSiteProfile" package="mantle.public">
+    <field name="siteId" type="id" is-pk="true"/>
+    <field name="partyId" type="id" is-pk="true"/>
+    <field name="handle" type="text-medium"/>
+    <field name="displayName" type="text-medium"/>
+    <field name="avatarId" type="id"/>
+    <field name="bio" type="text-long"/>
+    <field name="discoverability" type="id"/>
+    <field name="locale" type="id"/>
+    <field name="timeZone" type="id"/>
+    <field name="revision" type="number-integer"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <relationship type="one" related="mantle.party.Party"/>
+    <index name="PASS_PROFILE_HANDLE" unique="true">
+      <index-field name="siteId"/>
+      <index-field name="handle"/>
+    </index>
+    <index name="PASS_PROFILE_AVATAR">
+      <index-field name="siteId"/>
+      <index-field name="avatarId"/>
+    </index>
+  </entity>
+
+  <entity entity-name="PublicSiteInvitation" package="mantle.public">
+    <field name="invitationId" type="id" is-pk="true"/>
+    <field name="tokenHash" type="text-medium"/>
+    <field name="siteId" type="id"/>
+    <field name="emailHash" type="text-medium"/>
+    <field name="scopes" type="text-long"/>
+    <field name="inviterPartyId" type="id"/>
+    <field name="expiresAt" type="date-time"/>
+    <field name="redeemedAt" type="date-time"/>
+    <field name="revokedAt" type="date-time"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <index name="PASS_INVITE_HASH" unique="true">
+      <index-field name="tokenHash"/>
+    </index>
+  </entity>
+
+  <entity entity-name="PublicSitePage" package="mantle.public">
+    <description>A public page of a site: an exact WikiPage version bound to the site (the Forum's guidelines and about pages
+      by their role alone) or to an app mount, route and locale (Commerce's store and policy pages, impl-commerce P4, X14),
+      public within its publication window. A role is unique within a site when set. A scheduled publication waits in the
+      scheduled fields until the publication job revalidates it at its from date; a failure leaves the live version as it
+      was and is kept in the failure fields (the store's readiness lists it). The key changed from (site, role) to
+      sitePageId in November 2026: docs/Upgrading.md has the rebuild of an older database.</description>
+    <field name="sitePageId" type="id" is-pk="true"/>
+    <field name="siteId" type="id"/>
+    <field name="pageRole" type="id" enable-audit-log="true"><description>guidelines and about (the Forum's), or a policy
+      role (delivery, returns, privacy, terms); empty for any other page.</description></field>
+    <field name="wikiPageId" type="id" enable-audit-log="true"/>
+    <field name="versionName" type="id" enable-audit-log="true"><description>The exact published version; the page's
+      published wiki version must be this one for the page to show.</description></field>
+    <field name="publicationRevision" type="number-integer"/>
+    <field name="appMountId" type="id" enable-audit-log="true"/>
+    <field name="routePath" type="text-medium" enable-audit-log="true"><description>The path under the mount's pages/
+      route: lower-case segments of letters, digits and hyphens.</description></field>
+    <field name="locale" type="id" enable-audit-log="true"/>
+    <field name="templateKey" type="text-short" enable-audit-log="true"><description>The theme's page template; empty for
+      its default.</description></field>
+    <field name="title" type="text-medium"/>
+    <field name="seoTitle" type="text-medium"/>
+    <field name="seoDescription" type="text-long"/>
+    <field name="socialImageUrl" type="text-medium"/>
+    <field name="fromDate" type="date-time" enable-audit-log="true"/>
+    <field name="thruDate" type="date-time" enable-audit-log="true"/>
+    <field name="publishedByUserId" type="id-long"/>
+    <field name="publishedDate" type="date-time"/>
+    <field name="scheduledVersionName" type="id" enable-audit-log="true"/>
+    <field name="scheduledFromDate" type="date-time" enable-audit-log="true"/>
+    <field name="scheduledThruDate" type="date-time"/>
+    <field name="scheduledByUserId" type="id-long"/>
+    <field name="failureCode" type="id"/>
+    <field name="failureMessage" type="text-medium"/>
+    <field name="failureDate" type="date-time"/>
+    <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+    <field name="createdByUserId" type="id-long"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <relationship type="one" related="moqui.resource.wiki.WikiPage"/>
+    <index name="PASS_PAGE_ROLE" unique="true">
+      <index-field name="siteId"/>
+      <index-field name="pageRole"/>
+    </index>
+    <index name="PASS_PAGE_ROUTE">
+      <index-field name="siteId"/>
+      <index-field name="appMountId"/>
+      <index-field name="routePath"/>
+    </index>
+    <index name="PASS_PAGE_SCHEDULE">
+      <index-field name="scheduledFromDate"/>
+    </index>
+  </entity>
+
+  <entity entity-name="PublicAccessGrant" package="mantle.public">
+    <field name="grantId" type="id" is-pk="true"/>
+    <field name="partyId" type="id"/>
+    <field name="siteId" type="id"/>
+    <field name="targetType" type="id"/>
+    <field name="targetId" type="id"/>
+    <field name="sourceType" type="id"/>
+    <field name="sourceId" type="id"/>
+    <field name="fromDate" type="date-time"/>
+    <field name="thruDate" type="date-time"/>
+    <field name="revokedAt" type="date-time"/>
+    <field name="reason" type="text-medium"/>
+    <field name="grantedByPartyId" type="id"><description>Staff member for a manual grant; empty for a grant a subscription lifecycle made.</description></field>
+    <field name="createdAt" type="date-time"/>
+    <field name="revision" type="number-integer"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <relationship type="one" related="mantle.party.Party"/>
+    <index name="PASS_GRANT_SOURCE" unique="true">
+      <index-field name="partyId"/>
+      <index-field name="siteId"/>
+      <index-field name="targetType"/>
+      <index-field name="targetId"/>
+      <index-field name="sourceType"/>
+      <index-field name="sourceId"/>
+    </index>
+    <index name="PASS_GRANT_SITE">
+      <index-field name="siteId"/>
+      <index-field name="targetType"/>
+      <index-field name="targetId"/>
+      <index-field name="thruDate"/>
+    </index>
+  </entity>
+
+  <entity entity-name="PublicDiscussionLink" package="mantle.public">
+    <description>A forum topic linked to a source record: a product, an article, a support case or an issue (sourceType
+      issue, sourceId the issue's task: the discussion an issue names; mr-pass design-smithy §8.2). A narrowing gate makes
+      the topic readable only while its source is. Product and article sources have at most one active discussion.</description>
+    <field name="linkId" type="id" is-pk="true"/>
+    <field name="siteId" type="id"/>
+    <field name="sourceType" type="id"/>
+    <field name="sourceId" type="id"/>
+    <field name="rootCommEventId" type="id"/>
+    <field name="gate" type="id"/>
+    <field name="createdByPartyId" type="id"/>
+    <field name="createdAt" type="date-time"/>
+    <field name="detachedAt" type="date-time"/>
+    <field name="revision" type="number-integer"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <index name="PASS_LINK_SOURCE">
+      <index-field name="siteId"/>
+      <index-field name="sourceType"/>
+      <index-field name="sourceId"/>
+    </index>
+    <index name="PASS_LINK_TOPIC">
+      <index-field name="rootCommEventId"/>
+      <index-field name="gate"/>
+    </index>
+  </entity>
+
+  <entity entity-name="PublicSubscriptionBinding" package="mantle.public">
+    <description>The site or category scope a subscription resource grants. Its handlers write source-bound PublicAccessGrant rows.</description>
+    <field name="subscriptionResourceId" type="id" is-pk="true"/>
+    <field name="siteId" type="id"/>
+    <field name="targetType" type="id"/>
+    <field name="targetId" type="id"/>
+    <field name="createdAt" type="date-time"/>
+    <field name="revision" type="number-integer"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <relationship type="one" related="mantle.product.subscription.SubscriptionResource"/>
+  </entity>
+
+<!-- A public site's navigation (impl-commerce P4, X14, design-commerce §5 Navigation, design-shop §11): the menus of a
+    site's app mount by key and locale, each with its draft items and its published versions (dated snapshots), and the
+    site's redirects of old paths to typed destinations, each dated. mantle.public.ThemeServices writes them
+    (service/mantle/public/SitePages.js) after its permission and store checks; the live reads are SiteServices'
+    get#SiteNavigation and resolve#SiteRedirect. -->
+  <entity entity-name="PublicSiteNavigation" package="mantle.public">
+    <description>A menu of a site's app mount, by its key (main, footer, ...) and locale. draftText holds the draft's items
+      as JSON ({itemId, parentItemId, label, destinationTypeEnumId, destinationValue, visible}, in order); draftRevision
+      counts its saves, each checked. What visitors see is its active PublicSiteNavigationVersion.</description>
+    <field name="navigationId" type="id" is-pk="true"/>
+    <field name="siteId" type="id"/>
+    <field name="appMountId" type="id"/>
+    <field name="menuKey" type="id"/>
+    <field name="locale" type="id"/>
+    <field name="name" type="text-medium"/>
+    <field name="draftText" type="text-very-long"/>
+    <field name="draftRevision" type="number-integer"/>
+    <field name="lastChangedByUserId" type="id-long"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <index name="PASS_NAV_MENU">
+      <index-field name="siteId"/>
+      <index-field name="appMountId"/>
+      <index-field name="menuKey"/>
+    </index>
+  </entity>
+
+  <entity entity-name="PublicSiteNavigationVersion" package="mantle.public">
+    <description>A published version of a menu: the draft's items as validated when published (snapshotText), live from
+      its fromDate while active. A scheduled version waits until the publication job revalidates it at its from date; it
+      then becomes active and ends the version before it, or fails with its reason and leaves that version live.</description>
+    <field name="navigationId" type="id" is-pk="true"/>
+    <field name="fromDate" type="date-time" is-pk="true"/>
+    <field name="thruDate" type="date-time"/>
+    <field name="draftRevision" type="number-integer"><description>The draft revision this version is of.</description></field>
+    <field name="snapshotText" type="text-very-long"/>
+    <field name="publicationStateEnumId" type="id"/>
+    <field name="publishedByUserId" type="id-long"/>
+    <field name="publishedDate" type="date-time"/>
+    <field name="changeReason" type="text-medium"/>
+    <field name="failureCode" type="id"/>
+    <field name="failureMessage" type="text-medium"/>
+    <relationship type="one" related="mantle.public.PublicSiteNavigation"/>
+    <relationship type="one" title="SitePublicationState" related="moqui.basic.Enumeration">
+      <key-map field-name="publicationStateEnumId"/></relationship>
+    <index name="PASS_NAV_VERSION_STATE">
+      <index-field name="publicationStateEnumId"/>
+      <index-field name="fromDate"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Site Publication State" enumTypeId="SitePublicationState"/>
+      <moqui.basic.Enumeration description="Draft" enumId="SpsDraft" enumTypeId="SitePublicationState" sequenceNum="1"/>
+      <moqui.basic.Enumeration description="Scheduled" enumId="SpsScheduled" enumTypeId="SitePublicationState" sequenceNum="2"/>
+      <moqui.basic.Enumeration description="Active" enumId="SpsActive" enumTypeId="SitePublicationState" sequenceNum="3"/>
+      <moqui.basic.Enumeration description="Failed" enumId="SpsFailed" enumTypeId="SitePublicationState" sequenceNum="4"/>
+      <moqui.basic.Enumeration description="Superseded" enumId="SpsSuperseded" enumTypeId="SitePublicationState" sequenceNum="5"/>
+      <moqui.basic.Enumeration description="Withdrawn" enumId="SpsWithdrawn" enumTypeId="SitePublicationState" sequenceNum="6"/>
+    </seed-data>
+  </entity>
+
+  <entity entity-name="PublicSiteRedirect" package="mantle.public">
+    <description>An old path of a site (absolute, under one of its app mounts) sent to a typed destination, permanently
+      (301) or for a time (302), from its fromDate until its thruDate once published. A draft is not live; a scheduled one
+      waits for the publication job, which revalidates it.</description>
+    <field name="redirectId" type="id" is-pk="true"/>
+    <field name="siteId" type="id"/>
+    <field name="appMountId" type="id"/>
+    <field name="oldPath" type="text-medium" enable-audit-log="true"/>
+    <field name="destinationTypeEnumId" type="id" enable-audit-log="true"/>
+    <field name="destinationValue" type="text-medium" enable-audit-log="true"/>
+    <field name="permanent" type="text-indicator" enable-audit-log="true"/>
+    <field name="fromDate" type="date-time" enable-audit-log="true"/>
+    <field name="thruDate" type="date-time" enable-audit-log="true"/>
+    <field name="publicationStateEnumId" type="id" enable-audit-log="true"/>
+    <field name="revision" type="number-integer"/>
+    <field name="publishedByUserId" type="id-long"/>
+    <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+    <field name="failureCode" type="id"/>
+    <field name="failureMessage" type="text-medium"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <relationship type="one" title="SiteDestinationType" related="moqui.basic.Enumeration">
+      <key-map field-name="destinationTypeEnumId"/></relationship>
+    <relationship type="one" title="SitePublicationState" related="moqui.basic.Enumeration">
+      <key-map field-name="publicationStateEnumId"/></relationship>
+    <index name="PASS_REDIRECT_PATH">
+      <index-field name="siteId"/>
+      <index-field name="oldPath"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Site Destination Type" enumTypeId="SiteDestinationType"/>
+      <moqui.basic.Enumeration description="Product" enumId="SdtProduct" enumTypeId="SiteDestinationType" sequenceNum="1"/>
+      <moqui.basic.Enumeration description="Category" enumId="SdtCategory" enumTypeId="SiteDestinationType" sequenceNum="2"/>
+      <moqui.basic.Enumeration description="Page" enumId="SdtPage" enumTypeId="SiteDestinationType" sequenceNum="3"/>
+      <moqui.basic.Enumeration description="App of the site" enumId="SdtMount" enumTypeId="SiteDestinationType" sequenceNum="4"/>
+      <moqui.basic.Enumeration description="Path on the site" enumId="SdtPath" enumTypeId="SiteDestinationType" sequenceNum="5"/>
+      <moqui.basic.Enumeration description="Other website (https)" enumId="SdtExternal" enumTypeId="SiteDestinationType" sequenceNum="6"/>
+    </seed-data>
+  </entity>
+
+  <entity entity-name="PublicThemePreview" package="mantle.public">
+    <description>A preview of a theme's draft on a site's Shop mount for one actor (create#ThemePreview), until expireDate:
+      the page kind and representative record it shows. tokenDigest is the SHA-256 of the token the preview URL carries.</description>
+    <field name="previewId" type="id" is-pk="true"/>
+    <field name="themeId" type="id"/>
+    <field name="siteId" type="id"/>
+    <field name="appMountId" type="id"/>
+    <field name="userId" type="id-long"/>
+    <field name="tokenDigest" type="text-medium"/>
+    <field name="pageKind" type="text-short"/>
+    <field name="targetId" type="id"><description>The product, category or page (sitePageId) the page shows, when it shows one.</description></field>
+    <field name="locale" type="text-short"/>
+    <field name="draftRevision" type="number-integer"><description>The draft's revision when the preview was made.</description></field>
+    <field name="expireDate" type="date-time"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.public.PublicTheme"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <index name="PASS_THEME_PREVIEW_TOKEN" unique="true">
+      <index-field name="tokenDigest"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Public Site Host Kind" enumTypeId="PublicSiteHostKind"/>
+      <moqui.basic.Enumeration description="Live" enumId="PshkLive" enumTypeId="PublicSiteHostKind" sequenceNum="1"/>
+      <moqui.basic.Enumeration description="Theme preview" enumId="PshkPreview" enumTypeId="PublicSiteHostKind" sequenceNum="2"/>
+    </seed-data>
+  </entity>
+
+<!-- Shop themes and their releases (mr-pass impl-shop P2, design-shop §12.2 and §12.5; mantle.public.ThemeServices,
+    service/mantle/public/Themes.js). A theme is a store's editable package of files, kept as dbresource:// versions under
+    its one package root; a release is an immutable manifest that pins each file's version and digest; a binding is the
+    release a site's app mount shows. Commerce P5's editors write drafts through ThemeServices, never these rows. -->
+  <entity entity-name="PublicTheme" package="mantle.public">
+    <description>A store's theme: its draft is the current text of the files under packageRoot. draftRevision counts the
+      draft's saves (each save checks it); the last validation's digest and outcome are kept for publish.</description>
+    <field name="themeId" type="id" is-pk="true"/>
+    <field name="productStoreId" type="id"><description>The store whose staff may edit and publish it.</description></field>
+    <field name="name" type="text-medium"/>
+    <field name="engine" type="id"/>
+    <field name="packageRoot" type="text-medium"><description>dbresource://mantle/public/theme/{themeId}, never from a request.</description></field>
+    <field name="starterKey" type="text-medium"><description>The starter package it was copied from (component/name).</description></field>
+    <field name="sourceReleaseId" type="id"><description>The release it was copied from, when it started from one.</description></field>
+    <field name="draftRevision" type="number-integer"/>
+    <field name="validationDigest" type="text-medium"/>
+    <field name="validatedRevision" type="number-integer"/>
+    <field name="validationOk" type="text-indicator"/>
+    <field name="validatedDate" type="date-time"/>
+    <field name="createdByUserId" type="id-long"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.product.store.ProductStore"/>
+    <index name="PASS_THEME_STORE">
+      <index-field name="productStoreId"/>
+    </index>
+  </entity>
+
+  <entity entity-name="PublicThemeRelease" package="mantle.public">
+    <description>An immutable release of a theme: manifestText (JSON: the files with versions and digests, the section and
+      block schemas, the global settings, the templates' composition, the engine, renderer and view API versions and the
+      validation digest) and its SHA-256, manifestDigest. Written once by publish#Theme; never updated.</description>
+    <field name="releaseId" type="id" is-pk="true"/>
+    <field name="themeId" type="id"/>
+    <field name="releaseSeq" type="number-integer"/>
+    <field name="name" type="text-medium"/>
+    <field name="engine" type="id"/>
+    <field name="rendererVersion" type="number-integer"/>
+    <field name="viewApiVersion" type="number-integer"/>
+    <field name="validationDigest" type="text-medium"/>
+    <field name="manifestDigest" type="text-medium"/>
+    <field name="manifestText" type="text-very-long"/>
+    <field name="draftRevision" type="number-integer"><description>The draft's revision the release was made from.</description></field>
+    <field name="createdByUserId" type="id-long"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.public.PublicTheme"/>
+    <index name="PASS_THEME_RELEASE_SEQ" unique="true">
+      <index-field name="themeId"/>
+      <index-field name="releaseSeq"/>
+    </index>
+  </entity>
+
+  <entity entity-name="PublicThemeReleaseFile" package="mantle.public">
+    <description>A file a release pins: its path in the package, the dbresource version and the SHA-256 of its text.</description>
+    <field name="releaseId" type="id" is-pk="true"/>
+    <field name="filePath" type="text-medium" is-pk="true"/>
+    <field name="versionName" type="id"/>
+    <field name="digest" type="text-medium"/>
+    <field name="fileSize" type="number-integer"/>
+    <field name="contentType" type="text-medium"/>
+    <relationship type="one" related="mantle.public.PublicThemeRelease"/>
+  </entity>
+
+  <entity entity-name="PublicThemeBinding" package="mantle.public">
+    <description>The active release of a site's app mount (design-shop §12.5): each publish or restore replaces releaseId
+      in one transaction with the site's generation, checked by revision. releaseId and activation are audit-logged, so
+      the binding's history is the activation record.</description>
+    <field name="siteId" type="id" is-pk="true"/>
+    <field name="appMountId" type="id" is-pk="true"/>
+    <field name="themeId" type="id"/>
+    <field name="releaseId" type="id" enable-audit-log="true"/>
+    <field name="activation" type="id" enable-audit-log="true"><description>publish or restore</description></field>
+    <field name="revision" type="number-integer"/>
+    <field name="siteGeneration" type="number-integer"><description>The site's generation the switch advanced to.</description></field>
+    <field name="activatedDate" type="date-time"/>
+    <field name="activatedByUserId" type="id-long"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <relationship type="one" related="mantle.public.PublicSiteApp"/>
+    <relationship type="one" related="mantle.public.PublicThemeRelease"/>
+  </entity>
+</entities>

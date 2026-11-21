@@ -13,7 +13,7 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <entity-facade-xml type="seed-initial">
-    <!-- Purchase order revisions and acknowledgements (impl-purchasing P9; entity/PurchaseRevisionEntities.xml) -->
+    <!-- Purchase order revisions and acknowledgements (impl-purchasing P9; entity/order/OrderAndPurchaseAndReturnExtensions.xml) -->
     <!-- the supplier's response to a revision (OrderPart.acknowledgementEnumId) -->
     <moqui.basic.EnumerationType description="Purchase Acknowledgement" enumTypeId="PurchaseAcknowledgement"/>
     <moqui.basic.Enumeration enumId="PakAccepted" description="Accepted" sequenceNum="1" enumTypeId="PurchaseAcknowledgement"/>

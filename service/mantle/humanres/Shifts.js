@@ -2,7 +2,7 @@
 // get#ShiftProjection; IronStone People design §6 ShiftRoster, §13 TeamCalendar, PE-06, PE-20, PE-24; impl-people P14). Every
 // service checks the caller's People scope first (People.js scopeOf) and reads and writes with authorization off after it.
 //
-// The record (PeopleScheduleEntities.xml ShiftAssignment): a dated shift of an employment, its start and end instants, the zone
+// The record (entity/humanres/RecruitmentAndScheduleEntities.xml ShiftAssignment): a dated shift of an employment, its start and end instants, the zone
 // its day is attributed in (the employment's working schedule's at the start, else the rostering user's) and the day it counts
 // on (shiftDate, the local day of its start there), its unpaid break and work location. A draft is the roster's until it is
 // published; a published shift is the worker's: they are told (PeopleShiftChange), capacity reads it in place of the schedule's

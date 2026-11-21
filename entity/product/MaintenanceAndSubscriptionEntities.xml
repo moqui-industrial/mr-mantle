@@ -1,0 +1,530 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!-- mantle.product.maintenance -->
+    <!-- ========================================================= -->
+    <entity entity-name="AssetMaintenance" package="mantle.product.maintenance" cache="never">
+        <field name="assetMaintenanceId" type="id" is-pk="true"/>
+        <field name="assetId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="maintenanceDate" type="date-time"/>
+        <field name="maintenanceTypeEnumId" type="id"/>
+        <field name="productMaintenanceId" type="id">
+            <description>Optional, though should be filled in to determine upcoming maintenance for all scheduled
+                maintenance</description>
+        </field>
+        <field name="taskWorkEffortId" type="id"/>
+        <field name="intervalQuantity" type="number-decimal"/>
+        <field name="intervalUomId" type="id">
+            <description>UOM for intervalQuantity; ignored if intervalProductMeterId is used</description></field>
+        <!-- <field name="intervalMeterTypeId" type="id"><description>Meter Type for intervalQuantity; if used intervalUomId is generally not used (ie one or the other)</description></field> -->
+        <field name="intervalProductMeterId" type="id"/>
+        <field name="purchaseOrderId" type="id"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <field name="comments" type="text-long"/>
+        <relationship type="one" related="mantle.product.asset.Asset"/>
+        <relationship type="one" title="AssetMaintenance" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="MaintenanceType" related="moqui.basic.Enumeration">
+            <key-map field-name="maintenanceTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.maintenance.ProductMaintenance"/>
+        <relationship type="one" title="Task" related="mantle.work.effort.WorkEffort">
+            <key-map field-name="taskWorkEffortId"/></relationship>
+        <relationship type="one" title="Interval" related="moqui.basic.Uom">
+            <key-map field-name="intervalUomId"/></relationship>
+        <!-- <relationship type="one" title="Interval" related="ProductMeterType">
+            <key-map field-name="intervalMeterTypeId"/></relationship> -->
+        <relationship type="one" title="Interval" related="mantle.product.maintenance.ProductMeter">
+            <key-map field-name="intervalProductMeterId"/></relationship>
+        <relationship type="one" title="Purchase" related="mantle.order.OrderHeader">
+            <key-map field-name="purchaseOrderId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <seed-data>
+            <!-- Asset Maintenance Status -->
+            <moqui.basic.StatusType description="Asset Maintenance Status" statusTypeId="AssetMaintenance"/>
+            <moqui.basic.StatusItem description="Created" sequenceNum="1" statusId="AsMntCreated" statusTypeId="AssetMaintenance"/>
+            <moqui.basic.StatusItem description="Scheduled" sequenceNum="3" statusId="AsMntScheduled" statusTypeId="AssetMaintenance"/>
+            <moqui.basic.StatusItem description="In Process" sequenceNum="5" statusId="AsMntInProcess" statusTypeId="AssetMaintenance"/>
+            <moqui.basic.StatusItem description="Completed" sequenceNum="10" statusId="AsMntCompleted" statusTypeId="AssetMaintenance"/>
+            <moqui.basic.StatusItem description="Cancelled" sequenceNum="99" statusId="AsMntCancelled" statusTypeId="AssetMaintenance"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntCreated" toStatusId="AsMntScheduled" transitionName="Scheduled"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntCreated" toStatusId="AsMntInProcess" transitionName="In-Process"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntCreated" toStatusId="AsMntCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntScheduled" toStatusId="AsMntInProcess" transitionName="In-Process"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntScheduled" toStatusId="AsMntCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntInProcess" toStatusId="AsMntCompleted" transitionName="Complete"/>
+
+            <!-- Maintenance Type -->
+            <moqui.basic.EnumerationType description="Maintenance Type" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="Vehicle Maintenance" enumId="MntTpVehicle" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="Oil Change" enumId="MntTpOilChange" parentEnumId="MntTpVehicle" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="Belt Replacement" enumId="MntTpBeltReplace" parentEnumId="MntTpVehicle" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="Re-Fuel" enumId="MntTpRefuel" parentEnumId="MntTpVehicle" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="Tune Up" enumId="MntTpTuneUp" parentEnumId="MntTpVehicle" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="Battery Replace" enumId="MntTpBatteryReplace" parentEnumId="MntTpVehicle" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="Battery Check" enumId="MntTpBatteryCheck" parentEnumId="MntTpVehicle" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="Lubricate Chassis" enumId="MntTpLubeChassis" parentEnumId="MntTpVehicle" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="Tires Rotate" enumId="MntTpTiresRotate" parentEnumId="MntTpVehicle" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="Tire Replacement" enumId="MntTpTireReplacement" parentEnumId="MntTpVehicle" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="HVAC Maintenance" enumId="MntTpHvac" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="Air Filter Replace" enumId="MntTpAirFilterRepl" parentEnumId="MntTpHvac" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="Refrigerant Check/Recharge" enumId="MntTpRefrChkChrg" parentEnumId="MntTpHvac" enumTypeId="MaintenanceType"/>
+            <moqui.basic.Enumeration description="Cleaning" enumId="MntTpCleaning" enumTypeId="MaintenanceType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="AssetMaintenanceContent" package="mantle.product.maintenance" cache="never">
+        <field name="assetMaintenanceId" type="id" is-pk="true"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp" is-pk="true"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.product.maintenance.AssetMaintenance"/>
+        <relationship type="one" title="AssetMaintContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+    </entity>
+
+    <entity entity-name="AssetMaintenanceOrderItem" package="mantle.product.maintenance" cache="never">
+        <field name="assetMaintenanceId" type="id" is-pk="true"/>
+        <field name="orderId" type="id" is-pk="true"/>
+        <field name="orderItemSeqId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.product.maintenance.AssetMaintenance"/>
+        <relationship type="one" related="mantle.order.OrderHeader"/>
+        <relationship type="one-nofk" related="mantle.order.OrderItem">
+            <key-map field-name="orderId"/>
+            <key-map field-name="orderItemSeqId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="AssetMeter" package="mantle.product.maintenance" cache="never">
+        <!-- TODO: deprecate this, use mantle.work.measurement.Measurement instead -->
+        <field name="assetId" type="id" is-pk="true"/>
+        <field name="readingDate" type="date-time" is-pk="true"/>
+        <field name="productMeterTypeId" type="id"/>
+        <field name="productMeterId" type="id"/>
+        <!-- audit-logged on create too, so a reset's reason is kept with its value (record#MaintenanceMeter, impl-maintenance P2) -->
+        <field name="meterValue" type="number-decimal" enable-audit-log="true"/>
+        <field name="readingReasonEnumId" type="id"/>
+        <field name="assetMaintenanceId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.product.asset.Asset"/>
+        <relationship type="one" related="mantle.product.maintenance.AssetMaintenance"/>
+        <relationship type="one" related="mantle.product.maintenance.ProductMeterType"/>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <!-- why the reading was taken (impl-maintenance P2, F70): a reading, in work, a reset or a correction; written by
+            MaintenanceResourceServices.record#MaintenanceMeter -->
+        <relationship type="one" title="ReadingReason" related="moqui.basic.Enumeration">
+            <key-map field-name="readingReasonEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Asset Meter Reading Reason" enumTypeId="AssetMeterReadingReason"/>
+            <moqui.basic.Enumeration description="Reading" enumId="AmrReading" enumTypeId="AssetMeterReadingReason" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Taken in work" enumId="AmrWork" enumTypeId="AssetMeterReadingReason" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Meter reset" enumId="AmrReset" enumTypeId="AssetMeterReadingReason" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Correction" enumId="AmrCorrection" enumTypeId="AssetMeterReadingReason" sequenceNum="4"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="AssetRegistration" package="mantle.product.maintenance" cache="never">
+        <field name="assetId" type="id" is-pk="true"/>
+        <field name="assetRegSeqId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="registrationDate" type="date-time"/>
+        <field name="govAgencyPartyId" type="id"/>
+        <field name="registrationNumber" type="text-medium"/>
+        <field name="licenseNumber" type="text-medium"/>
+        <relationship type="one" related="mantle.product.asset.Asset"/>
+        <relationship type="one" title="GovAgency" related="mantle.party.Party">
+            <key-map field-name="govAgencyPartyId"/></relationship>
+    </entity>
+
+    <entity entity-name="ProductMeter" package="mantle.product.maintenance">
+        <field name="productMeterId" type="id" is-pk="true"/>
+        <field name="productId" type="id"/>
+        <field name="productMeterTypeId" type="id"/>
+        <field name="meterUomId" type="id"/>
+        <field name="meterName" type="text-medium"/>
+        <field name="isCumulative" type="text-indicator"><description>Y when the meter only counts up (hours, distance, cycles): a
+            lower reading is refused unless it is recorded as a reset or a correction (impl-maintenance P2, F70).</description></field>
+        <relationship type="one" related="mantle.product.Product"/>
+        <relationship type="one" related="mantle.product.maintenance.ProductMeterType"/>
+        <relationship type="one" title="Meter" related="moqui.basic.Uom">
+            <key-map field-name="meterUomId"/></relationship>
+    </entity>
+
+    <entity entity-name="ProductMeterType" package="mantle.product.maintenance">
+        <field name="productMeterTypeId" type="id" is-pk="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="defaultUomId" type="id">
+            <description>This is optional and if applicable can describe the meter better</description>
+        </field>
+        <relationship type="one" title="Default" related="moqui.basic.Uom">
+            <key-map field-name="defaultUomId"/></relationship>
+        <seed-data>
+            <!-- Product Meter Type -->
+            <mantle.product.maintenance.ProductMeterType description="Speedometer" productMeterTypeId="PdMtrSpeedometer"/>
+            <mantle.product.maintenance.ProductMeterType description="Tachometer" productMeterTypeId="PdMtrTachometer"/>
+            <mantle.product.maintenance.ProductMeterType description="Distance Meter" productMeterTypeId="PdMtrDistance"/>
+            <mantle.product.maintenance.ProductMeterType description="Motor Time Meter" productMeterTypeId="PdMtrMotorTime"/>
+            <mantle.product.maintenance.ProductMeterType description="Use Count Meter" productMeterTypeId="PdMtrUseCount"/>
+            <mantle.product.maintenance.ProductMeterType description="Copy Count Meter" productMeterTypeId="PdMtrCopyCount"/>
+            <mantle.product.maintenance.ProductMeterType description="Trip Meter" productMeterTypeId="PdMtrTripMeter"/>
+            <mantle.product.maintenance.ProductMeterType description="Tachograph" productMeterTypeId="PdMtrTachograph"/>
+            <mantle.product.maintenance.ProductMeterType description="Taximeter" productMeterTypeId="PdMtrTaximeter"/>
+            <mantle.product.maintenance.ProductMeterType description="Event Data Recorder" productMeterTypeId="PdMtrEventDataRec"/>
+            <mantle.product.maintenance.ProductMeterType description="Pedometer" productMeterTypeId="PdMtrPedometer"/>
+            <mantle.product.maintenance.ProductMeterType description="Odometer" productMeterTypeId="PdMtrOdometer"/>
+            <mantle.product.maintenance.ProductMeterType description="Thermometer" productMeterTypeId="PdMtrThermometer"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductMaintenance" package="mantle.product.maintenance">
+        <description>This is used to specify the details for scheduled maintenance.</description>
+        <field name="productMaintenanceId" type="id" is-pk="true"/>
+        <field name="productId" type="id"/>
+        <field name="maintenanceTypeEnumId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <field name="comments" type="text-long"/>
+        <field name="templateWorkEffortId" type="id">
+            <description>Template of Maintenance Plan. WorkEffort may have WorkEffortAssoc records for tasks/breakdown
+                details.</description></field>
+        <field name="intervalQuantity" type="number-decimal"/>
+        <field name="intervalProductMeterId" type="id"/>
+        <field name="intervalUomId" type="id">
+            <description>UOM for intervalQuantity; ignored if intervalProductMeterId is used</description></field>
+        <!-- this isn't really needed with intervalProductMeterId, but leaving commented in case there is a scenario for it:
+        <field name="intervalMeterTypeId" type="id">
+            <description>Meter Type for intervalQuantity; if used intervalUomId is generally not used (ie one or the
+                other)</description>
+        </field>
+        -->
+        <field name="repeatCount" type="number-integer">
+            <description>If 0 or null means no limit to repeat count; can be used with multiple ProductMaintenance
+                records for a single MaintenanceType in cases where maintenance intervals are not evenly distributed,
+                or only need to be done once like a break-in period</description>
+        </field>
+        <relationship type="one" related="mantle.product.Product"/>
+        <relationship type="one" title="MaintenanceType" related="moqui.basic.Enumeration">
+            <key-map field-name="maintenanceTypeEnumId"/></relationship>
+        <relationship type="one" title="Template" related="mantle.work.effort.WorkEffort">
+            <key-map field-name="templateWorkEffortId"/></relationship>
+        <relationship type="one" title="Interval" related="moqui.basic.Uom">
+            <key-map field-name="intervalUomId"/></relationship>
+        <!-- <relationship type="one" title="Interval" related="mantle.product.maintenance.ProductMeterType">
+            <key-map field-name="intervalMeterTypeId"/></relationship> -->
+        <relationship type="one" title="Interval" related="mantle.product.maintenance.ProductMeter">
+            <key-map field-name="intervalProductMeterId"/></relationship>
+    </entity>
+
+    <!-- ========================================================= -->
+    <!-- mantle.product.subscription -->
+    <!-- ========================================================= -->
+    <entity entity-name="ProductSubscriptionResource" package="mantle.product.subscription">
+        <field name="productId" type="id" is-pk="true"/>
+        <field name="subscriptionResourceId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="purchaseFromDate" type="date-time"/>
+        <field name="purchaseThruDate" type="date-time"/>
+        <field name="availableTime" type="number-integer"/>
+        <field name="availableTimeUomId" type="id"/>
+        <field name="useCountLimit" type="number-integer"/>
+        <field name="useTime" type="number-integer"/>
+        <field name="useTimeUomId" type="id"/>
+        <field name="useRoleTypeId" type="id"/>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" related="mantle.product.subscription.SubscriptionResource" short-alias="resource"/>
+        <relationship type="one" title="Use" related="mantle.party.RoleType" short-alias="useRole">
+            <key-map field-name="useRoleTypeId"/></relationship>
+        <relationship type="one" title="UseTime" related="moqui.basic.Uom" short-alias="useTimeUom">
+            <key-map field-name="useTimeUomId"/></relationship>
+        <relationship type="one" title="AvailableTime" related="moqui.basic.Uom" short-alias="availableTimeUom">
+            <key-map field-name="availableTimeUomId"/></relationship>
+    </entity>
+
+    <entity entity-name="Subscription" package="mantle.product.subscription" short-alias="subscriptions" cache="never">
+        <field name="subscriptionId" type="id" is-pk="true"/>
+        <field name="subscriptionTypeEnumId" type="id"/>
+        <field name="subscriptionResourceId" type="id"/>
+        <field name="subscriberPartyId" type="id"/>
+        <field name="deliverToContactMechId" type="id"/>
+
+        <field name="orderId" type="id"/>
+        <field name="orderItemSeqId" type="id"/>
+        <field name="productId" type="id"/>
+        <field name="externalSubscriptionId" type="text-short"/>
+        <field name="resourceInstanceId" type="text-short"><description>ID of an instance of a resource, like a serial
+            number or executing instance ID.</description></field>
+        <field name="description" type="text-medium"/>
+
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="purchaseFromDate" type="date-time"/>
+        <field name="purchaseThruDate" type="date-time"/>
+
+        <field name="availableTime" type="number-integer"/>
+        <field name="availableTimeUomId" type="id"/>
+        <field name="useTime" type="number-integer"/>
+        <field name="useTimeUomId" type="id"/>
+        <field name="useCountLimit" type="number-integer"/>
+        <field name="accessRevokedDate" type="date-time"><description>When expire#SubscriptionAccess handled the end of
+            this subscription's access: it called the resource's revoke service, unless a later subscription for the same
+            subscriber and resource continued the access.</description></field>
+        <field name="destroyedDate" type="date-time"><description>When expire#SubscriptionAccess handled the destroy time,
+            calling the resource's destroy service unless a later subscription continued it or none is configured.</description></field>
+        <relationship type="one" title="SubscriptionType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="subscriptionTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.subscription.SubscriptionResource" short-alias="resource">
+            <key-map field-name="subscriptionResourceId"/></relationship>
+        <relationship type="one" title="Subscriber" related="mantle.party.Party" short-alias="subscriber">
+            <key-map field-name="subscriberPartyId"/></relationship>
+        <relationship type="one" title="DeliverTo" related="mantle.party.contact.ContactMech" short-alias="deliverTo">
+            <key-map field-name="deliverToContactMechId"/></relationship>
+        <relationship type="one" related="mantle.order.OrderItem" short-alias="orderItem">
+            <key-map field-name="orderId"/><key-map field-name="orderItemSeqId"/></relationship>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" title="AvailableTime" related="moqui.basic.Uom" short-alias="availableTimeUom">
+            <key-map field-name="availableTimeUomId"/></relationship>
+        <relationship type="one" title="UseTime" related="moqui.basic.Uom" short-alias="useTimeUom">
+            <key-map field-name="useTimeUomId"/></relationship>
+        <seed-data>
+            <!-- Product Subscription Type -->
+            <moqui.basic.EnumerationType description="Subscription Type" enumTypeId="SubscriptionType"/>
+            <moqui.basic.Enumeration description="Product" enumId="StProduct" enumTypeId="SubscriptionType"/>
+        </seed-data>
+        <master>
+            <detail relationship="type"/>
+            <detail relationship="resource"/>
+            <detail relationship="subscriber" use-master="basic"/>
+            <detail relationship="deliverTo" use-master="default"/>
+            <detail relationship="product"/>
+            <detail relationship="availableTimeUom"/>
+            <detail relationship="useTimeUom"/>
+        </master>
+    </entity>
+
+    <entity entity-name="SubscriptionDelivery" package="mantle.product.subscription" cache="never">
+        <field name="subscriptionId" type="id" is-pk="true"/>
+        <field name="dateSent" type="date-time" is-pk="true"/>
+        <field name="communicationEventId" type="id"/>
+        <field name="comments" type="text-medium"/>
+        <relationship type="one" related="mantle.product.subscription.Subscription"/>
+        <relationship type="one" related="mantle.party.communication.CommunicationEvent"/>
+    </entity>
+
+    <entity entity-name="SubscriptionResource" package="mantle.product.subscription" short-alias="subscriptionResources">
+        <field name="subscriptionResourceId" type="id" is-pk="true"/>
+        <field name="parentResourceId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="remoteResourceId" type="text-medium"/>
+
+        <field name="initServiceName" type="text-medium">
+            <description>Service called when a new subscription to a resource begins. Must implement the
+                mantle.product.SubscriptionServices.init#SubscriptionResource service interface.</description></field>
+        <field name="renewServiceName" type="text-medium">
+            <description>Service called when an existing subscription is renewed. Can be empty or do nothing, using
+                revoke after expire instead. Must implement the mantle.product.SubscriptionServices.renew#SubscriptionResource
+                service interface.</description></field>
+        <field name="revokeAccessTime" type="number-integer"/>
+        <field name="revokeAccessTimeUomId" type="id"/>
+        <field name="revokeAccessServiceName" type="text-medium">
+            <description>Service called when inactive subscription goes past revokeAccessTime. Must implement the
+                mantle.product.SubscriptionServices.revoke#SubscriptionResourceAccess service interface.</description></field>
+        <field name="restoreAccessServiceName" type="text-medium">
+            <description>Service called on special events (manual or otherwise) to resore access. Must implement the
+                mantle.product.SubscriptionServices.restore#SubscriptionResourceAccess service interface.</description></field>
+        <field name="destroyTime" type="number-integer"/>
+        <field name="destroyTimeUomId" type="id"/>
+        <field name="destroyServiceName" type="text-medium">
+            <description>Service called when inactive subscription goes past destroyTime. Must implement the
+                mantle.product.SubscriptionServices.destroy#SubscriptionResource service interface.</description></field>
+
+        <relationship type="one" title="Parent" related="mantle.product.subscription.SubscriptionResource" short-alias="parent">
+            <key-map field-name="parentResourceId" related="subscriptionResourceId"/></relationship>
+        <relationship type="many" related="mantle.product.subscription.ProductSubscriptionResource" short-alias="products">
+            <key-map field-name="subscriptionResourceId"/></relationship>
+
+        <master>
+            <detail relationship="parent"/>
+            <detail relationship="products"><detail relationship="product"/></detail>
+        </master>
+    </entity>
+
+  <entity entity-name="StoreRecurringOffer" package="mantle.product.subscription" cache="never">
+    <description>A store's offer of a paid-access product as a fixed plan: the product and the subscription resource its
+      term grants (the product's ProductSubscriptionResource sets the term), the fixed price and currency, whether it renews
+      automatically (an automatic offer needs a store gateway with off-session charges), the terms version a buyer accepts,
+      the retry days after a failed renewal (by default 1, 3 and 7), and its effective dates and revision. A contract pins the
+      offer as accepted; a change of price or terms starts a new offer row.</description>
+    <field name="offerId" type="id" is-pk="true"/>
+    <field name="productStoreId" type="id"/>
+    <field name="productId" type="id"/>
+    <field name="subscriptionResourceId" type="id"/>
+    <field name="offerName" type="text-medium"/>
+    <field name="priceAmount" type="currency-amount"/>
+    <field name="currencyUomId" type="id"/>
+    <field name="autoRenew" type="text-indicator"><description>Y renews by charging the kept method off-session each term;
+      N is a prepaid term, renewed only by buying another.</description></field>
+    <field name="termsVersion" type="text-short"/>
+    <field name="retryDays" type="text-short"><description>Days after the first failed renewal charge it is tried again,
+      comma separated (default 1,3,7); after the last it waits for the customer.</description></field>
+    <field name="fromDate" type="date-time"/>
+    <field name="thruDate" type="date-time"/>
+    <field name="revision" type="number-integer"/>
+    <field name="changedByUserId" type="id-long"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.product.store.ProductStore"/>
+    <relationship type="one" related="mantle.product.Product"/>
+    <relationship type="one" related="mantle.product.subscription.SubscriptionResource"/>
+    <relationship type="one" title="Currency" related="moqui.basic.Uom">
+      <key-map field-name="currencyUomId" related="uomId"/>
+    </relationship>
+    <index name="STORE_OFFER_STORE">
+      <index-field name="productStoreId"/>
+      <index-field name="productId"/>
+    </index>
+  </entity>
+
+  <entity entity-name="StoreRecurringContract" package="mantle.product.subscription" cache="never">
+    <description>A verified customer's accepted subscription in a store: the offer as accepted (product, resource, price,
+      currency, automatic renewal, terms), the first order and line that bought it, the recurring base order
+      (RecurringTemplate) when it renews automatically, the kept payment method with its off-session consent (time, method,
+      terms version and evidence; cleared by a merge or an ended method), the paid-through date, the next renewal, a
+      cancellation at the end of the paid term, its state (StoreContractState) and revision. Its contractId is the resource
+      instance of every Subscription it pays for, so its renewals never extend another subscription of the same person. It
+      keeps no money balance.</description>
+    <field name="contractId" type="id" is-pk="true"/>
+    <field name="productStoreId" type="id"/>
+    <field name="siteId" type="id"/>
+    <field name="customerPartyId" type="id"/>
+    <field name="offerId" type="id"/>
+    <field name="productId" type="id"/>
+    <field name="subscriptionResourceId" type="id"/>
+    <field name="priceAmount" type="currency-amount"/>
+    <field name="currencyUomId" type="id"/>
+    <field name="autoRenew" type="text-indicator"/>
+    <field name="termsVersion" type="text-short"/>
+    <field name="stateEnumId" type="id"/>
+    <field name="originOrderId" type="id"/>
+    <field name="originOrderItemSeqId" type="id"/>
+    <field name="baseOrderId" type="id"/>
+    <field name="paymentMethodId" type="id"/>
+    <field name="consentDate" type="date-time"/>
+    <field name="consentMethodId" type="id"><description>The payment method the off-session consent is for; a charge
+      needs it to be the contract's method.</description></field>
+    <field name="consentTermsVersion" type="text-short"/>
+    <field name="consentEvidence" type="text-medium"/>
+    <field name="consentPaymentId" type="id"><description>The customer-initiated payment that first used the method
+      (its network transaction id is the original of the merchant-initiated renewals).</description></field>
+    <field name="consentEndedReason" type="text-short"><description>Why a consent was cleared (PARTY_MERGED,
+      METHOD_ENDED); a renewal then waits for the customer.</description></field>
+    <field name="paidThroughDate" type="date-time"/>
+    <field name="nextRenewalDate" type="date-time"/>
+    <field name="cancelDate" type="date-time"/>
+    <field name="cancelAtDate" type="date-time"><description>When access ends after a cancellation: the end of the paid term.</description></field>
+    <field name="cancelReason" type="text-medium"/>
+    <field name="revision" type="number-integer"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.product.store.ProductStore"/>
+    <relationship type="one" related="mantle.product.subscription.StoreRecurringOffer"/>
+    <relationship type="one" title="Customer" related="mantle.party.Party">
+      <key-map field-name="customerPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" related="mantle.account.method.PaymentMethod"/>
+    <relationship type="one" title="Origin" related="mantle.order.OrderHeader">
+      <key-map field-name="originOrderId" related="orderId"/>
+    </relationship>
+    <relationship type="one" title="Base" related="mantle.order.OrderHeader">
+      <key-map field-name="baseOrderId" related="orderId"/>
+    </relationship>
+    <relationship type="one" title="StoreContractState" related="moqui.basic.Enumeration">
+      <key-map field-name="stateEnumId" related="enumId"/>
+    </relationship>
+    <index name="STORE_CONTRACT_CUSTOMER">
+      <index-field name="customerPartyId"/>
+      <index-field name="productStoreId"/>
+    </index>
+    <index name="STORE_CONTRACT_ORIGIN" unique="true">
+      <index-field name="originOrderId"/>
+      <index-field name="originOrderItemSeqId"/>
+    </index>
+    <index name="STORE_CONTRACT_BASE">
+      <index-field name="baseOrderId"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Store contract state" enumTypeId="StoreContractState"/>
+      <moqui.basic.Enumeration enumId="ScsActive" description="Active" sequenceNum="1" enumTypeId="StoreContractState"/>
+      <moqui.basic.Enumeration enumId="ScsPastDue" description="Renewal payment due" sequenceNum="2" enumTypeId="StoreContractState"/>
+      <moqui.basic.Enumeration enumId="ScsCancelled" description="Renewal cancelled" sequenceNum="3" enumTypeId="StoreContractState"/>
+      <moqui.basic.Enumeration enumId="ScsEnded" description="Ended" sequenceNum="4" enumTypeId="StoreContractState"/>
+      <moqui.basic.Enumeration enumId="ScsPrepaid" description="Prepaid" sequenceNum="5" enumTypeId="StoreContractState"/>
+    </seed-data>
+  </entity>
+
+  <entity entity-name="StoreRenewalOccurrence" package="mantle.product.subscription" cache="never">
+    <description>One due billing period of a contract (unique by contract and period start): the renewal order cloned
+      from the base (copyPayment=false), the payment of its current attempt (Accounting's coordinator, purpose shopRenewal)
+      and the attempts made, the next retry after a failure, the term's Subscription once activated, the notices, and its
+      state (StoreRenewalState). At most one renewal order per period; concurrent jobs and retries answer this row.</description>
+    <field name="occurrenceId" type="id" is-pk="true"/>
+    <field name="contractId" type="id"/>
+    <field name="periodStartDate" type="date-time"/>
+    <field name="stateEnumId" type="id"/>
+    <field name="orderId" type="id"/>
+    <field name="paymentId" type="id"/>
+    <field name="invoiceId" type="id"/>
+    <field name="subscriptionId" type="id"/>
+    <field name="attemptCount" type="number-integer"/>
+    <field name="firstFailureDate" type="date-time"/>
+    <field name="nextRetryDate" type="date-time"/>
+    <field name="failureCode" type="id"/>
+    <field name="failureMessage" type="text-medium"/>
+    <field name="activatedDate" type="date-time"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.product.subscription.StoreRecurringContract"/>
+    <relationship type="one" related="mantle.order.OrderHeader"/>
+    <relationship type="one" related="mantle.account.payment.Payment"/>
+    <relationship type="one" title="StoreRenewalState" related="moqui.basic.Enumeration">
+      <key-map field-name="stateEnumId" related="enumId"/>
+    </relationship>
+    <index name="STORE_RENEWAL_PERIOD" unique="true">
+      <index-field name="contractId"/>
+      <index-field name="periodStartDate"/>
+    </index>
+    <index name="STORE_RENEWAL_ORDER">
+      <index-field name="orderId"/>
+    </index>
+    <index name="STORE_RENEWAL_DUE">
+      <index-field name="stateEnumId"/>
+      <index-field name="nextRetryDate"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Store renewal state" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsClaimed" description="Claimed" sequenceNum="1" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsCharging" description="Payment in progress" sequenceNum="2" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsRetry" description="Payment failed, retrying" sequenceNum="3" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsActionRequired" description="Waiting for the customer" sequenceNum="4" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsPlaced" description="Paid, order placed" sequenceNum="5" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsActivated" description="Renewed" sequenceNum="6" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsFailed" description="Retries exhausted" sequenceNum="7" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsCancelled" description="Not renewed" sequenceNum="8" enumTypeId="StoreRenewalState"/>
+    </seed-data>
+  </entity>
+</entities>

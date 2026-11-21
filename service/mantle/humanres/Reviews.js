@@ -4,7 +4,7 @@
 // Goals, §15 the review release, PE-16, PE-01, PE-21; impl-people P20). Every read is a projection of the caller's People scope
 // (People.js scopeOf), read with authorization off after that check.
 //
-// The records (PeopleReviewEntities.xml, refined from the commented sketches, F6):
+// The records (entity/humanres/AbilityEntities.xml, refined from the commented sketches, F6):
 // - a template (ReviewTemplate) of an employer says which steps its reviews ask for, the review form each answers (a published form
 //   of the DbfpReview purpose, People's Forms; none: a written summary) and its release policy;
 // - a cycle (ReviewCycle) of an employer, or of one of its units and those under it, is started into one review (PerformanceReview)

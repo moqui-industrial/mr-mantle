@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <extend-entity entity-name="UomConversion" package="moqui.basic">
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="conversionFactor" type="number-float" enable-audit-log="true"/>
+        <field name="rateSource" type="text-medium" enable-audit-log="update"/>
+    </extend-entity>
+
+    <extend-entity entity-name="Uom" package="moqui.basic">
+        <field name="fractionDigits" type="number-integer" enable-audit-log="update"/>
+    </extend-entity>
+
+    <!-- an HR vocabulary value ended, never deleted (PeopleServices.store#Lookup): the records that hold it keep it, and no new
+        record takes it. Other families ignore it. -->
+    <extend-entity entity-name="Enumeration" package="moqui.basic">
+        <field name="thruDate" type="date-time"><description>Ended from this time: kept for the records that hold it and offered
+            for no new one (People's lookups)</description></field>
+    </extend-entity>
+
+    <!-- ========================================================= -->
+    <!-- moqui.basic.print -->
+    <!-- ========================================================= -->
+    <extend-entity entity-name="NetworkPrinter" package="moqui.basic.print">
+        <field name="assetId" type="id"/>
+        <relationship type="one" related="mantle.product.asset.Asset"/>
+    </extend-entity>
+
+    <extend-entity entity-name="DataDocument" package="moqui.entity.document">
+        <relationship type="many" related="mantle.product.store.ProductStoreDataDocument" short-alias="storeDataDocuments">
+            <key-map field-name="dataDocumentId"/></relationship>
+    </extend-entity>
+
+    <!-- impl-people P16 review (design-people PE-21): a form's answers are the respondent's own text (an interview scorecard's
+        evidence, a review, an exit interview, a customer's comment), read through the service of the record they belong to, so the
+        text reaches no model tool: Assist's data reads never read, find or sort by it and Update with AI refuses it (the screens
+        that show answers mark their fields and sections ai-opt-out too) -->
+    <extend-entity entity-name="FormResponseAnswer" package="moqui.screen.form">
+        <field name="valueText" type="text-long" ai-opt-out="true"/>
+    </extend-entity>
+
+    <!-- impl-marketing P12 (design-marketing §10, §13 SubmitForm): a choice option's score for a survey's summary, on the shared
+        definition (FormDefinitions.js: an option line "value | label | score"); a whole number from 0 to 1000 on a single choice.
+        A change of a published option's score ends that option and starts a new one with the same value from now, so a response
+        reads the scores as of its date. -->
+    <extend-entity entity-name="DbFormFieldOption" package="moqui.screen.form">
+        <field name="scoreValue" type="number-integer"/>
+    </extend-entity>
+
+<!-- Case templates (design-customer-service §3 NewCase, §9 CaseTemplates; impl-customer-service P7, CS-TEMPLATES, F69-F71):
+    a template is a dated DbForm (DbForm.isDated, purpose DbfpCaseTemplate) owned by an organization, with its fields,
+    options and DbFormFieldDependency rows effective-dated by the framework (docs/ui/Db-Forms.md); a case's values are a
+    FormResponse of it, linked from the case's CaseProfile (formResponseId) and read as of its response date. There is no
+    CaseTemplate, field, dependency or value record of Mantle's own: the two fields below are on the framework's rows, so
+    the owner and each field's audience are read and dated with the form itself. Saved through
+    mantle.request.SupportCaseServices (save#CaseTemplate, save#CaseTemplateField, save#CaseTemplateCondition,
+    end#CaseTemplatePart; CaseTemplates.js). -->
+    <!-- the organization whose case template a DbForm is, as RequestCategory's owner (F6) -->
+    <extend-entity entity-name="DbForm" package="moqui.screen.form">
+        <field name="ownerPartyId" type="id" enable-audit-log="true"><description>The organization whose case template this
+            form is (purpose DbfpCaseTemplate); a form with no owner is no organization's template</description></field>
+        <relationship type="one-nofk" title="Owner" related="mantle.party.Party" short-alias="owner">
+            <key-map field-name="ownerPartyId" related="partyId"/></relationship>
+        <seed-data>
+            <moqui.basic.Enumeration description="Case template" enumId="DbfpCaseTemplate" enumTypeId="DbFormPurpose"/>
+        </seed-data>
+    </extend-entity>
+
+    <!-- who a case template's field is for: on the field's own dated row, so a response reads the audience it was submitted
+        under. A published field's audience is not edited: a change is a successor field from a date (create#DbFormFieldSuccessor),
+        so an internal answer never becomes customer-visible. No audience is internal. -->
+    <extend-entity entity-name="DbFormField" package="moqui.screen.form">
+        <field name="audienceEnumId" type="id" enable-audit-log="true"><description>CfaCustomer: the customer sees and
+            answers it (the Support app's form, a customer-visible print); CfaInternal or empty: agents only</description></field>
+        <relationship type="one-nofk" title="CaseFieldAudience" related="moqui.basic.Enumeration" short-alias="audience">
+            <key-map field-name="audienceEnumId" related="enumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Case Field Audience" enumTypeId="CaseFieldAudience"/>
+            <moqui.basic.Enumeration enumId="CfaCustomer" description="Customer-visible" sequenceNum="1" enumTypeId="CaseFieldAudience"/>
+            <moqui.basic.Enumeration enumId="CfaInternal" description="Internal" sequenceNum="2" enumTypeId="CaseFieldAudience"/>
+        </seed-data>
+    </extend-entity>
+
+    <extend-entity entity-name="UserAccount" package="moqui.security">
+        <field name="partyId" type="id"/>
+        <relationship type="one" related="mantle.party.Party"/>
+    </extend-entity>
+
+    <extend-entity entity-name="SystemMessage" package="moqui.service.message">
+        <field name="invoiceId" type="id"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice"/>
+    </extend-entity>
+
+    <extend-entity entity-name="SystemMessage" package="moqui.service.message">
+        <field name="paymentMethodFileId" type="id"/>
+        <relationship type="one" related="mantle.account.method.PaymentMethodFile"/>
+    </extend-entity>
+
+    <extend-entity entity-name="SystemMessage" package="moqui.service.message">
+        <field name="orderId" type="id"/>
+        <field name="orderPartSeqId" type="id"/>
+        <field name="orderRevision" type="number-integer"/>
+        <relationship type="one" related="mantle.order.OrderHeader" short-alias="orderHeader"/>
+        <relationship type="one-nofk" related="mantle.order.OrderPart" short-alias="orderPart"/>
+        <!-- should have auto based on FK: <index name="SYSMSG_ORDER"><index-field name="orderId"/></index> -->
+    </extend-entity>
+
+    <extend-entity entity-name="SystemMessage" package="moqui.service.message">
+        <field name="returnId" type="id"/>
+        <relationship type="one" related="mantle.order.return.ReturnHeader"/>
+    </extend-entity>
+
+    <extend-entity entity-name="SystemMessageRemote" package="moqui.service.message">
+        <field name="productStoreId" type="id"/>
+        <relationship type="one" related="mantle.product.store.ProductStore"/>
+    </extend-entity>
+
+    <extend-entity entity-name="SystemMessage" package="moqui.service.message">
+        <field name="shipmentId" type="id"/>
+        <relationship type="one" related="mantle.shipment.Shipment" short-alias="shipment"/>
+    </extend-entity>
+
+    <extend-entity entity-name="SystemMessageRemote" package="moqui.service.message">
+        <field name="storeConnectorId" type="id" enable-audit-log="update"><description>The registered connector a store's
+            binding uses (StoreChannelConnector); with productStoreId it makes the remote a store integration</description></field>
+        <field name="storeMappingVersion" type="number-integer" enable-audit-log="update"/>
+        <field name="storeMappingJson" type="text-long" enable-audit-log="update"><description>The binding's typed mapping
+            parameters (StoreChannels.js connectors' parameters), checked by store#StoreIntegration; never credentials</description></field>
+        <field name="storeDisabled" type="text-indicator" enable-audit-log="update"><description>Y: the store's intake over
+            this binding is stopped (a new binding starts so until the operator has set its credentials)</description></field>
+        <relationship type="one" related="mantle.product.store.StoreChannelConnector" short-alias="storeConnector">
+            <key-map field-name="storeConnectorId" related="connectorId"/></relationship>
+    </extend-entity>
+
+    <extend-entity entity-name="SystemMessage" package="moqui.service.message">
+        <field name="productStoreId" type="id"><description>The store a channel message is of (its binding's), one of the
+            four deduplication keys</description></field>
+        <field name="contentHash" type="text-medium"><description>The hash of a channel message's canonical content: the
+            same external ID with the same hash is a replay, with another a conflict</description></field>
+        <field name="duplicateOfMessageId" type="id"><description>For a replay (Consumed) or a quarantined conflict
+            (Rejected), the original message</description></field>
+        <relationship type="one-nofk" related="mantle.product.store.ProductStore" short-alias="channelStore"/>
+        <relationship type="one-nofk" title="DuplicateOf" related="moqui.service.message.SystemMessage" short-alias="duplicateOf">
+            <key-map field-name="duplicateOfMessageId" related="systemMessageId"/></relationship>
+        <index name="SYS_MSG_CHANNEL"><index-field name="productStoreId"/><index-field name="systemMessageRemoteId"/>
+            <index-field name="docType"/><index-field name="messageId"/></index>
+    </extend-entity>
+</entities>

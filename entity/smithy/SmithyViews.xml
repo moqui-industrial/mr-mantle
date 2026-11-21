@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <view-entity entity-name="SmithyIssueTask" package="mantle.smithy">
+        <description>An issue with what its lists filter and sort by: its task's name, status, resolution and visibility,
+            its topic's activity and count, and the visibility of its first post (a held one is its author's and the
+            moderators').</description>
+        <member-entity entity-alias="I" entity-name="mantle.smithy.SmithyIssue"/>
+        <member-entity entity-alias="W" entity-name="mantle.work.effort.WorkEffort" join-from-alias="I">
+            <key-map field-name="workEffortId"/></member-entity>
+        <member-entity entity-alias="T" entity-name="mantle.forum.ForumTopic" join-from-alias="I">
+            <key-map field-name="rootCommEventId"/></member-entity>
+        <member-entity entity-alias="P" entity-name="mantle.forum.ForumPostState" join-from-alias="I">
+            <key-map field-name="rootCommEventId" related="communicationEventId"/></member-entity>
+        <alias-all entity-alias="I"/>
+        <alias entity-alias="W" name="workEffortName"/>
+        <alias entity-alias="W" name="statusId"/>
+        <alias entity-alias="W" name="resolutionEnumId"/>
+        <alias entity-alias="W" name="visibilityEnumId"/>
+        <alias entity-alias="W" name="rootWorkEffortId"/>
+        <alias entity-alias="T" name="lastActivity"/>
+        <alias entity-alias="T" name="visiblePostCount"/>
+        <alias entity-alias="P" name="rootVisibility" field="visibility"/>
+    </view-entity>
+
+    <view-entity entity-name="SmithyReleaseTag" package="mantle.smithy">
+        <description>A tag of a repository and the work effort it is linked to (WorkEffortGitRef), with what a list of
+            releases filters and sorts by: Smithy's releases are Mantle's releases (WetRelease) by their tags.</description>
+        <member-entity entity-alias="R" entity-name="mantle.work.effort.WorkEffortGitRef"/>
+        <member-entity entity-alias="W" entity-name="mantle.work.effort.WorkEffort" join-from-alias="R">
+            <key-map field-name="workEffortId"/></member-entity>
+        <alias-all entity-alias="R"/>
+        <alias entity-alias="W" name="workEffortTypeEnumId"/>
+        <alias entity-alias="W" name="statusId"/>
+        <alias entity-alias="W" name="workEffortName"/>
+        <alias entity-alias="W" name="actualStartDate"/>
+        <alias entity-alias="W" name="actualCompletionDate"/>
+    </view-entity>
+</entities>

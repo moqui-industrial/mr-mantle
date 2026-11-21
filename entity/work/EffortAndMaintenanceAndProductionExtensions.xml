@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+<!-- Maintenance parts and stock (IronStone Maintenance design §3 PlannedParts and PartsUsed, MT-08, MT-09; impl-maintenance P9,
+    F30, F32). A planned part is a WorkEffortProduct row (WeptConsume) of the work order's root or step, its key (work effort,
+    product, from date) the line's identity; a change ends the row and starts the next (no maintenance material record,
+    impl-maintenance §4). An issue is a new AssetIssuance to the root or step each time, carrying the cost centre and the project
+    the work is charged to; a return is a new AssetReceipt naming its issuance (sourceAssetIssuanceId) at the returned asset's
+    acquireCost. Accounting's AC-24 (design-accounting PostingDefaults "Maintenance expense routing"): an issuance to a managed
+    maintenance work order or its step posts to the expense account of the MaintenanceCostPolicy in effect for the work's
+    organization, kind and facility, never to the same-owner WIP account, and its return's credit goes back the same way. -->
+    <extend-entity entity-name="WorkEffortProduct" package="mantle.work.effort">
+        <field name="quantityUomId" type="id"><description>The unit of estimatedQuantity; the product's stock unit when
+            empty (impl-maintenance F30)</description></field>
+        <field name="requiredDate" type="date-time"><description>When the part is needed</description></field>
+        <field name="sourceFacilityId" type="id"><description>The facility the part is to be issued from</description></field>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId" related="uomId"/></relationship>
+        <relationship type="one" title="Source" related="mantle.facility.Facility" short-alias="sourceFacility">
+            <key-map field-name="sourceFacilityId" related="facilityId"/></relationship>
+    </extend-entity>
+
+    <!-- The run a split, backorder or clone came from (ProductionSourceOrigin: PsoSplit, PsoBackorder, PsoClone). -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionSourceRunId" type="id" enable-audit-log="true"/>
+        <field name="productionSourceEnumId" type="id" enable-audit-log="true"/>
+        <relationship type="one-nofk" title="ProductionSource" related="mantle.work.effort.WorkEffort"
+                short-alias="productionSourceRun">
+            <key-map field-name="productionSourceRunId" related="workEffortId"/></relationship>
+    </extend-entity>
+
+    <!-- The run's cost close (post#CostClose): when it posted, its transaction (none when nothing was left to post), the
+        policy row it applied and its operation; close (transition#ProductionOrder) is refused until it is set. -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionCostClosedDate" type="date-time" enable-audit-log="true"/>
+        <field name="productionCostCloseTransId" type="id" enable-audit-log="true"/>
+        <field name="productionAllocationPolicyId" type="id" enable-audit-log="true"/>
+    </extend-entity>
+
+<!-- Manufacturing's cost evidence (design-manufacturing §12 M8 and ProductionCosts, crosscut CX-COST; impl-manufacturing P6):
+    the cost events of a production run, written only by mantle.work.ProductionServices.record#ProductionCostEvent inside the
+    transaction of the fact that causes each, the allocations Accounting's cost close makes of them (P15), and the run's
+    cost-review status. Evidence, not a second ledger: a material event references the AcctgTrans its stock movement's hook
+    posted, and posts nothing itself. -->
+    <!-- The run's cost review (review#ProductionCosts): its status (ProductionCostReview, empty until requested), when and by
+        whom it was requested, at which revision of the run, the proposed accounting date and the note, audit-logged. -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionCostReviewStatusId" type="id" enable-audit-log="true"/>
+        <field name="productionCostReviewDate" type="date-time" enable-audit-log="true"/>
+        <field name="productionCostReviewByUserId" type="id" enable-audit-log="true"/>
+        <field name="productionCostReviewRevision" type="number-integer" enable-audit-log="true"/>
+        <field name="productionCostAccountingDate" type="date" enable-audit-log="true"/>
+        <field name="productionCostReviewNote" type="text-medium" enable-audit-log="true"/>
+        <relationship type="one" title="ProductionCostReview" related="moqui.basic.StatusItem"
+                short-alias="productionCostReviewStatus">
+            <key-map field-name="productionCostReviewStatusId" related="statusId"/></relationship>
+    </extend-entity>
+
+<!-- Manufacturing's production runs, their lines and the production stock fields (design-manufacturing §12 M2 and M4,
+    crosscut CX-PRODUCTION; built by impl-warehouse P16), and Purchasing's service acceptance (design-purchasing
+    PUR-RECEIPT). Under the shared effective-date rule a run keeps its own lines, written at create and frozen at release,
+    in place of snapshot records: they are records of their own because issuances and receipts reference them. -->
+    <!-- The run's own fields (M4), audit-logged: the revision counter, the method date its lines were read as of, its
+        release time, the BOM and routing it was made from, the frozen standard cost (Products' effective-dated estimate,
+        stamped at release) and its demand links. An operation child of a released run carries the routing operation it
+        was made from, its sequence and work center. -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionRevision" type="number-integer" enable-audit-log="true"/>
+        <field name="productionMethodDate" type="date-time" enable-audit-log="true"/>
+        <field name="productionReleaseDate" type="date-time" enable-audit-log="true"/>
+        <field name="productBomId" type="id" enable-audit-log="true"/>
+        <field name="productionRoutingId" type="id" enable-audit-log="true"/>
+        <field name="productionMethodRefs" type="text-long" enable-audit-log="true"><description>The BOMs (the run's and its
+            phantoms') and routings (the phantoms' first) the lines were read from, as JSON {bomIds, routingIds}.</description>
+        </field>
+        <field name="productStandardCostId" type="id" enable-audit-log="true"/>
+        <field name="demandOrderId" type="id" enable-audit-log="true"/>
+        <field name="demandOrderItemSeqId" type="id" enable-audit-log="true"/>
+        <field name="demandRequirementId" type="id" enable-audit-log="true"/>
+        <field name="routingOperationWorkEffortId" type="id" enable-audit-log="true"/>
+        <field name="operationSequenceNum" type="number-integer" enable-audit-log="true"/>
+        <field name="workCenterFacilityId" type="id" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.bom.ProductBom" short-alias="productBom"/>
+        <relationship type="one" related="mantle.product.cost.ProductStandardCost" short-alias="productStandardCost"/>
+        <relationship type="one" title="RoutingOperation" related="mantle.work.effort.WorkEffort"
+                short-alias="routingOperation">
+            <key-map field-name="routingOperationWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" title="WorkCenter" related="mantle.facility.Facility" short-alias="workCenterFacility">
+            <key-map field-name="workCenterFacilityId" related="facilityId"/></relationship>
+    </extend-entity>
+
+<!-- The lifecycle of Manufacturing's production runs (design-manufacturing WorkOrderDetail, §12 M2 and M4; impl-manufacturing
+    P5a; ProductionOrders.js): the staged release a supervisor approves, and the short lines a staged release leaves blocked.
+    A file of its own so it merges apart from entity/work/ProductionEntities.xml. -->
+    <!-- A supervisor's approval of a staged release (transition#ProductionOrder approveStaged): the run's revision it was
+        given at, who gave it and when. It holds while the run stays at that revision; any change of the draft asks for it
+        again. -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionStagedRevision" type="number-integer" enable-audit-log="true"/>
+        <field name="productionStagedByUserId" type="id" enable-audit-log="true"/>
+        <field name="productionStagedDate" type="date-time" enable-audit-log="true"/>
+    </extend-entity>
+
+    <!-- when a run's gates were written (its release under P8): a run with this date reads its gates only, so a template
+        published after the release adds no gate to it -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionGatesDate" type="date-time"/>
+    </extend-entity>
+
+<!-- The production schedule (design-manufacturing ProductionSchedule, Operations' Reschedule, §12 M5 and M10;
+    impl-manufacturing P12; ProductionSchedule.js): an operation's schedule revision, and each schedule change an operation
+    went through or was asked for (a move, an unschedule, a supervisor's override request and its decision). A file of its
+    own so it merges apart from entity/work/ProductionEntities.xml. -->
+    <!-- An operation child's schedule revision: schedule#ProductionOperation takes it as the expected revision and adds one with
+        each change of the operation's work center or dates. -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="scheduleRevision" type="number-integer" enable-audit-log="true"/>
+    </extend-entity>
+
+<!-- The shop floor's own records (design-manufacturing §4 OperationExecution and Instructions, §12 M7; impl-manufacturing
+    P10): a machine's runtime on an operation, recorded apart from a person's time, and an operator's acknowledgment of an
+    instruction step or the evidence recorded for one; and the supervisor's override of an operation's start checks. A
+    person's time stays the Projects TimeEntry (TimesheetServices' timers); the labor and machine cost events are
+    ProductionCostEvent rows written by record#ProductionCostEvent. -->
+    <!-- An operation's start override (override#ProductionOperationStart, design §13's skill and acknowledgment decision):
+        a supervisor's reason that lets the operation start without the required skills or acknowledgment, audit-logged;
+        and what its completion reported (complete#ProductionOperation): the good and the lost quantity of the operation,
+        whether or not it is the one that receives the output. -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionGoodQuantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="productionLossQuantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="productionStartOverride" type="text-medium" enable-audit-log="true"/>
+        <field name="productionStartOverrideChecks" type="text-short" enable-audit-log="true"><description>The checks the
+            override lets pass: SKILL_MISSING, and ACKNOWLEDGMENT_REQUIRED when the supervisor also waived the
+            acknowledgment</description></field>
+        <field name="productionStartOverrideByUserId" type="id" enable-audit-log="true"/>
+        <field name="productionStartOverrideDate" type="date-time" enable-audit-log="true"/>
+    </extend-entity>
+
+    <!-- the plan a work order executes (P14's generation sets it): its completion is what advances the plan's due projection -->
+    <extend-entity entity-name="MaintenanceWorkOrder" package="mantle.work.maintenance">
+        <field name="maintenanceScheduleId" type="id"><description>The preventive plan this work executes (impl-maintenance
+            P13): its completion (complete or closed, never cancelled) counts for the plan</description></field>
+        <relationship type="one-nofk" related="mantle.work.maintenance.MaintenanceSchedule" short-alias="schedule"/>
+        <index name="MNT_WO_SCHEDULE"><index-field name="maintenanceScheduleId"/></index>
+    </extend-entity>
+
+    <!-- P14 (design §9 MaintenanceSettings "due job/lead defaults"): the days ahead a plan's work is made when its terms name none -->
+    <extend-entity entity-name="MaintenancePolicy" package="mantle.work.maintenance">
+        <field name="pmLeadDays" type="number-integer"><description>The days before a due date its preventive work is made, for a
+            plan whose terms name none (zero when empty: on the day)</description></field>
+    </extend-entity>
+
+    <!-- A line a controlled change added: a substitute (substituteOfLineId, the material line it stands in for) or an
+        amendment's new line; productionChangeId names the change. -->
+    <extend-entity entity-name="ProductionRunLine" package="mantle.work.production">
+        <field name="substituteOfLineId" type="id" enable-audit-log="true"/>
+        <field name="productionChangeId" type="id" enable-audit-log="true"/>
+        <relationship type="one-nofk" title="SubstituteOf" related="mantle.work.production.ProductionRunLine"
+                short-alias="substituteOf">
+            <key-map field-name="substituteOfLineId" related="productionRunLineId"/></relationship>
+    </extend-entity>
+
+    <!-- What a cost close posted of an allocation (P6's record): the cost component and account, the accounting day, and
+        whether it was an adjustment after the run's close (R-SA-11). An allocation with no event is the overhead the close
+        applied on an event's hours (its productionCostEventId), or the residual of an output line; destination says where
+        it went (WIP absorption, an output line's share, variance). -->
+    <extend-entity entity-name="ProductionCostAllocation" package="mantle.work.production">
+        <field name="organizationPartyId" type="id"/>
+        <field name="costComponentEnumId" type="id"/>
+        <field name="glAccountId" type="id"/>
+        <field name="accountingDate" type="date"/>
+        <field name="adjustment" type="text-indicator"/>
+        <field name="basisQuantity" type="number-decimal"/>
+        <field name="basisRate" type="currency-precise"/>
+        <field name="sharePercent" type="number-decimal"/>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" title="ProductionCostComponent" related="moqui.basic.Enumeration" short-alias="component">
+            <key-map field-name="costComponentEnumId"/></relationship>
+        <relationship type="one" related="mantle.ledger.account.GlAccount" short-alias="glAccount"/>
+        <relationship type="one" related="mantle.work.production.ProductionAllocationPolicy" short-alias="policy"/>
+    </extend-entity>
+
+<!-- The materials of Manufacturing's production runs (design-manufacturing Components, §12 M4; impl-manufacturing P5b;
+    ProductionMaterials.js): a material line a planner adds to a draft by hand, beside the lines its method gave it. A file
+    of its own so it merges apart from entity/work/ProductionEntities.xml. -->
+    <!-- A manual material line (store#ProductionMaterial): Y when a planner added it to the draft, so a re-explosion of the
+        method keeps it; the facility its stock is staged from; the planner's instruction. -->
+    <extend-entity entity-name="ProductionRunLine" package="mantle.work.production">
+        <field name="manualLine" type="text-indicator" enable-audit-log="true"/>
+        <field name="sourceFacilityId" type="id" enable-audit-log="true"/>
+        <field name="instructionText" type="text-medium" enable-audit-log="true"/>
+    </extend-entity>
+
+    <!-- A material line released short under a staged release: what was short at release. Its issue stays blocked
+        (LINE_STAGED_SHORT) until the stock the run nets against covers what the line has left; the first issue after that
+        clears it. -->
+    <extend-entity entity-name="ProductionRunLine" package="mantle.work.production">
+        <field name="stagedShortQuantity" type="number-decimal" enable-audit-log="true"/>
+    </extend-entity>
+
+    <!-- A supervisor's approval of output beyond an output line's target and the policy's overproduction tolerance
+        (approve#ProductionException): how much more may be received, who approved it and when, audit-logged. -->
+    <extend-entity entity-name="ProductionRunLine" package="mantle.work.production">
+        <field name="overApprovedQuantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="overApprovedByUserId" type="id" enable-audit-log="true"/>
+        <field name="overApprovedDate" type="date-time" enable-audit-log="true"/>
+    </extend-entity>
+</entities>

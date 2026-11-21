@@ -23,7 +23,7 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.Enumeration enumId="WktpProductionRework" description="Production rework" enumTypeId="WorkType"/>
 
     <!-- the costing rate of production time is the one labor costing purpose, RaprCost (People P10, impl-people §4: seeded with
-        RateAmount in entity/HumanResourcesEntities.xml): a RateAmount by emplPositionClassId and workTypeEnumId values an
+        RateAmount in entity/humanres/PositionAndRateEntities.xml): a RateAmount by emplPositionClassId and workTypeEnumId values an
         approved entry's labor cost event (mantle.humanres.RateServices.get#CostingRate), never the person's own vendor rate
         (design ProductionTime, review Y2). The production costing purpose of before (RaprProductionCost) is moved to it on a
         load, its rows and then the value (migrate#ProductionCostRates: nothing to do once done, or on a new database). -->

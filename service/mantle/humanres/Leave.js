@@ -6,7 +6,7 @@
 // Team absence projected calendar; design §7 LeaveRequests and LeaveRequestDetail, §13 TeamCalendar, PE-21, PE-24). Every service
 // checks the caller's People scope first (People.js scopeOf) and reads and writes with authorization off after it.
 //
-// The records (PeopleLeaveEntities.xml):
+// The records (entity/humanres/LeaveEntities.xml):
 // - a policy (LeavePolicy) is an employer's dated rules for one leave type (the HR vocabulary PeopleLeaveType): its unit (days or
 //   hours), paid meaning, allocation requirement, negative limit, evidence and accrual frequency; its accrual steps
 //   (LeaveAccrualRule) are dated: by months of service, an amount a period, a cap, a carry-over limit at a year's end and a

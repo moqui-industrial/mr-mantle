@@ -79,7 +79,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="organizationPartyId" from="isFromPartyOrgInternal ? invoice.fromPartyId : invoice.toPartyId"/>
             </else></if>
             <set field="isPayableInvoice" from="organizationPartyId == invoice.toPartyId"/>
-            <!-- statusFlowId used in StatusChangeSection, see seed data in AccountingAccountEntities.xml -->
+            <!-- statusFlowId used in StatusChangeSection, see entity/account/InvoiceEntities.xml -->
             <set field="statusFlowId" from="isPayableInvoice ? 'InvoicePayable' : 'InvoiceReceivable'"/>
             <!-- check the statusFlowId to make sure it has transitions, for backward compatibility from before these had seed data! -->
             <entity-find-count entity-name="moqui.basic.StatusFlowTransition" count-field="statusFlowTransCount" cache="true">

@@ -13,7 +13,7 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <!-- Order changes (CS-ORDER-CHANGE, CX-ORDER-CHANGE; design-customer-service §4 OrderChanges and OrderChangeDetail, D9, D7;
-    impl-customer-service §4, P10; OrderChanges.js, SupportOrderChangeEntities.xml). A proposal is its RqtOrderChange Request with
+    impl-customer-service §4, P10; OrderChanges.js, entity/request/RequestAndRequirementAndSupportExtensions.xml). A proposal is its RqtOrderChange Request with
     RequestItem lines linked to the order's lines (RequestItemOrder); its revision is the time of the last change to its
     audit-logged key fields, and it binds the order's revision (expectedOrderRevision, the commercial revision under
     PartyAcctgPreference.salesCommercialRevisionOnly). Two kinds are applied by Customer Service: cancel (the open remainder of a

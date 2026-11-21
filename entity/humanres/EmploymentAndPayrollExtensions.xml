@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <extend-entity entity-name="EmploymentApplication" package="mantle.humanres.employment">
+        <field name="jobOpeningId" type="id"><description>The opening applied to (impl-people P16)</description></field>
+        <field name="organizationPartyId" type="id"><description>The opening's employer</description></field>
+        <field name="contactAllowed" type="text-indicator"><description>Y: the applicant agreed to be contacted about other
+            openings</description></field>
+        <field name="emailMessageId" type="id"><description>The message an application by mail was made from, once</description></field>
+        <field name="duplicateOfApplicationId" type="id"><description>Another application of the same person to the same
+            employer, open when this one was made: flagged for review, never merged</description></field>
+        <field name="comments" type="text-medium"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="sourceKey" type="text-medium"><description>The chat message an application was made from (chat:room:seq),
+            once (create#ApplicationFromChat)</description></field>
+        <relationship type="one-nofk" related="mantle.humanres.recruitment.JobOpening" short-alias="opening"/>
+        <index name="EMPL_APP_OPENING"><index-field name="jobOpeningId"/><index-field name="statusId"/></index>
+        <index name="EMPL_APP_EMAIL"><index-field name="emailMessageId"/></index>
+        <index name="EMPL_APP_PARTY"><index-field name="applyingPartyId"/></index>
+        <index name="EMPL_APP_SOURCE"><index-field name="sourceKey"/></index>
+    </extend-entity>
+
+    <extend-entity entity-name="PayrollGroup" package="mantle.humanres.payroll">
+        <field name="externalProcessing" type="text-indicator" enable-audit-log="update"><description>Y: the group's pay is
+            calculated by an external processor (impl-people P28): its approved inputs are exported, its results imported through
+            the payroll exchange; its runs are never calculated natively, and it may be live with no localization once Accounting's
+            payroll-origin projection is in place</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="PayrollRun" package="mantle.humanres.payroll">
+        <field name="exchangeBatchId" type="id"><description>The payroll exchange whose external results the run carries: its
+            employments are never calculated here, and its approval binds the results as imported</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="PayrollRun" package="mantle.humanres.payroll">
+        <field name="finalizedDate" type="date-time"/>
+        <field name="finalizedByUserId" type="id"/>
+        <field name="finalizeMessage" type="text-long"><description>Why a finalization is still pending (a unit or a payee bucket
+            that failed), cleared once it completes</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="PayrollRunEmployment" package="mantle.humanres.payroll">
+        <field name="finalizedDate" type="date-time"/>
+    </extend-entity>
+
+    <extend-entity entity-name="PayrollGroup" package="mantle.humanres.payroll">
+        <field name="localizationPayeePartyId" type="id" enable-audit-log="update"><description>The localization binding's payee: who
+            is paid the localization's employee and employer amounts (impl-people P27)</description></field>
+        <field name="localizationLiabilityGlAccountId" type="id" enable-audit-log="update"><description>Where the localization's
+            withheld and owed amounts are held until its payee is paid</description></field>
+        <field name="localizationExpenseGlAccountId" type="id" enable-audit-log="update"><description>The expense of the
+            localization's employer amounts</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="PayrollComponentTerm" package="mantle.humanres.payroll">
+        <field name="payeePartyId" type="id"><description>A deduction's or an employer contribution's payee (the People P27 review,
+            the user's call of Nov 13, 2026): a finalization makes the withheld and owed amounts of its final slips one draft invoice
+            from it a liability account (PayrollObligations.js payeeBuckets)</description></field>
+    </extend-entity>
+</entities>

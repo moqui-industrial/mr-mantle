@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+  <view-entity entity-name="ForumConversationMember" package="mantle.forum">
+    <member-entity entity-alias="P" entity-name="mantle.forum.ForumParticipant"/>
+    <member-entity entity-alias="T" entity-name="mantle.forum.ForumTopic" join-from-alias="P">
+      <key-map field-name="rootCommEventId"/>
+    </member-entity>
+    <alias entity-alias="P" name="rootCommEventId"/>
+    <alias entity-alias="P" name="partyId"/>
+    <alias entity-alias="P" name="role"/>
+    <alias entity-alias="P" name="endedAt"/>
+    <alias entity-alias="P" name="archivedAt"/>
+    <alias entity-alias="T" name="siteId"/>
+    <alias entity-alias="T" name="kind"/>
+    <alias entity-alias="T" name="lastActivity"/>
+    <alias entity-alias="T" name="visiblePostCount"/>
+  </view-entity>
+
+  <view-entity entity-name="ForumTaggedTopic" package="mantle.forum">
+    <member-entity entity-alias="TT" entity-name="mantle.forum.ForumTopicTag"/>
+    <member-entity entity-alias="T" entity-name="mantle.forum.ForumTopic" join-from-alias="TT">
+      <key-map field-name="rootCommEventId"/>
+    </member-entity>
+    <alias entity-alias="TT" name="tagId"/>
+    <alias-all entity-alias="T"/>
+  </view-entity>
+
+  <view-entity entity-name="InternalMailboxMember" package="mantle.forum">
+    <member-entity entity-alias="M" entity-name="mantle.marketing.contact.ContactListParty"/>
+    <member-entity entity-alias="U" entity-name="moqui.security.UserAccount" join-from-alias="M">
+      <key-map field-name="partyId"/>
+    </member-entity>
+    <member-entity entity-alias="G" entity-name="moqui.security.UserGroupMember" join-from-alias="U">
+      <key-map field-name="userId"/>
+    </member-entity>
+    <alias entity-alias="M" name="contactListId"/>
+    <alias entity-alias="M" name="partyId"/>
+    <alias entity-alias="M" name="statusId"/>
+    <alias entity-alias="M" name="fromDate"/>
+    <alias entity-alias="M" name="thruDate"/>
+    <alias entity-alias="U" name="disabled"/>
+    <alias entity-alias="U" name="terminateDate"/>
+    <alias entity-alias="G" name="userGroupId"/>
+    <alias entity-alias="G" name="groupFromDate" field="fromDate"/>
+    <alias entity-alias="G" name="groupThruDate" field="thruDate"/>
+    <entity-condition>
+      <econdition entity-alias="G" field-name="userGroupId" operator="not-equals" value="ALL_USERS"/>
+    </entity-condition>
+  </view-entity>
+
+  <view-entity entity-name="ForumPostSearch" package="mantle.forum">
+    <member-entity entity-alias="P" entity-name="mantle.forum.ForumPostState"/>
+    <member-entity entity-alias="E" entity-name="mantle.party.communication.CommunicationEvent" join-from-alias="P">
+      <key-map field-name="communicationEventId"/>
+    </member-entity>
+    <member-entity entity-alias="T" entity-name="mantle.forum.ForumTopic" join-from-alias="P">
+      <key-map field-name="rootCommEventId"/>
+    </member-entity>
+    <alias-all entity-alias="P"/>
+    <alias entity-alias="E" name="subject"/>
+    <alias entity-alias="E" name="body"/>
+    <alias entity-alias="E" name="entryDate"/>
+    <alias entity-alias="E" name="fromPartyId"/>
+    <alias entity-alias="E" name="parentCommEventId"/>
+    <alias entity-alias="E" name="contactListId"/>
+    <alias entity-alias="T" name="siteId"/>
+    <alias entity-alias="T" name="unlisted"/>
+    <alias entity-alias="T" name="kind"/>
+  </view-entity>
+
+  <view-entity entity-name="ForumReceiptState" package="mantle.forum">
+    <member-entity entity-alias="R" entity-name="mantle.party.communication.CommunicationEventParty"/>
+    <member-entity entity-alias="P" entity-name="mantle.forum.ForumPostState" join-from-alias="R">
+      <key-map field-name="communicationEventId"/>
+    </member-entity>
+    <alias entity-alias="R" name="partyId"/>
+    <alias entity-alias="R" name="readDate"/>
+    <alias entity-alias="R" name="roleTypeId"/>
+    <alias entity-alias="P" name="communicationEventId"/>
+    <alias entity-alias="P" name="rootCommEventId"/>
+    <alias entity-alias="P" name="ordinal"/>
+  </view-entity>
+
+  <view-entity entity-name="ForumInternalAccount" package="mantle.forum">
+    <member-entity entity-alias="U" entity-name="moqui.security.UserAccount"/>
+    <member-entity entity-alias="G" entity-name="moqui.security.UserGroupMember" join-from-alias="U">
+      <key-map field-name="userId"/>
+    </member-entity>
+    <alias entity-alias="U" name="partyId"/>
+    <alias entity-alias="U" name="disabled"/>
+    <alias entity-alias="U" name="terminateDate"/>
+    <alias entity-alias="G" name="fromDate"/>
+    <alias entity-alias="G" name="thruDate"/>
+    <entity-condition>
+      <econdition entity-alias="G" field-name="userGroupId" operator="not-equals" value="ALL_USERS"/>
+    </entity-condition>
+  </view-entity>
+
+  <view-entity entity-name="ForumMailboxReceipt" package="mantle.forum">
+    <member-entity entity-alias="R" entity-name="mantle.party.communication.CommunicationEventParty"/>
+    <member-entity entity-alias="E" entity-name="mantle.party.communication.CommunicationEvent" join-from-alias="R">
+      <key-map field-name="communicationEventId"/>
+    </member-entity>
+    <member-entity entity-alias="L" entity-name="mantle.marketing.contact.ContactList" join-from-alias="E">
+      <key-map field-name="contactListId"/>
+    </member-entity>
+    <alias entity-alias="R" name="partyId"/>
+    <alias entity-alias="E" name="communicationEventId"/>
+    <alias entity-alias="E" name="rootCommEventId"/>
+    <!-- the list's type and owner, which the organization filters of ContactList read (MANTLE_USER_ORG_CLST,
+        impl-marketing P1): a view without them is refused under an app root's grant -->
+    <alias entity-alias="L" name="contactListTypeEnumId"/>
+    <alias entity-alias="L" name="listOwnerPartyId" field="ownerPartyId"/>
+    <entity-condition>
+      <econdition entity-alias="L" field-name="contactListTypeEnumId" value="MAILBOX"/>
+    </entity-condition>
+  </view-entity>
+</entities>

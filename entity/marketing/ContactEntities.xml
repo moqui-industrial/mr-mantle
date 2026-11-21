@@ -1,0 +1,418 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ===== end of Marketing P2 ===== -->
+    <!-- ===== Marketing P3: lists, consent and suppressions (impl-marketing P3, F6, F9, F43; design-marketing §4, §14.1) ===== -->
+    <!-- A list's subscription policy (design §4 ListDetail SubscriptionPolicy; F6): dated rows, the one in effect ended when the next
+        starts, never deleted (mantle.marketing.AudienceServices store#SubscriptionPolicy). The public offer is the list's offer to
+        subscribe from a published page (PASS Subscribe, P7), apart from the legacy isPublic flag; confirmation required asks a pending
+        request to be confirmed by the recipient (double opt-in) before it is accepted; the purpose is the consent purpose a membership
+        records; the evidence text is the wording the offer shows, which a request's evidence repeats. -->
+    <entity entity-name="ContactListPolicy" package="mantle.marketing.contact" cache="never">
+        <field name="contactListId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="publicOffer" type="text-indicator"><description>Y: offered for subscription on a published page (P7)</description></field>
+        <field name="confirmationRequired" type="text-indicator"><description>Y: a request waits for the recipient's confirmation;
+            empty is Y</description></field>
+        <field name="purposeEnumId" type="id"><description>PartyConsentPurpose; empty is the list's channel's (marketing email, or SMS
+            for a list of phone numbers)</description></field>
+        <field name="evidenceText" type="text-long"><description>The wording of the offer, repeated in each request's evidence</description></field>
+        <field name="confirmEmailTemplateId" type="id"><description>The confirmation message of a pending request (P7)</description></field>
+        <field name="noticeEmailTemplateId" type="id"><description>The notice of an accepted subscription</description></field>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" related="mantle.marketing.contact.ContactList"/>
+        <relationship type="one" title="PartyConsentPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId"/></relationship>
+        <relationship type="one" title="Confirm" related="moqui.basic.email.EmailTemplate">
+            <key-map field-name="confirmEmailTemplateId" related="emailTemplateId"/></relationship>
+        <relationship type="one" title="Notice" related="moqui.basic.email.EmailTemplate">
+            <key-map field-name="noticeEmailTemplateId" related="emailTemplateId"/></relationship>
+        <relationship type="one" title="ChangedBy" related="moqui.security.UserAccount">
+            <key-map field-name="changedByUserId" related="userId"/></relationship>
+    </entity>
+
+    <!-- A request to subscribe a party to a list (design §14.1 SubscriptionRequest; §4 AddMembers, the Sales bulk action): the one
+        evidenced path to membership (request#Subscriptions). Who asked, for whom, with what evidence (source, date, text, the record
+        it came from), and the outcome: pending until the recipient confirms (the membership CLPT_PENDING), accepted by the audited
+        evidence path (CLPT_ACCEPTED with a list consent grant), or refused by its reason (withdrawn, suppressed, no address). A request
+        never clears a withdrawal or a suppression. P7 adds the public request's site, token digest and request key. -->
+    <entity entity-name="SubscriptionRequest" package="mantle.marketing.contact" cache="never">
+        <field name="subscriptionRequestId" type="id" is-pk="true"/>
+        <field name="contactListId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="contactMechId" type="id"><description>The address the membership sends to</description></field>
+        <field name="organizationPartyId" type="id"><description>The list's organization when it was asked</description></field>
+        <field name="purposeEnumId" type="id"/>
+        <field name="requestKindEnumId" type="id"><description>SubscriptionRequestKind: staff, a Sales lead or account, an import,
+            the public page</description></field>
+        <field name="sourceEnumId" type="id"><description>PartyConsentSource of the evidence</description></field>
+        <field name="evidenceDate" type="date-time"><description>When the evidence was given (the form, the call, the event)</description></field>
+        <field name="evidenceText" type="text-long"/>
+        <field name="sourceRecordId" type="id"><description>The record the request was filed from (a lead, an account)</description></field>
+        <field name="statusEnumId" type="id"><description>SubscriptionRequestStatus: pending, accepted, refused</description></field>
+        <field name="reasonCode" type="text-short"><description>A refusal's reason (WITHDRAWN, CONSENT_WITHDRAWN, MISSING_DESTINATION,
+            RECORD_UNAVAILABLE), or the outcome of an existing membership (ALREADY_MEMBER)</description></field>
+        <field name="requestedDate" type="date-time"/>
+        <field name="requestedByUserId" type="id"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="partyConsentId" type="id"><description>The list consent an accepted request recorded</description></field>
+        <relationship type="one" related="mantle.marketing.contact.ContactList"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.contact.ContactMech"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="SubscriptionRequestKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="requestKindEnumId"/></relationship>
+        <relationship type="one" title="SubscriptionRequestStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId"/></relationship>
+        <relationship type="one" title="PartyConsentSource" related="moqui.basic.Enumeration" short-alias="source">
+            <key-map field-name="sourceEnumId"/></relationship>
+        <relationship type="one" title="RequestedBy" related="moqui.security.UserAccount">
+            <key-map field-name="requestedByUserId" related="userId"/></relationship>
+        <relationship type="one" related="mantle.party.PartyConsent"/>
+        <index name="SUBSCR_REQ_LIST_PARTY"><index-field name="contactListId"/><index-field name="partyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Subscription request kind" enumTypeId="SubscriptionRequestKind"/>
+            <moqui.basic.Enumeration enumId="SrkStaff" description="Staff" sequenceNum="1" enumTypeId="SubscriptionRequestKind"/>
+            <moqui.basic.Enumeration enumId="SrkSalesLead" description="Sales lead" sequenceNum="2" enumTypeId="SubscriptionRequestKind"/>
+            <moqui.basic.Enumeration enumId="SrkSalesAccount" description="Sales account" sequenceNum="3" enumTypeId="SubscriptionRequestKind"/>
+            <moqui.basic.Enumeration enumId="SrkImport" description="Import" sequenceNum="4" enumTypeId="SubscriptionRequestKind"/>
+            <moqui.basic.Enumeration enumId="SrkPublic" description="Public page" sequenceNum="5" enumTypeId="SubscriptionRequestKind"/>
+            <moqui.basic.EnumerationType description="Subscription request status" enumTypeId="SubscriptionRequestStatus"/>
+            <moqui.basic.Enumeration enumId="SrsPending" description="Pending confirmation" sequenceNum="1" enumTypeId="SubscriptionRequestStatus"/>
+            <moqui.basic.Enumeration enumId="SrsAccepted" description="Accepted" sequenceNum="2" enumTypeId="SubscriptionRequestStatus"/>
+            <moqui.basic.Enumeration enumId="SrsRefused" description="Refused" sequenceNum="3" enumTypeId="SubscriptionRequestStatus"/>
+        </seed-data>
+    </entity>
+
+    <!-- ===== end of Marketing P3 ===== -->
+    <!-- ===== Marketing P4: audience import and merge (impl-marketing P4; design-marketing §4 AudienceImport, AudienceMerge, §14.1,
+        §18) ===== -->
+    <!-- An import of a file of contacts into a Marketing list (design §14.1 "AudienceImport and item results";
+        mantle.marketing.AudienceServices preview#, apply#, get#AudienceImport, find#AudienceImportRuns): the staged file by
+        reference and hash (fileLocation, fileHash; never shown, never shell context), its column mapping, the evidence it was
+        classified with (source, date, text, or columns of the file giving them per row; accept with the evidence or request
+        confirmation), who staged and applied it, its state and counts, and an expiry after which the staged file is removed
+        (purge#AudienceImports) and the outcomes kept. A list supplies no evidence. importKey is the user's, the list's and the file's
+        hash, so the same file staged again before it is applied answers the same import. -->
+    <entity entity-name="AudienceImport" package="mantle.marketing.contact" cache="never">
+        <field name="audienceImportId" type="id" is-pk="true"/>
+        <field name="contactListId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The list's organization when it was staged</description></field>
+        <field name="importKey" type="text-medium"><description>A digest of the user, the list and the file's hash</description></field>
+        <field name="fileName" type="text-medium"/>
+        <field name="fileLocation" type="text-medium"><description>The staged file; emptied when it is purged</description></field>
+        <field name="fileHash" type="text-medium"><description>The sha256 of the staged file's text</description></field>
+        <field name="rowCount" type="number-integer"/>
+        <field name="mappingJson" type="text-very-long"><description>The column mapping (column name to contact field) and the
+            columns named for evidence</description></field>
+        <field name="sourceEnumId" type="id"><description>PartyConsentSource of the evidence; PcsImport by default</description></field>
+        <field name="evidenceDate" type="date-time"><description>When the evidence was given, for a row without its own date</description></field>
+        <field name="evidenceText" type="text-long"><description>What the people did or said, for a row without its own evidence</description></field>
+        <field name="evidenceColumn" type="text-medium"><description>The file's column giving a row's evidence</description></field>
+        <field name="evidenceDateColumn" type="text-medium"><description>The file's column giving a row's evidence date</description></field>
+        <field name="acceptEvidence" type="text-indicator"><description>Y: accepted with the evidence (MARKETING_CONSENT_EDIT); else
+            each request waits for the person's confirmation</description></field>
+        <field name="stateEnumId" type="id"><description>AudienceImportState: staged, applying, complete, partial, expired</description></field>
+        <field name="stagedDate" type="date-time"/>
+        <field name="stagedByUserId" type="id"/>
+        <field name="appliedDate" type="date-time"/>
+        <field name="appliedByUserId" type="id"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="expireDate" type="date-time"><description>After it the import is not applied and its staged file is purged</description></field>
+        <field name="purgedDate" type="date-time"/>
+        <field name="pendingCount" type="number-integer"/>
+        <field name="acceptedCount" type="number-integer"/>
+        <field name="existingCount" type="number-integer"/>
+        <field name="refusedCount" type="number-integer"/>
+        <field name="skippedCount" type="number-integer"/>
+        <field name="failedCount" type="number-integer"/>
+        <relationship type="one" related="mantle.marketing.contact.ContactList"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="PartyConsentSource" related="moqui.basic.Enumeration" short-alias="source">
+            <key-map field-name="sourceEnumId"/></relationship>
+        <relationship type="one" title="AudienceImportState" related="moqui.basic.Enumeration" short-alias="state">
+            <key-map field-name="stateEnumId"/></relationship>
+        <relationship type="one" title="StagedBy" related="moqui.security.UserAccount">
+            <key-map field-name="stagedByUserId" related="userId"/></relationship>
+        <relationship type="one" title="AppliedBy" related="moqui.security.UserAccount">
+            <key-map field-name="appliedByUserId" related="userId"/></relationship>
+        <index name="AUD_IMPORT_LIST"><index-field name="contactListId"/><index-field name="stagedDate"/></index>
+        <index name="AUD_IMPORT_KEY"><index-field name="importKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Audience import state" enumTypeId="AudienceImportState"/>
+            <moqui.basic.Enumeration enumId="AisStaged" description="Previewed" sequenceNum="1" enumTypeId="AudienceImportState"/>
+            <moqui.basic.Enumeration enumId="AisApplying" description="Applying" sequenceNum="2" enumTypeId="AudienceImportState"/>
+            <moqui.basic.Enumeration enumId="AisComplete" description="Complete" sequenceNum="3" enumTypeId="AudienceImportState"/>
+            <moqui.basic.Enumeration enumId="AisPartial" description="Complete with failures" sequenceNum="4" enumTypeId="AudienceImportState"/>
+            <moqui.basic.Enumeration enumId="AisExpired" description="Expired" sequenceNum="5" enumTypeId="AudienceImportState"/>
+            <!-- a list merge's requests (merge#Lists): the target list's membership filed from a source list's -->
+            <moqui.basic.Enumeration enumId="SrkMerge" description="List merge" sequenceNum="6" enumTypeId="SubscriptionRequestKind"/>
+        </seed-data>
+    </entity>
+
+    <!-- One row of an AudienceImport: its preview (the proposed action, the matched contact, the address masked, the exclusion the
+        preview found) and its outcome, applied once under its import and row identity through request#Subscriptions' filing
+        (file#SubscriptionRequest, whose SubscriptionRequest names the import and row as its source record): pending, accepted,
+        existing (already a member or pending), refused (WITHDRAWN, CONSENT_WITHDRAWN and the like, decided when applied), skipped (an
+        empty row, an address earlier in the file, a row the preview excluded) or failed (an error, retried by retry). Never the raw
+        address: the staged file holds it until it is purged. -->
+    <entity entity-name="AudienceImportItem" package="mantle.marketing.contact" cache="never">
+        <field name="audienceImportId" type="id" is-pk="true"/>
+        <field name="rowNumber" type="number-integer" is-pk="true"/>
+        <field name="proposedAction" type="text-short"><description>add (a new contact), match (an existing contact), skip or
+            exclude</description></field>
+        <field name="matchedPartyId" type="id"/>
+        <field name="matchReason" type="text-short"/>
+        <field name="addressMasked" type="text-medium"/>
+        <field name="contactName" type="text-medium"/>
+        <field name="exclusionCode" type="text-short"><description>Why the preview excludes it (INVALID_ADDRESS, MISSING_ADDRESS,
+            EVIDENCE_REQUIRED, EVIDENCE_DATE_REQUIRED, EVIDENCE_DATE_INVALID, DUPLICATE_IN_FILE, EMPTY_ROW) or a note it is applied with (SUPPRESSED,
+            ALREADY_MEMBER, WITHDRAWN)</description></field>
+        <field name="problemText" type="text-long"/>
+        <field name="outcome" type="text-short"><description>staged, pending, accepted, existing, refused, skipped or failed</description></field>
+        <field name="reasonCode" type="text-short"/>
+        <field name="partyId" type="id"/>
+        <field name="subscriptionRequestId" type="id"/>
+        <field name="attemptCount" type="number-integer"/>
+        <field name="appliedDate" type="date-time"/>
+        <relationship type="one" related="mantle.marketing.contact.AudienceImport"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" title="Matched" related="mantle.party.Party">
+            <key-map field-name="matchedPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.marketing.contact.SubscriptionRequest"/>
+    </entity>
+
+    <!-- One confirmation link of a public request (P7): made by each attempt of its verification message, its token in that
+        message only and its digest here; any of a request's links confirms it until the request expires. -->
+    <entity entity-name="SubscriptionRequestToken" package="mantle.marketing.contact" cache="never">
+        <field name="tokenId" type="id" is-pk="true"/>
+        <field name="tokenDigest" type="text-medium"/>
+        <field name="requestGroupId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" title="RequestGroup" related="mantle.marketing.contact.SubscriptionRequest">
+            <key-map field-name="requestGroupId" related="subscriptionRequestId"/></relationship>
+        <index name="SUBSCR_TOKEN_DIGEST" unique="true"><index-field name="tokenDigest"/></index>
+        <index name="SUBSCR_TOKEN_GROUP"><index-field name="requestGroupId"/></index>
+    </entity>
+
+    <!-- ===== end of Marketing P15 ===== -->
+    <!-- ========================================================= -->
+    <!-- mantle.marketing.contact -->
+    <!-- ========================================================= -->
+    <entity entity-name="ContactList" package="mantle.marketing.contact">
+        <field name="contactListId" type="id" is-pk="true"/>
+        <field name="contactListTypeEnumId" type="id"/>
+        <field name="contactMechTypeEnumId" type="id"/>
+        <field name="marketingCampaignId" type="id"/>
+        <field name="contactListName" type="text-medium"/>
+        <field name="description" type="text-medium"/>
+        <field name="comments" type="text-medium"/>
+        <field name="isPublic" type="text-indicator"/>
+        <field name="singleUse" type="text-indicator">
+            <description>Parties in the list should be contacted only once.</description>
+        </field>
+        <!-- the organization the list belongs to, its organization filter field (MANTLE_USER_ORG_CLST; impl-marketing P1), audited
+            on change: an unowned (_NA_ or empty) list that is not a mailbox is no organization's until an administrator adopts it
+            (mantle.marketing.CampaignServices apply#Adoption) -->
+        <field name="ownerPartyId" type="id" enable-audit-log="update"/>
+        <field name="verifyEmailFrom" type="text-medium"/>
+        <field name="verifyEmailScreen" type="text-medium"/>
+        <field name="verifyEmailSubject" type="text-long"/>
+        <field name="verifyEmailWebSiteId" type="id"/>
+        <field name="optOutScreen" type="text-medium"/>
+        <field name="postingEnumId" type="id"><description>Who may post to a mailbox: its members (empty is members), its
+            owners and moderators, or any user (a help mailbox, where a poster who is not a member sees only their own
+            threads)</description></field>
+        <field name="defaultDeliveryEnumId" type="id"><description>A new member's delivery of a mailbox's posts (empty
+            is the Inbox)</description></field>
+        <field name="archivedDate" type="date-time"><description>An archived list takes no posts or members</description></field>
+        <field name="linkValidDays" type="number-integer" enable-audit-log="update"><description>How many days a list link (an
+            unsubscribe token, ContactListToken) of a message of this list works; empty is 365 (SEC-PSS-44,
+            ListLinks.js)</description></field>
+        <!-- impl-marketing P3 (design-marketing §4 ListDetail): a single-use list is reserved atomically by the first released send,
+            which keeps it while any hand-off is accepted or uncertain; a cancellation before any hand-off releases it, and the send's
+            completion consumes it (mantle.marketing.AudienceServices reserve#SingleUseList, release#SingleUseList; the send is P9's) -->
+        <field name="reservedBySendId" type="id" enable-audit-log="update"><description>The send that holds a single-use list (a
+            CampaignSend id, P9)</description></field>
+        <field name="reservedDate" type="date-time"/>
+        <field name="consumedDate" type="date-time"><description>When the send that held a single-use list completed: it is used
+            and takes no other send</description></field>
+        <relationship type="one" related="mantle.marketing.campaign.MarketingCampaign"/>
+        <relationship type="one" title="ContactListType" related="moqui.basic.Enumeration">
+            <key-map field-name="contactListTypeEnumId"/></relationship>
+        <relationship type="one" title="ContactMechType" related="moqui.basic.Enumeration">
+            <key-map field-name="contactMechTypeEnumId"/></relationship>
+        <relationship type="one" title="Owner" related="mantle.party.Party">
+            <key-map field-name="ownerPartyId"/></relationship>
+        <relationship type="one" title="ContactListPosting" related="moqui.basic.Enumeration" short-alias="posting">
+            <key-map field-name="postingEnumId"/></relationship>
+        <relationship type="one" title="ContactListDelivery" related="moqui.basic.Enumeration" short-alias="defaultDelivery">
+            <key-map field-name="defaultDeliveryEnumId"/></relationship>
+        <seed-data>
+            <!-- Contact List Type -->
+            <moqui.basic.EnumerationType description="Contact List Type" enumTypeId="ContactListType"/>
+            <moqui.basic.Enumeration enumId="MARKETING" description="Marketing" enumTypeId="ContactListType"/>
+            <moqui.basic.Enumeration enumId="NEWSLETTER" description="Newsletter" enumTypeId="ContactListType"/>
+            <moqui.basic.Enumeration enumId="ANNOUNCEMENT" description="Announcement" enumTypeId="ContactListType"/>
+            <!-- a shared list or forum of internal messages: posts are CommunicationEvents with its contactListId -->
+            <moqui.basic.Enumeration enumId="MAILBOX" description="Mailbox" enumTypeId="ContactListType"/>
+
+            <!-- Contact List Posting -->
+            <moqui.basic.EnumerationType description="Contact List Posting" enumTypeId="ContactListPosting"/>
+            <moqui.basic.Enumeration enumId="ClpMembers" description="Members" sequenceNum="1" enumTypeId="ContactListPosting"/>
+            <moqui.basic.Enumeration enumId="ClpModerators" description="Owners and moderators" sequenceNum="2" enumTypeId="ContactListPosting"/>
+            <moqui.basic.Enumeration enumId="ClpAnyUser" description="Any user" sequenceNum="3" enumTypeId="ContactListPosting"/>
+
+            <!-- Contact List Delivery -->
+            <moqui.basic.EnumerationType description="Contact List Delivery" enumTypeId="ContactListDelivery"/>
+            <moqui.basic.Enumeration enumId="CldInbox" description="Inbox" sequenceNum="1" enumTypeId="ContactListDelivery"/>
+            <moqui.basic.Enumeration enumId="CldMailboxOnly" description="Mailbox only" sequenceNum="2" enumTypeId="ContactListDelivery"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ContactListEmail" package="mantle.marketing.contact">
+        <field name="contactListId" type="id" is-pk="true"/>
+        <field name="emailTypeEnumId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="emailTemplateId" type="id"/>
+        <field name="wikiPageCategoryId" type="id"/>
+        <relationship type="one" related="mantle.marketing.contact.ContactList"/>
+        <relationship type="one" title="ContactListEmailType" related="moqui.basic.Enumeration">
+            <key-map field-name="emailTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.basic.email.EmailTemplate"/>
+        <relationship type="one" related="moqui.resource.wiki.WikiPageCategory" short-alias="wikiPageCategory"/>
+        <relationship type="many" related="moqui.resource.wiki.WikiBlogCategory" short-alias="wikiBlogs"/>
+        <seed-data>
+            <!-- Contact List Email Type -->
+            <moqui.basic.EnumerationType description="Contact List Email Type" enumTypeId="ContactListEmailType"/>
+            <moqui.basic.Enumeration description="Subscribe Notification" enumId="CONT_SUB_NOT" enumTypeId="ContactListEmailType"/>
+            <moqui.basic.Enumeration description="Unsubscribe Verify" enumId="CONT_UNSUB_VER" enumTypeId="ContactListEmailType"/>
+            <moqui.basic.Enumeration description="Unsubscribe Notification" enumId="CONT_UNSUB_NOT" enumTypeId="ContactListEmailType"/>
+            <moqui.basic.Enumeration description="Outgoing Email" enumId="CONT_EMAIL_TEMPLATE" enumTypeId="ContactListEmailType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ContactListCommStatus" package="mantle.marketing.contact">
+        <field name="contactListId" type="id" is-pk="true"/>
+        <field name="communicationEventId" type="id" is-pk="true"/>
+        <field name="contactMechId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"/>
+        <field name="messageId" type="text-medium"/>
+        <field name="statusId" type="id"/>
+        <relationship type="one" related="mantle.marketing.contact.ContactList"/>
+        <relationship type="one" related="mantle.party.communication.CommunicationEvent"/>
+        <relationship type="one" related="mantle.party.contact.ContactMech"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="moqui.basic.StatusItem"/>
+        <index name="CNTLSTCST_MSG_ID" unique="true"><index-field name="messageId"/></index>
+    </entity>
+
+    <entity entity-name="ContactListParty" package="mantle.marketing.contact">
+        <field name="contactListId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="revision" type="number-integer"><description>Optimistic revision for public membership decisions; legacy rows begin at zero.</description></field>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="preferredContactMechId" type="id"/>
+        <field name="optInVerifyCode" type="text-short"/>
+        <field name="roleTypeId" type="id"><description>ListOwner or ListModerator; empty is a member</description></field>
+        <field name="deliveryEnumId" type="id"><description>How a mailbox's posts reach the member (ContactListDelivery);
+            empty is the list's default delivery</description></field>
+        <relationship type="one" related="mantle.marketing.contact.ContactList"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" title="ContactListParty" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="Preferred" related="mantle.party.contact.ContactMech">
+            <key-map field-name="preferredContactMechId"/></relationship>
+        <relationship type="one" related="mantle.party.RoleType" short-alias="role"/>
+        <relationship type="one" title="ContactListDelivery" related="moqui.basic.Enumeration" short-alias="delivery">
+            <key-map field-name="deliveryEnumId"/></relationship>
+        <seed-data>
+            <!-- Contact List Party Role (empty is a member) -->
+            <mantle.party.RoleType description="List Owner" roleTypeId="ListOwner"/>
+            <mantle.party.RoleType description="List Moderator" roleTypeId="ListModerator"/>
+
+            <!-- Contact List Party Status -->
+            <moqui.basic.StatusType description="Contact List Party" statusTypeId="ContactListParty"/>
+            <moqui.basic.StatusItem description="Pending Acceptance" sequenceNum="1" statusId="CLPT_PENDING" statusTypeId="ContactListParty"/>
+            <moqui.basic.StatusItem description="Accepted" sequenceNum="2" statusId="CLPT_ACCEPTED" statusTypeId="ContactListParty"/>
+            <moqui.basic.StatusItem description="Rejected" sequenceNum="3" statusId="CLPT_REJECTED" statusTypeId="ContactListParty"/>
+            <moqui.basic.StatusItem description="In Use" sequenceNum="4" statusId="CLPT_IN_USE" statusTypeId="ContactListParty"/>
+            <moqui.basic.StatusItem description="Invalid" sequenceNum="5" statusId="CLPT_INVALID" statusTypeId="ContactListParty"/>
+            <moqui.basic.StatusItem description="Unsubscribe Pending" sequenceNum="6" statusId="CLPT_UNSUBS_PENDING" statusTypeId="ContactListParty"/>
+            <moqui.basic.StatusItem description="Unsubscribed" sequenceNum="7" statusId="CLPT_UNSUBSCRIBED" statusTypeId="ContactListParty"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_PENDING" toStatusId="CLPT_ACCEPTED" transitionName="Accept"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_PENDING" toStatusId="CLPT_REJECTED" transitionName="Reject"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_ACCEPTED" toStatusId="CLPT_REJECTED" transitionName="Reject"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_REJECTED" toStatusId="CLPT_ACCEPTED" transitionName="Accept"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_REJECTED" toStatusId="CLPT_PENDING" transitionName="Pending Accept"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_ACCEPTED" toStatusId="CLPT_IN_USE" transitionName="Locked - In Use"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_ACCEPTED" toStatusId="CLPT_INVALID" transitionName="Invalid"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_ACCEPTED" toStatusId="CLPT_UNSUBS_PENDING" transitionName="Subscription Accepted - Unsubscription Pending"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_PENDING" toStatusId="CLPT_UNSUBS_PENDING" transitionName="Subscription Pending - Unsubscription Pending"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_IN_USE" toStatusId="CLPT_UNSUBS_PENDING" transitionName="Subscription In Use - Unsubscription Pending"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_INVALID" toStatusId="CLPT_UNSUBS_PENDING" transitionName="Subscription Invalid - Unsubscription Pending"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_ACCEPTED" toStatusId="CLPT_UNSUBSCRIBED" transitionName="Subscription Accepted - Unsubscribed"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_PENDING" toStatusId="CLPT_UNSUBSCRIBED" transitionName="Subscription Accepted - Unsubscribed"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_IN_USE" toStatusId="CLPT_UNSUBSCRIBED" transitionName="Subscription In Use - Unsubscribed"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_INVALID" toStatusId="CLPT_UNSUBSCRIBED" transitionName="Subscription Invalid - Unsubscribed"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_UNSUBS_PENDING" toStatusId="CLPT_UNSUBSCRIBED" transitionName="Confirm Unsubscribe"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_UNSUBS_PENDING" toStatusId="CLPT_ACCEPTED" transitionName="Cancel Unsubscribe"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_UNSUBSCRIBED" toStatusId="CLPT_ACCEPTED" transitionName="Subscribe Again"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CLPT_UNSUBSCRIBED" toStatusId="CLPT_PENDING" transitionName="Subscribe Again - Pending"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ContactListToken" package="mantle.marketing.contact" cache="never">
+        <description>The token of an unsubscribe link for a party on a contact list: the /u/&lt;token&gt; of the public
+            Unsubscribe page and of the List-Unsubscribe header's one-click POST (RFC 8058), usually one per message sent
+            (communicationEventId, messageId). The token is random (32 URL-safe characters, 192 bits) and is given only
+            when it is created; this keeps its hash (tokenHash), so reading the rows gives no working links. A token ends
+            at thruDate (revoked or expired; its list's linkValidDays, else 365 days, after it is made); usedDate is its last
+            use. A link unsubscribes; it subscribes the party again only to a list it unsubscribed itself, within a day of that
+            (unsubscribedListIds, unsubscribedDate; ListLinks.js, SEC-PSS-44). mantle.party.ConsentServices
+            create#UnsubscribeToken, resolve#UnsubscribeToken, apply#UnsubscribePreferences and
+            unsubscribe#ContactListParty.</description>
+        <field name="contactListTokenId" type="id" is-pk="true"/>
+        <field name="tokenHash" type="id-long"/>
+        <field name="contactListId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="contactMechId" type="id"><description>The address the message went to</description></field>
+        <field name="communicationEventId" type="id"/>
+        <field name="messageId" type="text-medium"/>
+        <field name="purposeEnumId" type="id"><description>PartyConsentPurpose: PcpMarketingEmail, or PcpSms for a list
+            of phone numbers</description></field>
+        <field name="createdDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="usedDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="unsubscribedListIds" type="text-long"><description>The lists this link unsubscribed the party from, which
+            it may subscribe again within a day of unsubscribedDate (comma separated)</description></field>
+        <field name="unsubscribedDate" type="date-time"><description>When this link last unsubscribed the party from a list</description></field>
+        <relationship type="one" related="mantle.marketing.contact.ContactList" short-alias="contactList"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="mantle.party.contact.ContactMech" short-alias="contactMech"/>
+        <relationship type="one" related="mantle.party.communication.CommunicationEvent" short-alias="communicationEvent"/>
+        <relationship type="one" title="PartyConsentPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId"/></relationship>
+        <index name="CNTLSTTKN_HASH" unique="true"><index-field name="tokenHash"/></index>
+        <index name="CNTLSTTKN_PARTY"><index-field name="partyId"/></index>
+    </entity>
+</entities>

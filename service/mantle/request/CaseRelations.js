@@ -1,5 +1,5 @@
 // Merge, split and closing of support cases (design-customer-service §3 MergeCases, SplitCase, CaseDetail's lineage, §9
-// StatusCategories, ServiceDefaults; impl-customer-service P8, CS-MERGE, CS-JOBS; SupportRelationEntities.xml). A case relation
+// StatusCategories, ServiceDefaults; impl-customer-service P8, CS-MERGE, CS-JOBS; entity/request/SupportEntities.xml). A case relation
 // is lineage: a merge (sources into the case kept), a split (a new case from some of a case's evidence) or a follow-up (a new
 // case for a reply that cannot reopen the case), with its items (the messages, files, records, work and clocks it referenced
 // or carried, each with its audience).

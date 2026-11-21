@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <extend-entity entity-name="PartyIdentification" package="mantle.party">
+        <field name="idValue" type="text-medium" encrypt="true" enable-audit-log="update"/>
+        <field name="issuedBy" type="text-medium" enable-audit-log="update"/>
+        <field name="expireDate" type="date" enable-audit-log="update"/>
+    </extend-entity>
+
+    <!-- ===== end of Marketing P11 ===== -->
+    <!-- ===== Marketing P12: surveys and form publication (impl-marketing P12; design-marketing §10 SurveyDistribution, §13
+        SubmitForm) ===== -->
+    <!-- A Marketing publication's own fields (Commons keeps FormPublication; mantle.marketing.MarketingFormServices store#Publication):
+        the list a respondent may choose to subscribe to beside the answers (a separate choice, filed through the audience's evidenced
+        request with its own confirmation, never inferred from an answer or a typed address). The campaign is the publication's
+        context record (contextEntityName MarketingCampaign) and its CampaignAssociation (CakForm). -->
+    <extend-entity entity-name="FormPublication" package="mantle.party">
+        <field name="subscriptionListId" type="id"/>
+        <relationship type="one-nofk" title="SubscriptionList" related="mantle.marketing.contact.ContactList">
+            <key-map field-name="subscriptionListId" related="contactListId"/></relationship>
+    </extend-entity>
+
+  <!-- ===== end of Marketing P6 ===== -->
+  <!-- ===== Marketing P9: the reviewer's resolution of an uncertain delivery (impl-marketing P9; design-marketing §5 RecipientDetail
+    ResolveDelivery): who decided it, when, and the evidence and reason given (resolve#Delivery). ===== -->
+  <extend-entity entity-name="MessageDelivery" package="mantle.party">
+    <field name="resolvedByUserId" type="id"/>
+    <field name="resolvedDate" type="date-time"/>
+    <field name="resolutionNote" type="text-long"><description>The reviewer's evidence and reason for the outcome recorded on an
+      uncertain delivery</description></field>
+  </extend-entity>
+
+  <!-- ===== end of Marketing P9 ===== -->
+<!-- Comms' text messages (mr-boss impl-marketing P22; design-marketing §12 SendingProfiles; service/mantle/party/MessageSms.js): a
+    sending profile's messaging number and its cost a segment. The channel, consent source, suppression reason and source of a text
+    and the Send SMS step are seed data/MessageSmsSeedData.xml (their types are defined by entity files that load after this one). -->
+  <extend-entity entity-name="MessageSendingProfile" package="mantle.party">
+    <field name="fromPhoneNumber" type="text-short" enable-audit-log="true"><description>An SMS profile's number (E.164): one of the
+      organization's messaging numbers (a current telecom number of the organization that is one of our numbers with a messaging
+      bridge, moqui.call.PhoneNumber)</description></field>
+    <field name="segmentCost" type="currency-precise"><description>An SMS profile's configured cost of one segment, for the estimate
+      shown before approval</description></field>
+    <field name="segmentCostUomId" type="id"/>
+  </extend-entity>
+
+<!-- Purchasing's supplier pages (design-purchasing §13; impl-purchasing P16): the PASS Supplier app's QuoteResponse and
+    OrderAcknowledgement over mantle.order.SupplierPortalServices (SupplierPortal.js). A capability names the revision of the
+    record it was issued for, so a purchase order's link of an earlier revision answers SupersededRevision. A supplier's
+    response from those pages is a claim for internal review: its draft and its receipt are SupplierPortalResponse rows,
+    and what it claims is written to the order through Mantle's own services (store#SupplierQuote and
+    store#SupplierQuoteItem, record#Acknowledgement), or kept as the order's content (a drop-ship delivery report). -->
+    <extend-entity entity-name="ExternalAccessCapability" package="mantle.party">
+        <!-- the record's revision the capability was issued for: a purchase order's orderRevision (send#PurchaseOrder); empty
+            for a link of no revision -->
+        <field name="recordRevision" type="number-integer"/>
+    </extend-entity>
+
+    <extend-entity entity-name="ExternalAccessContact" package="mantle.party">
+        <field name="administrator" type="text-indicator" enable-audit-log="true">
+            <description>Y: the contact is a customer administrator of the outside party on this app, and sees the
+                organization's cases, not only their own (the Support app; impl-customer-service P15). Set from the
+                invitation.</description></field>
+    </extend-entity>
+
+<!-- Purchase agreements (design-purchasing §7 Agreements and AgreementDetail; impl-purchasing P13, §2, §4, F10, F18, F36,
+    F57): the AgrPurchase type, the one Mantle Agreement status flow (AgmStDraft, AgmStActive, AgmStExpired, AgmStClosed,
+    AgmStCancelled; review X13, which Sales adopts), an item's value cap and release tolerance, effective-dated items and
+    terms, and the release allocation, a record of its own. Versions are the audit log: a purchase agreement's revision is
+    agreementRevision and its time, counted once by each change of its key fields (header dates, supplier and currency;
+    the items' product, quantity, unit, cap, tolerance, dates and price; the terms), each logged "true" so its first value
+    is in the log too (F57) and a print as of a time reads it back. The approval of a revision
+    (mantle.order.PurchaseServices.decide#PurchaseApproval with the agreement as source, on PurchaseOrderApproval) sets
+    approvedRevision and stores the agreement's PDF as AgreementContent (AcntApprovedVersion); a release needs the agreement
+    Active at its approved revision. Signers and other parties are AgreementParty rows (AgreementSigner). -->
+    <extend-entity entity-name="Agreement" package="mantle.party.agreement">
+        <!-- the key fields Mantle logged with "update" (its first value left out, F57) are logged on create as well -->
+        <field name="otherPartyId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="currencyUomId" type="id" enable-audit-log="true"/>
+        <field name="agreementRevision" type="number-integer" enable-audit-log="true">
+            <description>A purchase agreement's revision: 1 when created, counted once by each change of its key fields
+                (mantle.party.AgreementServices store#PurchaseAgreement and store#AgreementItem). An approval decision is bound
+                to it.</description></field>
+        <field name="revisionDate" type="date-time"><description>When the revision was counted.</description></field>
+        <field name="approvedRevision" type="number-integer" enable-audit-log="true">
+            <description>The revision whose approval completed; a release needs it to be the agreement's revision, so a
+                changed active agreement takes no release until its new revision is approved.</description></field>
+        <field name="approvedDate" type="date-time"/>
+    </extend-entity>
+
+    <extend-entity entity-name="AgreementItem" package="mantle.party.agreement">
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="amountCap" type="currency-amount" enable-audit-log="true">
+            <description>The value the item's releases may reach, in the agreement's currency (F10); empty is no value
+                cap.</description></field>
+        <field name="releaseTolerancePercent" type="number-decimal" enable-audit-log="true">
+            <description>How far over its quantity and value caps the item's releases may go, as a percent; empty is
+                none.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="AgreementTerm" package="mantle.party.agreement">
+        <!-- effective-dated terms, each key field logged with its first value -->
+        <field name="settlementTermId" type="id" enable-audit-log="true"/>
+        <field name="termTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="termText" type="text-long" enable-audit-log="true"/>
+        <field name="termNumber" type="number-decimal" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+    </extend-entity>
+
+<!-- Sales' customer agreements (IronStone Sales design §7 Agreements and AgreementDetail, §17 SAL-AGREEMENT; impl-sales P15, F19,
+    F20): the native Agreement of type AgrSales or AgrProduct, on the one status flow and audited fields Purchasing seeded
+    (entity/party/AgreementEntities.xml), with no table of Sales' own. A renewal is a dated successor linked through AgreementAssoc of the
+    type below (mantle.party.SalesAgreementServices.renew#SalesAgreement); AgreementParty keeps no dates, as no succession needs them.
+    The negotiated prices are ProductPrice rows naming the agreement, which the price resolver applies only while the agreement is
+    active and in its dates (mantle/product/PriceResolver.js agreementApplies). -->
+    <extend-entity entity-name="AgreementAssoc" package="mantle.party.agreement">
+        <seed-data>
+            <moqui.basic.Enumeration description="Renewal" enumId="AatRenewal" enumTypeId="AgreementAssocType"/>
+        </seed-data>
+    </extend-entity>
+</entities>

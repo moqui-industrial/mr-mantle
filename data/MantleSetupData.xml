@@ -939,7 +939,7 @@ along with this software (see the LICENSE.md file). If not, see
         hour, a bounded batch of the cases resolved longer ago than their organization's ServicePolicy autoCloseDays, each closed
         in its own transaction (CaseProfile.closedDate, the status kept ReqCompleted), a failing case logged by its id and the rest
         going on; a rerun changes nothing -->
-    <!-- a case's clock a merge ended (its figures kept; SupportRelationEntities.xml), and the events of a merge on both cases -->
+    <!-- a case's clock a merge ended (its figures kept; entity/request/SupportEntities.xml), and the events of a merge on both cases -->
     <moqui.basic.Enumeration enumId="SlsMerged" description="Merged into another case" sequenceNum="7" enumTypeId="CaseSlaState"/>
     <moqui.basic.Enumeration enumId="SetMerged" description="Merged into another case" sequenceNum="20" enumTypeId="CaseSlaEventType"/>
     <moqui.basic.Enumeration enumId="SetCarried" description="Carried from a merged case" sequenceNum="21" enumTypeId="CaseSlaEventType"/>

@@ -1,0 +1,346 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <extend-entity entity-name="ProductContent" package="mantle.product">
+        <field name="sourceProductContentId" type="id" enable-audit-log="true"/>
+        <field name="reviewedSourceRevision" type="text-long" enable-audit-log="true"/>
+        <field name="reviewedByUserId" type="id" enable-audit-log="true"/>
+        <field name="reviewedDate" type="date-time" enable-audit-log="true"/>
+    </extend-entity>
+
+    <extend-entity entity-name="ProductCatalogOperation" package="mantle.product">
+        <field name="state" type="text-short" enable-audit-log="true"/>
+        <field name="inputFingerprint" type="text-long" enable-audit-log="true"/>
+        <field name="outputContentLocation" type="text-medium" enable-audit-log="true"/>
+        <field name="printJobId" type="id" enable-audit-log="true"/>
+        <field name="lastError" type="text-long" enable-audit-log="true"/>
+    </extend-entity>
+
+    <extend-entity entity-name="ProductAssoc" package="mantle.product"><field name="quantityUomId" type="id" enable-audit-log="true"/></extend-entity>
+
+    <extend-entity entity-name="Product" package="mantle.product">
+        <field name="storageTypeEnumId" type="id" enable-audit-log="true"><description>How the product must be stored
+            (StorageType): it is put away only in locations of that storage type.</description></field>
+        <relationship type="one" title="StorageType" related="moqui.basic.Enumeration" short-alias="storageType">
+            <key-map field-name="storageTypeEnumId"/></relationship>
+    </extend-entity>
+
+    <extend-entity entity-name="ProductPrice" package="mantle.product">
+        <!-- the quote a supplier price was published from (publish#SupplierQuotePrice, R-PUR-21) -->
+        <field name="sourceOrderId" type="id" enable-audit-log="true"/>
+        <field name="sourceOrderItemSeqId" type="id" enable-audit-log="true"/>
+        <relationship type="one-nofk" title="Source" related="mantle.order.OrderHeader" short-alias="sourceOrder">
+            <key-map field-name="sourceOrderId" related="orderId"/></relationship>
+    </extend-entity>
+
+<!-- Store reviews (impl-commerce P9, F19, F41; design-commerce §4 Reviews, design-shop §5 PublicReviews and SubmitReview,
+    §14.2; COM-MERCH, SHOP-SUPPORT; service/mantle/product/StoreReviews.js). ProductReview gains its purchase proof (the
+    author's own order item), the author's public label and the store's reply with its author and time, the proof and the
+    reply audit-logged with the status; a moderation decision is a status change whose reason is in the audit log, with no
+    decision record (impl-commerce §4). A review's images are ProductReviewImage rows: a scanned PNG or JPEG kept under the
+    store's content root, served by its digest only while the review is approved. -->
+  <extend-entity entity-name="ProductReview" package="mantle.product">
+    <field name="orderId" type="id" enable-audit-log="true">
+      <description>The purchase proof: the author's own order (impl-commerce F19), found by Shop from the signed-in account's
+        own qualifying order item, never taken from the request.</description>
+    </field>
+    <field name="orderItemSeqId" type="id" enable-audit-log="true"/>
+    <field name="displayName" type="text-medium">
+      <description>The author's public label as they chose it at submission (a first name and initial, or none for "A
+        customer"); the public projection shows this and never the account, party or email.</description>
+    </field>
+    <field name="replyText" type="text-very-long" enable-audit-log="true">
+      <description>The store's public reply, plain text, shown under an approved review.</description>
+    </field>
+    <field name="replyUserId" type="id" enable-audit-log="true"/>
+    <field name="replyDate" type="date-time"/>
+    <relationship type="one" related="mantle.order.OrderHeader"/>
+    <relationship type="one" related="mantle.order.OrderItem">
+      <key-map field-name="orderId"/>
+      <key-map field-name="orderItemSeqId"/>
+    </relationship>
+    <relationship type="one" title="Reply" related="moqui.security.UserAccount">
+      <key-map field-name="replyUserId" related="userId"/>
+    </relationship>
+    <index name="PRODUCT_REVIEW_STORE">
+      <index-field name="productStoreId"/>
+      <index-field name="productId"/>
+      <index-field name="statusId"/>
+    </index>
+  </extend-entity>
+
+    <extend-entity entity-name="Asset" package="mantle.product.asset">
+        <field name="exchangeRate" type="text-short" enable-audit-log="update">
+            <description>The decimal rate of acquireCostUomId to exchangeRateToUomId the asset's first posting took (its
+                receipt's); every later posting of the asset's cost in that currency converts at it, so its inventory
+                account clears (impl-accounting F417).</description></field>
+        <field name="exchangeRateDate" type="date-time" enable-audit-log="update"/>
+        <field name="exchangeRateSource" type="text-medium" enable-audit-log="update"/>
+        <field name="exchangeRateToUomId" type="id" enable-audit-log="update"/>
+    </extend-entity>
+
+    <extend-entity entity-name="AssetBookEvent" package="mantle.product.asset">
+        <field name="fixedAssetClassId" type="id" enable-audit-log="true"/>
+        <field name="disposalTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="proceedsAmount" type="currency-amount" enable-audit-log="true"/>
+        <field name="gainLossAmount" type="currency-amount" enable-audit-log="true">
+            <description>A disposal's gain (positive) or loss (negative)</description></field>
+        <field name="buyerPartyId" type="id" enable-audit-log="true"/>
+        <field name="salesInvoiceId" type="id" enable-audit-log="true"/>
+        <field name="sourceInvoiceId" type="id" enable-audit-log="true"/>
+        <field name="sourceAssetReceiptId" type="id" enable-audit-log="true"/>
+        <field name="bookBeforeJson" type="text-very-long">
+            <description>The asset's book basis before the event, which its reversal restores</description></field>
+        <field name="bookAfterJson" type="text-very-long"/>
+        <relationship type="one" title="AssetBookEventType" related="moqui.basic.Enumeration" short-alias="eventType">
+            <key-map field-name="eventTypeEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.product.asset.FixedAssetClass">
+            <key-map field-name="fixedAssetClassId"/></relationship>
+        <relationship type="one" title="AssetDisposalType" related="moqui.basic.Enumeration">
+            <key-map field-name="disposalTypeEnumId"/></relationship>
+        <relationship type="one-nofk" title="ReversalOf" related="mantle.product.asset.AssetBookEvent">
+            <key-map field-name="reversalOfAssetBookEventId" related="assetBookEventId"/></relationship>
+        <index name="ASSET_BOOK_EVT_ASSET"><index-field name="assetId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType enumTypeId="AssetDisposalType" description="Asset disposal type"/>
+            <moqui.basic.Enumeration enumId="AdtScrap" enumTypeId="AssetDisposalType" description="Scrapped" sequenceNum="1"/>
+            <moqui.basic.Enumeration enumId="AdtSale" enumTypeId="AssetDisposalType" description="Sold" sequenceNum="2"/>
+        </seed-data>
+    </extend-entity>
+
+<!-- Counts with snapshots, review and guarded posting (design-warehouse §17 WH-COUNT; impl-warehouse P10): the fields a
+    count (PhysicalInventory) and its lines (PhysicalInventoryCount) need for mantle.product.InventoryCountServices, the
+    last count dates find#DueCounts reads, and the count schedule (CountSchedule), effective-dated rows of the warehouse
+    policy written by mantle.facility.WarehousePolicyServices.store#CountSchedule. A count of these services has a count
+    mode; PhysicalInventory rows without one are Mantle's immediate postings (record#PhysicalInventoryQuantity, scrap),
+    which the count services never list. -->
+    <extend-entity entity-name="PhysicalInventory" package="mantle.product.asset">
+        <field name="countModeEnumId" type="id"><description>Full, cycle or spot (CountMode): set on every count of
+            InventoryCountServices, never on an immediate posting.</description></field>
+        <field name="blindIndicator" type="text-indicator" enable-audit-log="true"><description>Y: counters get no
+            expected quantity or variance from the server; reviewers see them once the count is submitted.</description></field>
+        <field name="assigneePartyId" type="id" enable-audit-log="true"/>
+        <field name="plannedDate" type="date-time"/>
+        <field name="countSourceEnumId" type="id"><description>Why the count exists (CountSource): planned, the
+            schedule, Request a count, a short-pick recount.</description></field>
+        <field name="sourceReference" type="text-medium"><description>The record the request came from, such as the
+            shipment of a short pick.</description></field>
+        <field name="countScheduleId" type="id"/>
+        <field name="scopeLocationTypeEnumId" type="id"/>
+        <field name="scopeAreaId" type="id"/>
+        <field name="scopeLocationSeqId" type="id"/>
+        <field name="scopeProductId" type="id"/>
+        <field name="scopeProductCategoryId" type="id"/>
+        <field name="scopeLotId" type="id"/>
+        <field name="scopeAbcClassEnumId" type="id"/>
+        <field name="scopeVersion" type="number-integer"><description>Raised by each scope change while planning; frozen
+            when the count starts.</description></field>
+        <field name="startedDate" type="date-time"/>
+        <field name="startedByUserId" type="id"/>
+        <field name="submittedDate" type="date-time"/>
+        <field name="reviewedDate" type="date-time"/>
+        <field name="reviewedByUserId" type="id"/>
+        <field name="reviewVersion" type="number-integer"><description>Raised by each review, recount and resolution;
+            post#Count posts only the reviewed version it was shown.</description></field>
+        <field name="completedDate" type="date-time"/>
+        <relationship type="one" title="CountMode" related="moqui.basic.Enumeration" short-alias="countModeEnum">
+            <key-map field-name="countModeEnumId"/></relationship>
+        <relationship type="one" title="CountSource" related="moqui.basic.Enumeration" short-alias="countSourceEnum">
+            <key-map field-name="countSourceEnumId"/></relationship>
+        <relationship type="one" title="Assignee" related="mantle.party.Party" short-alias="assignee">
+            <key-map field-name="assigneePartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.facility.CountSchedule" short-alias="countSchedule"/>
+        <index name="PHYS_INV_COUNT_MODE"><index-field name="countModeEnumId"/><index-field name="statusId"/></index>
+        <index name="PHYS_INV_ASSIGNEE"><index-field name="assigneePartyId"/></index>
+    </extend-entity>
+
+    <extend-entity entity-name="PhysicalInventoryCount" package="mantle.product.asset">
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="assetId" type="id"><description>The exact stock counted; empty on a line for stock found that the
+            snapshot did not hold (extraIndicator).</description></field>
+        <field name="extraIndicator" type="text-indicator"/>
+        <field name="ownerPartyId" type="id"/>
+        <field name="assetPoolId" type="id"/>
+        <field name="assetStatusId" type="id"/>
+        <field name="containerId" type="id"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="snapshotQuantity" type="number-decimal"/>
+        <field name="snapshotDate" type="date-time"/>
+        <field name="countedByUserId" type="id"/>
+        <field name="skipReasonEnumId" type="id"/>
+        <field name="recountNumber" type="number-integer"/>
+        <field name="countTimeQuantity" type="number-decimal"><description>The asset's quantity at the time it was
+            counted (review#Count).</description></field>
+        <field name="interveningQuantity" type="number-decimal"><description>The asset's movements of other records since
+            the snapshot (review#Count).</description></field>
+        <field name="conflictText" type="text-medium"/>
+        <field name="approvedDelta" type="number-decimal" enable-audit-log="true"/>
+        <field name="varianceReasonEnumId" type="id"/>
+        <field name="reviewedByUserId" type="id"/>
+        <field name="reviewedDate" type="date-time"/>
+        <field name="postedDelta" type="number-decimal"/>
+        <field name="postedDate" type="date-time"/>
+        <field name="postAssetId" type="id"><description>The asset the variance posted to (a new one for stock
+            found).</description></field>
+        <field name="assetDetailId" type="id"/>
+        <field name="postReasonCode" type="text-short"/>
+        <field name="postMessage" type="text-medium"/>
+        <relationship type="one" title="PhysicalInventoryCount" related="moqui.basic.StatusItem" short-alias="status"
+                fk-name="PhysInvCountStatus"/>
+        <relationship type="one-nofk" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" title="CountSkipReason" related="moqui.basic.Enumeration" short-alias="skipReasonEnum">
+            <key-map field-name="skipReasonEnumId"/></relationship>
+        <relationship type="one" title="InventoryVarianceReason" related="moqui.basic.Enumeration"
+                short-alias="varianceReasonEnum">
+            <key-map field-name="varianceReasonEnumId"/></relationship>
+        <index name="PHYS_INV_CNT_INV"><index-field name="physicalInventoryId"/><index-field name="statusId"/></index>
+        <index name="PHYS_INV_CNT_ASSET"><index-field name="assetId"/></index>
+    </extend-entity>
+
+    <!-- WH-SCRAP (impl-warehouse P6): a PhysicalInventory scrap#Asset made, one per scrap operation (F5), which Counts,
+        CountVariance and the count record kind leave out -->
+    <extend-entity entity-name="PhysicalInventory" package="mantle.product.asset">
+        <field name="scrapIndicator" type="text-indicator"/>
+    </extend-entity>
+
+    <extend-entity entity-name="ProductCategoryContent" package="mantle.product.category">
+        <field name="sourceProductCategoryContentId" type="id" enable-audit-log="true"/>
+        <field name="reviewedSourceRevision" type="text-long" enable-audit-log="true"/>
+        <field name="reviewedByUserId" type="id" enable-audit-log="true"/>
+        <field name="reviewedDate" type="date-time" enable-audit-log="true"/>
+    </extend-entity>
+
+    <extend-entity entity-name="AssetIssuance" package="mantle.product.issuance">
+        <field name="costCenterId" type="id"><description>The cost centre the issue is charged to (a maintenance issue: its
+            work order's, impl-maintenance F30)</description></field>
+        <field name="projectWorkEffortId" type="id"><description>The project the issue is charged to (a maintenance issue: its
+            work order's)</description></field>
+        <relationship type="one-nofk" title="CostCenter" related="mantle.party.Party" short-alias="costCenter">
+            <key-map field-name="costCenterId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Project" related="mantle.work.effort.WorkEffort" short-alias="project">
+            <key-map field-name="projectWorkEffortId" related="workEffortId"/></relationship>
+    </extend-entity>
+
+    <!-- CX-PRODUCTION (impl-warehouse F7): the run line and operation of a production movement. The movement's workEffortId
+        is always the run (operation children never carry stock); a production output receipt with no approved standard
+        cost is costProvisional (its cost the issued cost to date over the quantity). -->
+    <extend-entity entity-name="AssetIssuance" package="mantle.product.issuance">
+        <field name="productionMaterialLineId" type="id"/>
+        <field name="operationWorkEffortId" type="id"/>
+        <relationship type="one" title="ProductionMaterial" related="mantle.work.production.ProductionRunLine"
+                short-alias="productionMaterialLine">
+            <key-map field-name="productionMaterialLineId" related="productionRunLineId"/></relationship>
+        <relationship type="one" title="Operation" related="mantle.work.effort.WorkEffort" short-alias="operation">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+    </extend-entity>
+
+    <!-- The output asset issued back to its run by an output scrap (record#ProductionLoss): the issuance names its loss, so
+        its cost event is the output's scrap (PcetOutputScrap), not a material issue. -->
+    <extend-entity entity-name="AssetIssuance" package="mantle.product.issuance">
+        <field name="productionLossId" type="id"/>
+        <relationship type="one" related="mantle.work.production.ProductionLoss" short-alias="productionLoss"/>
+    </extend-entity>
+
+    <extend-entity entity-name="AssetIssuance" package="mantle.product.issuance">
+        <field name="enteredQuantity" type="number-decimal"/>
+        <field name="enteredQuantityUomId" type="id"/>
+        <field name="appliedConversionFactor" type="number-decimal"/>
+        <relationship type="one" title="EnteredQuantity" related="moqui.basic.Uom" short-alias="enteredQuantityUom">
+            <key-map field-name="enteredQuantityUomId"/></relationship>
+    </extend-entity>
+
+<!-- Manufacturing's quality gates (design-manufacturing QualityGates, Inspections, QualityInspection and InspectionTemplates;
+    §12 M6's inspection part over CX-QUALITY; impl-manufacturing P8; ProductionQuality.js): a production template's stage
+    (in-process or final), sampling basis and the method or operation it attaches to; a released run's gates, each the
+    template as of the release with its sample plan, so a template change never changes an existing gate; and the
+    production links of an inspection and of its scrap disposition. A file of its own so it merges apart from the quality
+    and the other production entities. -->
+    <!-- a production template (inspectionContextEnumId QicProduction): in-process (an operation's gate, blocking the
+        operations after it) or final (the output, received held); its sample counted on each receipt or on the run's
+        quantity; attached to a method (a BOM: the final check of what it makes) or an operation (an operation template or a
+        routing operation: its in-process check), else applying by product, category and facility as any template -->
+    <extend-entity entity-name="InspectionTemplate" package="mantle.product.quality">
+        <field name="productionStageEnumId" type="id" enable-audit-log="true"/>
+        <field name="sampleBasisEnumId" type="id" enable-audit-log="true"/>
+        <field name="productBomId" type="id" enable-audit-log="true"/>
+        <field name="operationWorkEffortId" type="id" enable-audit-log="true"/>
+        <relationship type="one-nofk" title="ProductionStage" related="moqui.basic.Enumeration">
+            <key-map field-name="productionStageEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="SampleBasis" related="moqui.basic.Enumeration">
+            <key-map field-name="sampleBasisEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.product.bom.ProductBom"/>
+        <relationship type="one-nofk" title="Operation" related="mantle.work.effort.WorkEffort">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+    </extend-entity>
+
+    <!-- an inspection of a run's gate: the operation (in-process) or output line (final) and the gate it answers -->
+    <extend-entity entity-name="QualityInspection" package="mantle.product.quality">
+        <field name="operationWorkEffortId" type="id"/>
+        <field name="productionRunLineId" type="id"/>
+        <field name="productionQualityGateId" type="id"/>
+        <relationship type="one-nofk" related="mantle.work.production.ProductionQualityGate"/>
+        <index name="QUAL_INSP_WORK"><index-field name="workEffortId"/></index>
+        <index name="QUAL_INSP_GATE"><index-field name="productionQualityGateId"/></index>
+    </extend-entity>
+
+    <!-- a scrap disposition of an open run's output takes P7's loss path: the loss it wrote -->
+    <extend-entity entity-name="QualityInspectionDisposition" package="mantle.product.quality">
+        <field name="productionLossId" type="id"/>
+        <relationship type="one-nofk" related="mantle.work.production.ProductionLoss"/>
+    </extend-entity>
+
+    <extend-entity entity-name="QualityInspectionDisposition" package="mantle.product.quality">
+        <field name="returnedQuantity" type="number-decimal"><description>Of a Return to supplier disposition, the quantity
+            issued to a supplier return shipment so far (issue#SupplierReturnStock); the inspection's heldQuantity falls by
+            the same.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="AssetReceipt" package="mantle.product.receipt">
+        <field name="productionOutputLineId" type="id"/>
+        <field name="operationWorkEffortId" type="id"/>
+        <field name="costProvisional" type="text-indicator"/>
+        <relationship type="one" title="ProductionOutput" related="mantle.work.production.ProductionRunLine"
+                short-alias="productionOutputLine">
+            <key-map field-name="productionOutputLineId" related="productionRunLineId"/></relationship>
+        <relationship type="one" title="Operation" related="mantle.work.effort.WorkEffort" short-alias="operation">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+    </extend-entity>
+
+<!-- The fields of the Warehouse posting guard's movements (design-warehouse §17 WH-POST, crosscut CX-POSTING;
+    impl-warehouse F7): what a person entered, in the unit they entered it, and the conversion the guard applied to reach
+    the stock quantity, on each receipt, issuance and shipment source line a guarded entry point writes. The stock
+    quantity stays in the existing quantity fields; these are written by the receive, issue and pick entry points (P7,
+    P11, P16) and are empty on rows Mantle's own services write. -->
+    <extend-entity entity-name="AssetReceipt" package="mantle.product.receipt">
+        <field name="enteredQuantity" type="number-decimal"/>
+        <field name="enteredQuantityUomId" type="id"/>
+        <field name="appliedConversionFactor" type="number-decimal"/>
+        <!-- CX-PRODUCTION (impl-warehouse P6, F7): the issuance a receipt was made from, as a repack's receipt of its
+            source's issue (repack#Asset), so the ledger and Traceability follow the conversion -->
+        <field name="sourceAssetIssuanceId" type="id"/>
+        <relationship type="one" title="EnteredQuantity" related="moqui.basic.Uom" short-alias="enteredQuantityUom">
+            <key-map field-name="enteredQuantityUomId"/></relationship>
+        <relationship type="one" title="Source" related="mantle.product.issuance.AssetIssuance"
+                short-alias="sourceAssetIssuance">
+            <key-map field-name="sourceAssetIssuanceId" related="assetIssuanceId"/></relationship>
+    </extend-entity>
+
+  <!-- a paid-access line's fulfillment names the term it activated (design-shop §14.2: the granted subscription) -->
+  <extend-entity entity-name="StoreItemFulfillment" package="mantle.product.store">
+    <field name="subscriptionId" type="id"><description>For a paid-access line: the Subscription its settled term activated
+      on its contract's resource instance.</description></field>
+  </extend-entity>
+</entities>

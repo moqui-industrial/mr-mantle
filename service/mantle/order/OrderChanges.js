@@ -1,5 +1,5 @@
 // Order changes (CS-ORDER-CHANGE, CX-ORDER-CHANGE; design-customer-service §4 OrderChanges and OrderChangeDetail, D9, D7;
-// impl-customer-service §4, P10; OrderChangeServices.xml, SupportOrderChangeEntities.xml). A proposal is the RqtOrderChange Request
+// impl-customer-service §4, P10; OrderChangeServices.xml, entity/request/RequestAndRequirementAndSupportExtensions.xml). A proposal is the RqtOrderChange Request
 // of a sales order: its organization the order's seller (an OrgInternal RequestParty), its customer a Customer RequestParty,
 // its lines RequestItems linked to the order's lines by RequestItemOrder. Its revision is the time of the last change to its
 // audit-logged key fields (the kind, the consent, the order revision it binds, the commercial fields, and each line's action,

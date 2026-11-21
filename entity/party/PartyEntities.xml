@@ -1,0 +1,1739 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+<!-- External access (CX-PORTALS): a capability over one record for an outside party, held as a bearer token or reached by
+    a signed-in contact of that party (mantle.party.ExternalAccessServices). It is not a PublicAccessGrant, which is a
+    party's grant to a site or category and has no token. -->
+    <entity entity-name="ExternalAccessCapability" package="mantle.party" cache="never">
+        <description>What an outside party may do with one record of an organization: the record (recordType and recordId,
+            the party (a customer or supplier), its scopes (comma separated, such as
+            InvoicePay or BillUpload), its expiry and revocation, and the digest of its bearer token. The token itself is
+            shown once, when it is created, and never stored.</description>
+        <field name="capabilityId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="partyId" type="id">
+            <description>The outside party: the invoice's customer, the order's supplier.</description></field>
+        <field name="recordType" type="id">
+            <description>Invoice or Order; the record types ExternalAccess.js knows.</description></field>
+        <field name="recordId" type="id"/>
+        <field name="scopes" type="text-medium"/>
+        <field name="tokenDigest" type="text-medium"/>
+        <field name="issuerKind" type="id">
+            <description>organization (an internal user's link) or contact (a signed-in contact's shared
+                link).</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="revokedDate" type="date-time"/>
+        <field name="revokedByUserId" type="id"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="boundCapabilityId" type="id">
+            <description>An emailed code's capability (the OrderChange scope, SEC-PSS-23): the order link it was asked with,
+                which alone may use it; its tokenDigest binds the code to that link.</description></field>
+        <field name="failedTries" type="number-integer">
+            <description>An emailed code's wrong tries; the fifth ends it.</description></field>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/>
+        </relationship>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one-nofk" title="Bound" related="mantle.party.ExternalAccessCapability">
+            <key-map field-name="boundCapabilityId" related="capabilityId"/></relationship>
+        <index name="EXT_ACCESS_TOKEN" unique="true"><index-field name="tokenDigest"/></index>
+        <index name="EXT_ACCESS_RECORD"><index-field name="recordType"/><index-field name="recordId"/></index>
+        <index name="EXT_ACCESS_BOUND"><index-field name="boundCapabilityId"/></index>
+    </entity>
+
+    <entity entity-name="ExternalAccessContact" package="mantle.party" cache="never">
+        <description>A public account's grant as a contact of an outside party (a customer, a supplier) on one app of one
+            organization's site, made by redeeming an invite#Contact invitation. The Billing and Supplier pages check it;
+            a CRM contact relationship gives no portal access, and the account holds no user group.</description>
+        <field name="contactGrantId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"><description>The account's party.</description></field>
+        <field name="outsidePartyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="app" type="id"><description>billing or supplier (PublicApps.js).</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" title="Outside" related="mantle.party.Party">
+            <key-map field-name="outsidePartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <index name="EXT_ACCESS_CONTACT"><index-field name="partyId"/><index-field name="organizationPartyId"/>
+            <index-field name="app"/></index>
+    </entity>
+
+<!-- Form publication and invitations (design-drawers-commons §19, crosscut X16; Commons owns them, built by Customer Service
+    P13 under the owner-contract rule): one publication and invitation model for every app's forms over the framework's
+    DbForm and FormResponse, Marketing's surveys, Sales' lead forms and People's scorecards after Customer Service's case
+    feedback. A FormPublication is a dated DbForm offered to an audience for a purpose; a FormInvitation is one recipient's
+    invitation to answer it once, with its context record (for case feedback the case's resolution episode), its delivery
+    state and the response it got; its link is an ExternalAccessCapability of the FormInvitation record kind
+    (ExternalAccess.js), so the token is a digest there and never kept here. A response that answers an invitation is kept
+    as submitted: the framework's update#FormResponse and delete#FormResponse refuse it (FormPublication.eecas.xml,
+    mantle.party.FormPublicationServices.guard#FormResponse). Case feedback's delivery policy and follow-up are
+    Customer Service's (entity/request/SupportEntities.xml). -->
+    <entity entity-name="FormPublication" package="mantle.party" cache="never">
+        <description>A DbForm offered for a purpose by an organization: its context record when the publication is of one
+            (a campaign, an event; empty for case feedback, whose invitations carry their own), the PASS site it is answered
+            on when it is fixed (empty: the organization's site of the app), open from fromDate to thruDate, its access
+            (invited recipients, anyone, or signed-in accounts) and its repeat policy (once per invitation, or more).</description>
+        <field name="publicationId" type="id" is-pk="true"/>
+        <field name="formId" type="id"/>
+        <field name="purposeEnumId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="contextEntityName" type="text-medium"/>
+        <field name="contextId" type="id"/>
+        <field name="siteId" type="id"/>
+        <field name="accessEnumId" type="id"/>
+        <field name="repeatEnumId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <!-- impl-marketing P12 (design-drawers-commons §19; design-marketing §10 SurveyDistribution, §13 SubmitForm): what a public
+            page shows around the form and when it was opened -->
+        <field name="titleText" type="text-medium"><description>The page's heading (empty: the form's name)</description></field>
+        <field name="introText" type="text-long"><description>Plain text above the questions; no expression</description></field>
+        <field name="completionMessage" type="text-medium"><description>The receipt's words after an answer (empty: a neutral thank
+            you)</description></field>
+        <field name="publishedDate" type="date-time"/>
+        <field name="publishedByUserId" type="id"/>
+        <field name="closedByUserId" type="id"/>
+        <relationship type="one" related="moqui.screen.form.DbForm" short-alias="form"/>
+        <relationship type="one" title="FormPublicationPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="FormPublicationAccess" related="moqui.basic.Enumeration" short-alias="access">
+            <key-map field-name="accessEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="FormPublicationRepeat" related="moqui.basic.Enumeration" short-alias="repeat">
+            <key-map field-name="repeatEnumId" related="enumId"/></relationship>
+        <index name="FORM_PUB_ORG"><index-field name="organizationPartyId"/><index-field name="purposeEnumId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Form Publication Purpose" enumTypeId="FormPublicationPurpose"/>
+            <moqui.basic.Enumeration enumId="FppCaseFeedback" description="Case feedback" sequenceNum="1" enumTypeId="FormPublicationPurpose"/>
+            <moqui.basic.Enumeration enumId="FppSurvey" description="Survey" sequenceNum="2" enumTypeId="FormPublicationPurpose"/>
+            <!-- impl-marketing P12: Marketing's public purposes beside the survey (a lead form, P13's handoff; an event's
+                registration questions, P16) -->
+            <moqui.basic.Enumeration enumId="FppLead" description="Lead form" sequenceNum="3" enumTypeId="FormPublicationPurpose"/>
+            <moqui.basic.Enumeration enumId="FppRegistration" description="Registration questions" sequenceNum="4" enumTypeId="FormPublicationPurpose"/>
+            <moqui.basic.EnumerationType description="Form Publication Access" enumTypeId="FormPublicationAccess"/>
+            <moqui.basic.Enumeration enumId="FpaInvited" description="Invited recipients" sequenceNum="1" enumTypeId="FormPublicationAccess"/>
+            <moqui.basic.Enumeration enumId="FpaAnonymous" description="Anyone with the page" sequenceNum="2" enumTypeId="FormPublicationAccess"/>
+            <moqui.basic.Enumeration enumId="FpaAccount" description="Signed-in accounts" sequenceNum="3" enumTypeId="FormPublicationAccess"/>
+            <moqui.basic.EnumerationType description="Form Publication Repeat" enumTypeId="FormPublicationRepeat"/>
+            <moqui.basic.Enumeration enumId="FprOnce" description="One response per invitation" sequenceNum="1" enumTypeId="FormPublicationRepeat"/>
+            <moqui.basic.Enumeration enumId="FprMany" description="Several responses" sequenceNum="2" enumTypeId="FormPublicationRepeat"/>
+            <!-- the framework DbForm purpose of a case feedback form (Customer Service's CSAT survey; the survey builder) -->
+            <moqui.basic.Enumeration enumId="DbfpCaseFeedback" description="Case feedback" enumTypeId="DbFormPurpose"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="FormPurpose" package="mantle.party" cache="never">
+        <description>The registration of a purpose of the survey builder's forms (impl-people P16, F51, F62;
+            mantle.party.FormDefinitions): a DbForm of a registered purpose is built and read through
+            mantle.party.FormDefinitionServices (FormDefinitions.js), which check the permission that edits it (editPermission)
+            and the one that also reads it (viewPermission), each a permission or a comma list of them any one of which admits,
+            and the organization it is owned by: one the scope service names
+            (scopeServiceName answers organizationPartyIds for the user; empty, the user's own internal organizations). A
+            publication of such a form (FormPublication, its invitation links) takes only the access kinds accessEnumIds lists
+            (a comma list of FormPublicationAccess ids); none means the form is answered only by the respondents an app's own
+            service assigns, with no public or invitation link, its answers read through that app's service of the record they
+            belong to. formNoun is the word the builder's messages use (template, form). Customer Service registers its case
+            templates and case feedback, People its private purposes (impl-people P16), Marketing its own.</description>
+        <field name="purposeEnumId" type="id" is-pk="true"/>
+        <field name="publicationPurposeEnumId" type="id"/>
+        <field name="editPermission" type="text-medium"/>
+        <field name="viewPermission" type="text-medium"/>
+        <field name="scopeServiceName" type="text-medium"/>
+        <field name="accessEnumIds" type="text-medium"/>
+        <field name="formNoun" type="text-short"/>
+        <field name="fieldAudienceEnumId" type="id"><description>impl-marketing P12: the audience every field of the purpose takes
+            (CfaCustomer for a public purpose, whose every question a visitor answers); empty: the one each field is given,
+            internal by default</description></field>
+        <field name="ownServices" type="text-indicator"><description>Y: its forms are built only through its app's own services,
+            which add the app's rules (Customer Service's case templates and case feedback: CaseTemplateServices and
+            CaseFeedbackServices, the customer audience and the rating); FormDefinitionServices reads them and refuses to make or
+            change one (PURPOSE_UNAVAILABLE, impl-people P16 review)</description></field>
+        <relationship type="one-nofk" title="DbFormPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="FormPublicationPurpose" related="moqui.basic.Enumeration" short-alias="publicationPurpose">
+            <key-map field-name="publicationPurposeEnumId" related="enumId"/></relationship>
+        <seed-data>
+            <!-- Customer Service's: case templates (an agent's and a customer's fields; edited with SUPPORT_POLICY_EDIT, read by
+                agents) and case feedback (a resolved case's customer, invited by a link) -->
+            <mantle.party.FormPurpose purposeEnumId="DbfpCaseTemplate" editPermission="SUPPORT_POLICY_EDIT"
+                    viewPermission="SUPPORT_CASE_EDIT" formNoun="template" ownServices="Y"/>
+            <mantle.party.FormPurpose purposeEnumId="DbfpCaseFeedback" publicationPurposeEnumId="FppCaseFeedback"
+                    editPermission="SUPPORT_POLICY_EDIT" viewPermission="SUPPORT_CASE_EDIT" accessEnumIds="FpaInvited" formNoun="form" ownServices="Y"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="FormSubmission" package="mantle.party" cache="never">
+        <description>impl-marketing P12 (design-drawers-commons §19; design-marketing §13 SubmitForm): one accepted public answer of a
+            publication (mantle.party.FormPublicationServices accept#Submission): the response it made (formResponseId, read with the
+            form as of submittedDate), the invitation it answered when invited, the party verified for it (an invitation's
+            recipient or a signed-in account's own party; never one an email field names), the site, the request identity
+            (requestKey: a digest of the page's request key, unique, so a repeat answers the first) with the digest of what was
+            sent (payloadDigest: the same key with other answers is refused), and the state of its effects after acceptance (a
+            subscription choice, an automation, a lead handoff), each separate and replay-safe. Its response is kept as
+            submitted, as an invited one is (FormPublication.eecas.xml).</description>
+        <field name="formSubmissionId" type="id" is-pk="true"/>
+        <field name="publicationId" type="id"/>
+        <field name="formId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="formResponseId" type="id"/>
+        <field name="invitationId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="siteId" type="id"/>
+        <field name="requestKey" type="text-medium"/>
+        <field name="payloadDigest" type="text-medium"/>
+        <field name="submittedDate" type="date-time"/>
+        <field name="statusEnumId" type="id"/>
+        <field name="effectsText" type="text-medium"><description>What its effects did, or why one failed (no answer text)</description></field>
+        <relationship type="one" related="mantle.party.FormPublication" short-alias="publication"/>
+        <relationship type="one" related="moqui.screen.form.DbForm" short-alias="form"/>
+        <relationship type="one-nofk" related="moqui.screen.form.FormResponse" short-alias="response"/>
+        <relationship type="one-nofk" related="mantle.party.FormInvitation" short-alias="invitation"/>
+        <relationship type="one-nofk" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" title="FormSubmissionStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <index name="FORM_SUB_KEY" unique="true"><index-field name="requestKey"/></index>
+        <index name="FORM_SUB_RESPONSE"><index-field name="formResponseId"/></index>
+        <index name="FORM_SUB_PUB"><index-field name="publicationId"/><index-field name="submittedDate"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Form Submission Status" enumTypeId="FormSubmissionStatus"/>
+            <moqui.basic.Enumeration enumId="FsbAccepted" description="Accepted, effects pending" sequenceNum="1" enumTypeId="FormSubmissionStatus"/>
+            <moqui.basic.Enumeration enumId="FsbApplied" description="Accepted, effects applied" sequenceNum="2" enumTypeId="FormSubmissionStatus"/>
+            <moqui.basic.Enumeration enumId="FsbEffectFailed" description="Accepted, an effect failed" sequenceNum="3" enumTypeId="FormSubmissionStatus"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="FormInvitation" package="mantle.party" cache="never">
+        <description>One recipient's invitation to answer a publication once: the recipient (partyId, the party the answer is
+            of: a case's customer) and who it is sent to (contactPartyId, emailAddress), its context record (contextEntityName
+            and contextId: for case feedback the case's resolution CaseSlaEpisode, else the Request) and the record that holds
+            it (recordEntityName and recordId: the Request), the app's policy row it was made under (policyId) and the key
+            that makes it once (invitationKey: one per case, or per resolution); when it is sent (scheduledDate), until when
+            its link works (expireDate), its delivery (statusEnumId, the sends, reminders and the last error) and its one
+            response (formResponseId, responseDate and the score when the form has a rating). The links are
+            ExternalAccessCapability rows of record type FormInvitation; each send makes one that ends at expireDate.</description>
+        <field name="invitationId" type="id" is-pk="true"/>
+        <field name="publicationId" type="id"/>
+        <field name="formId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="contactPartyId" type="id"/>
+        <field name="emailAddress" type="text-medium"/>
+        <field name="contextEntityName" type="text-medium"/>
+        <field name="contextId" type="id"/>
+        <field name="recordEntityName" type="text-medium"/>
+        <field name="recordId" type="id"/>
+        <field name="policyId" type="id"><description>The app's delivery policy row (case feedback:
+            FeedbackDeliveryPolicy) the invitation was made under</description></field>
+        <field name="invitationKey" type="text-medium"/>
+        <field name="statusEnumId" type="id" enable-audit-log="true"/>
+        <field name="scheduledDate" type="date-time"/>
+        <field name="expireDate" type="date-time"/>
+        <field name="sentDate" type="date-time"/>
+        <field name="lastSentDate" type="date-time"/>
+        <field name="nextReminderDate" type="date-time"/>
+        <field name="reminderCount" type="number-integer"/>
+        <field name="attemptCount" type="number-integer"/>
+        <field name="emailMessageId" type="id"/>
+        <field name="lastError" type="text-medium"/>
+        <field name="formResponseId" type="id"/>
+        <field name="responseDate" type="date-time"/>
+        <field name="score" type="number-integer"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.party.FormPublication" short-alias="publication"/>
+        <relationship type="one" related="moqui.screen.form.DbForm" short-alias="form"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one-nofk" title="Contact" related="mantle.party.Party" short-alias="contact">
+            <key-map field-name="contactPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="FormInvitationStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="moqui.screen.form.FormResponse" short-alias="response"/>
+        <index name="FORM_INV_KEY" unique="true"><index-field name="invitationKey"/></index>
+        <index name="FORM_INV_RECORD"><index-field name="recordEntityName"/><index-field name="recordId"/></index>
+        <index name="FORM_INV_RESPONSE"><index-field name="formResponseId"/></index>
+        <index name="FORM_INV_DUE"><index-field name="statusEnumId"/><index-field name="scheduledDate"/></index>
+        <index name="FORM_INV_ORG"><index-field name="organizationPartyId"/><index-field name="formId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Form Invitation Status" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinScheduled" description="Scheduled" sequenceNum="1" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinSent" description="Sent" sequenceNum="2" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinResponded" description="Answered" sequenceNum="3" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinExpired" description="Expired unanswered" sequenceNum="4" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinFailed" description="Not delivered" sequenceNum="5" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinSuppressed" description="Not sent" sequenceNum="6" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinRevoked" description="Withdrawn" sequenceNum="7" enumTypeId="FormInvitationStatus"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="EmplPositionClassPtyClsTp" package="mantle.party">
+        <field name="emplPositionClassId" type="id" is-pk="true"/>
+        <field name="classificationTypeEnumId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.humanres.position.EmplPositionClass" short-alias="emplPositionClass"/>
+        <relationship type="one" title="PartyClassificationType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="classificationTypeEnumId"/></relationship>
+    </entity>
+
+<!-- Organization-scoped staff identity (mantle.party.IdentityServices; mr-boss plan/design-admin.md §4.1, §17.2; impl-admin P5):
+    the staff invitation. Separate from PASS's PublicSiteInvitation, which is a site's public identity flow and never grants
+    staff access. P6 adds the lifecycle operation and its steps. -->
+    <entity entity-name="UserInvitation" package="mantle.party" cache="never">
+        <description>A staff invitation: an address, the organization the invited person will work for (a relationship of
+            relationshipTypeEnumId), the grant proposal (registered bundles, checked when it is sent and again when it is accepted)
+            and a single-use token, kept only as its hash, that lasts until expiresDate. statusId is UinvPending until it is
+            accepted (UinvAccepted, with the account it went to) or revoked (UinvRevoked); a pending one past expiresDate reads
+            as expired (UinvExpired). A resend gives it a new token, so the earlier one no longer matches. operationKey makes a
+            retry of the same request answer this invitation. The token itself is mailed, or shown once to the inviter when
+            the instance cannot send mail (linkShownDate); it is never stored, listed or logged. Read and changed only through
+            mantle.party.IdentityServices.</description>
+        <field name="invitationId" type="id" is-pk="true"/>
+        <field name="emailAddress" type="text-medium"><description>The invited address; the account the invitation
+            goes to has it.</description></field>
+        <field name="firstName" type="text-medium"><description>The person's name when the invitation makes a new
+            person.</description></field>
+        <field name="lastName" type="text-medium"/>
+        <field name="partyId" type="id"><description>An existing person the inviter chose, or the person the acceptance
+            made or matched.</description></field>
+        <field name="userId" type="id"><description>The account the invitation was accepted with.</description></field>
+        <field name="organizationPartyId" type="id"><description>The internal organization the person will work
+            for; the organization entity filters apply to it.</description></field>
+        <field name="relationshipTypeEnumId" type="id"><description>PrtEmployee, PrtAgent or PrtMember.</description></field>
+        <field name="bundleGroupIds" type="text-medium"><description>The grant proposal: registered bundles (UserGroup
+            ids, comma separated) the app supplied, validated structured data, never executable.</description></field>
+        <field name="message" type="text-long"><description>The inviter's note in the email.</description></field>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="tokenHash" type="text-medium"><description>The hash of the current token (singleUseCodeHash);
+            never the token.</description></field>
+        <field name="expiresDate" type="date-time" enable-audit-log="true"/>
+        <field name="sentDate" type="date-time" enable-audit-log="true"><description>When the current token was
+            issued (sent, or made for the link shown).</description></field>
+        <field name="sendCount" type="number-integer"/>
+        <field name="mailSent" type="text-indicator"><description>Y when the current token went out by mail.</description></field>
+        <field name="linkShownDate" type="date-time" enable-audit-log="true"><description>When the acceptance link of the
+            current token was shown to the inviter, the instance having no mail server; audited, without the token.</description></field>
+        <field name="acceptedDate" type="date-time" enable-audit-log="true"/>
+        <field name="revokedDate" type="date-time" enable-audit-log="true"/>
+        <field name="factorId" type="id"><description>The authenticator factor the acceptance made when a bundle's group
+            requires one, until its first code confirms it.</description></field>
+        <field name="acceptVisitId" type="id"><description>The session (Visit) the acceptance ran in: only it, or the account
+            signed in, sees the factor step and its key.</description></field>
+        <field name="inviterUserId" type="id"/>
+        <field name="revokedByUserId" type="id"/>
+        <field name="operationKey" type="text-medium"><description>The caller's key of the request: a retry with the same
+            key answers this invitation.</description></field>
+        <relationship type="one" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="Inviter" related="moqui.security.UserAccount">
+            <key-map field-name="inviterUserId" related="userId"/></relationship>
+        <index name="USER_INVITE_TOKEN" unique="true"><index-field name="tokenHash"/></index>
+        <index name="USER_INVITE_OPKEY" unique="true"><index-field name="operationKey"/></index>
+        <index name="USER_INVITE_EMAIL"><index-field name="emailAddress"/></index>
+    </entity>
+
+    <!-- An account's lifecycle (impl-admin P6; design-admin §4.1 Offboarding, §4 LifecycleOperations and LifecycleDetail, §17.2) -->
+    <entity entity-name="UserLifecycleOperation" package="mantle.party" cache="never">
+        <description>One lifecycle request of an account: a global disable (now, or at a future date written to the account's
+            terminateDate), the removal from one internal organization (its relationships, and the account's memberships when no
+            organization is left), or a restoration (enabled again, no credential or schedule brought back). Its independent
+            steps (UserLifecycleOperationStep) each keep their own outcome: a failed step leaves the others, and the revocation,
+            in place and stays to be retried. organizationPartyId is the organization it was requested for (the one removed, or
+            for a global operation the target's organization in the requester's scope), which the organization entity filters
+            apply to. operationKey makes a retry of the same request answer this operation. Read and changed only through
+            mantle.party.IdentityServices.</description>
+        <field name="operationId" type="id" is-pk="true"/>
+        <field name="userId" type="id"><description>The account the operation is about.</description></field>
+        <field name="partyId" type="id"/>
+        <field name="kindEnumId" type="id"><description>UlkDisable, UlkOrgRemoval, UlkRestore, or UlkProvision (a People hire's
+            provisioning, request#Provisioning: userId empty until the person has an account).</description></field>
+        <field name="isGlobal" type="text-indicator"><description>Y for an account-wide operation (disable, restore), N for one
+            organization's removal.</description></field>
+        <field name="organizationPartyId" type="id"/>
+        <field name="effectiveDate" type="date-time"><description>When it takes effect; a future date of a disable is the
+            account's terminateDate, of a removal the relationships' end.</description></field>
+        <field name="reason" type="text-long"/>
+        <field name="sourceReference" type="text-medium"><description>The requesting record, as its owner names it (People's
+            operation key, later); empty for Admin's own requests.</description></field>
+        <field name="statusId" type="id" enable-audit-log="true"><description>UlopCompleted, UlopScheduled (taking effect at its
+            date) or UlopAttention (a step failed or waits for an owner).</description></field>
+        <field name="accountRevision" type="text-short"><description>The account revision the request named.</description></field>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="operationKey" type="text-medium"/>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="UserLifecycleKind" related="moqui.basic.Enumeration">
+            <key-map field-name="kindEnumId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="RequestedBy" related="moqui.security.UserAccount">
+            <key-map field-name="requestedByUserId" related="userId"/></relationship>
+        <relationship type="many" related="mantle.party.UserLifecycleOperationStep" short-alias="steps">
+            <key-map field-name="operationId"/></relationship>
+        <index name="USER_LIFE_OPKEY" unique="true"><index-field name="operationKey"/></index>
+        <index name="USER_LIFE_USER"><index-field name="userId"/></index>
+    </entity>
+
+    <entity entity-name="UserLifecycleOperationStep" package="mantle.party" cache="never">
+        <description>One independent step of a lifecycle operation: the account's own (disable, end date, access revoked,
+            relationships and memberships ended, enabled again) or a participant's (an owner's pause, or a resource waiting for
+            a new owner through the owner's transfer service, design-admin §14). It keeps the target identity, the provider and
+            its action, the state, the attempts and the reason; never a copy of the owner's records or a secret. A participant
+            step names only a service carrying the owned-resource contract (org.moqui.admin.IdentityServices
+            define#OwnedResourceTransfer or define#OwnedResourcePause).</description>
+        <field name="operationId" type="id" is-pk="true"/>
+        <field name="stepSeqId" type="id" is-pk="true"/>
+        <field name="stepKind" type="text-short"><description>disableAccount, endDate, revokeAccess, endRelationships,
+            endMemberships, enableAccount, pause or transfer; a provisioning's membership, invite, grants and notify.</description></field>
+        <field name="providerKey" type="text-medium"><description>identity for the account's own steps, else the participant's
+            key (the app's registration).</description></field>
+        <field name="ownerApp" type="text-short"/>
+        <field name="title" type="text-medium"/>
+        <field name="resourceKind" type="text-short"/>
+        <field name="resourceId" type="text-medium"/>
+        <field name="resourceName" type="text-medium"/>
+        <field name="actionService" type="text-medium"><description>A participant step's service (the owner's pause or
+            transfer).</description></field>
+        <field name="resourceParameter" type="text-short"><description>The owner's name for the resource's id among the
+            transfer service's parameters.</description></field>
+        <field name="toUserId" type="id"><description>The new owner a transfer went to.</description></field>
+        <field name="statusId" type="id" enable-audit-log="true"><description>UlstDone, UlstFailed, UlstWaiting (for a new
+            owner) or UlstSkipped.</description></field>
+        <field name="attemptCount" type="number-integer"/>
+        <field name="reasonCode" type="text-short"/>
+        <field name="reason" type="text-long"/>
+        <field name="lastAttemptDate" type="date-time"/>
+        <field name="lastAttemptByUserId" type="id"/>
+        <field name="completedDate" type="date-time"/>
+        <relationship type="one" related="mantle.party.UserLifecycleOperation"/>
+        <relationship type="one" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="NewOwner" related="moqui.security.UserAccount">
+            <key-map field-name="toUserId" related="userId"/></relationship>
+    </entity>
+
+<!-- The one outbound delivery ledger (design-crosscut CX-DELIVERY, X8; Comms' contract, built with mr-pass impl-shop P6, F24;
+    mantle.party.MessageServices, service/mantle/party/MessageDeliveries.js), generalized from the Forum's ForumDelivery: one
+    delivery per event, recipient, channel and template key, with the consent snapshot taken before the hand-off and each
+    attempt's outcome from send#EmailTemplate (sent, retryable, permanent or uncertain). A retryable outcome is tried again
+    by the job with backoff, a permanent one stops, and an uncertain one waits for review, never a blind resend. Its first
+    source is Shop's download-ready notice; Commerce's review requests and cart recovery and Shop's renewal notices follow.
+    The existing store emails keep their own senders until Comms moves them (impl-shop §4). -->
+  <entity entity-name="MessageDelivery" package="mantle.party" cache="never">
+    <description>One message to one recipient for one event: the event (its source's key, such as
+      shopDownloads:ORDER), the recipient (a party and the address it went to), the channel and template key, the consent
+      snapshot (transactional, or the marketing consent state when it was handed off), the state (MessageDeliveryState:
+      queued, sent, retry, failed, suppressed, uncertain), the attempts with the next one's time, the provider's message id
+      and the last safe error. The event, recipient, channel and template key are unique, so a retry or a second source call
+      never sends twice.</description>
+    <field name="deliveryId" type="id" is-pk="true"/>
+    <field name="eventKey" type="text-medium"/>
+    <field name="sourceEnumId" type="id"/>
+    <field name="recipientPartyId" type="id"/>
+    <field name="toAddress" type="text-medium"/>
+    <field name="channelEnumId" type="id"/>
+    <field name="templateKey" type="id"><description>The EmailTemplate (emailTemplateId) for the email channel.</description></field>
+    <field name="siteId" type="id"/>
+    <field name="productStoreId" type="id"/>
+    <field name="organizationPartyId" type="id"><description>The organization the delivery is from (a seller's quote, Sales P10;
+      a campaign's, Marketing P9), whose suppressions it meets beside every organization's; empty: its store's organization, when
+      it names a store (impl-marketing P3 review).</description></field>
+    <field name="sendingProfileId" type="id"><description>The sending profile it goes out from (impl-marketing P6, F13): its
+      relay, sender and reply-to, within its throttle and quiet hours, with the bounce address bounces+(deliveryId).(bounceKey)@ its bounce
+      domain; empty: as the template says.</description></field>
+    <field name="bounceKey" type="text-short"><description>The random key of its VERP bounce address,
+      bounces+(deliveryId).(bounceKey)@ the profile's bounce domain (P6 review): anyone can mail the bounce address, so the intake
+      takes a report for this delivery only with this key, never by the delivery id alone.</description></field>
+    <field name="receiptEnumId" type="id"><description>The strongest later fact of the delivery (MessageDeliveryReceipt, P6, F14):
+      delivered, soft bounce, hard bounce or complaint; apart from the hand-off's state, and never moved back by a weaker
+      one.</description></field>
+    <field name="receiptDate" type="date-time"/>
+    <field name="parametersJson" type="text-long"><description>The template's body parameters as handed off, without
+      secrets kept elsewhere (a link's token is put in only for the send and never stored).</description></field>
+    <field name="transactional" type="text-indicator"><description>Y for a notice of the recipient's own purchase or
+      account, which needs no marketing consent.</description></field>
+    <field name="consentJson" type="text-medium"><description>The consent snapshot taken before the hand-off.</description></field>
+    <field name="stateEnumId" type="id"/>
+    <field name="attempts" type="number-integer"/>
+    <field name="nextAttemptDate" type="date-time"/>
+    <field name="providerMessageId" type="text-medium"/>
+    <field name="lastError" type="text-medium"/>
+    <field name="createdDate" type="date-time"/>
+    <field name="sentDate" type="date-time"/>
+    <relationship type="one" title="Recipient" related="mantle.party.Party">
+      <key-map field-name="recipientPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" title="MessageDeliveryState" related="moqui.basic.Enumeration">
+      <key-map field-name="stateEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" title="MessageDeliverySource" related="moqui.basic.Enumeration">
+      <key-map field-name="sourceEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" title="MessageDeliveryChannel" related="moqui.basic.Enumeration">
+      <key-map field-name="channelEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" related="mantle.party.MessageSendingProfile"/>
+    <relationship type="one" title="MessageDeliveryReceipt" related="moqui.basic.Enumeration">
+      <key-map field-name="receiptEnumId" related="enumId"/>
+    </relationship>
+    <index name="MESSAGE_DELIVERY_EVENT" unique="true">
+      <index-field name="eventKey"/>
+      <index-field name="recipientPartyId"/>
+      <index-field name="channelEnumId"/>
+      <index-field name="templateKey"/>
+    </index>
+    <index name="MESSAGE_DELIVERY_DUE">
+      <index-field name="stateEnumId"/>
+      <index-field name="nextAttemptDate"/>
+    </index>
+    <index name="MESSAGE_DELIVERY_PROFILE">
+      <index-field name="sendingProfileId"/>
+      <index-field name="sentDate"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Message delivery state" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.Enumeration enumId="MdsQueued" description="Queued" sequenceNum="1" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.Enumeration enumId="MdsSent" description="Sent" sequenceNum="2" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.Enumeration enumId="MdsRetry" description="Waiting to retry" sequenceNum="3" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.Enumeration enumId="MdsFailed" description="Failed" sequenceNum="4" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.Enumeration enumId="MdsSuppressed" description="Suppressed" sequenceNum="5" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.Enumeration enumId="MdsUncertain" description="Uncertain, for review" sequenceNum="6" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.EnumerationType description="Message delivery channel" enumTypeId="MessageDeliveryChannel"/>
+      <moqui.basic.Enumeration enumId="MdcEmail" description="Email" sequenceNum="1" enumTypeId="MessageDeliveryChannel"/>
+      <moqui.basic.EnumerationType description="Message delivery source" enumTypeId="MessageDeliverySource"/>
+    </seed-data>
+  </entity>
+
+  <entity entity-name="MessageDeliveryAttempt" package="mantle.party" cache="never">
+    <description>One hand-off of a delivery to its channel: when, the outcome (sent, retryable, permanent, uncertain,
+      suppressed), the provider's message id and the safe error. History only.</description>
+    <field name="deliveryId" type="id" is-pk="true"/>
+    <field name="attemptSeqId" type="id" is-pk="true"/>
+    <field name="attemptDate" type="date-time"/>
+    <field name="outcome" type="id"/>
+    <field name="providerMessageId" type="text-medium"/>
+    <field name="emailMessageId" type="id"/>
+    <field name="error" type="text-medium"/>
+    <relationship type="one" related="mantle.party.MessageDelivery"/>
+  </entity>
+
+  <!-- Comms' suppressions (design-marketing §4 Suppressions, §14.1 MessageSuppression; impl-marketing P3, F13, F16; owner contract,
+    design-drawers-commons): a destination that no delivery of the ledger may reach, for every organization or one, kept apart
+    from list membership and consent. A subscription never ends one; only a holder of MESSAGE_SUPPRESSION_REVIEW ends one, with new
+    evidence, and the row and its source event stay. mantle.party.MessageServices find#Suppressions, store#Suppression and
+    check#Suppressions; attempt#Delivery refuses a suppressed destination. -->
+  <entity entity-name="MessageSuppression" package="mantle.party" cache="never">
+    <description>A block on one destination of a channel (an email address, normalized: trimmed and in lower case), for every
+      organization (organizationPartyId empty) or one, by its reason (a hard bounce, a complaint, staff, repeated soft failures)
+      and source (a provider callback, a delivery status or abuse report, staff entry), with the evidence, from and thru dates, who
+      added it and who ended it with what evidence. Rows are history: an end sets thruDate and the reviewer's evidence; nothing is
+      deleted.</description>
+    <field name="suppressionId" type="id" is-pk="true"/>
+    <field name="channelEnumId" type="id"><description>MessageDeliveryChannel (MdcEmail)</description></field>
+    <field name="destinationKey" type="text-medium"><description>The normalized destination (an email address trimmed and in
+      lower case)</description></field>
+    <field name="organizationPartyId" type="id"><description>Empty: every organization (a provider-level block)</description></field>
+    <field name="reasonEnumId" type="id"/>
+    <field name="sourceEnumId" type="id"/>
+    <field name="sourceRef" type="text-medium"><description>The source event: a delivery, a report's message id</description></field>
+    <field name="evidenceText" type="text-long"/>
+    <field name="fromDate" type="date-time"/>
+    <field name="thruDate" type="date-time"/>
+    <field name="createdByUserId" type="id"/>
+    <field name="endedByUserId" type="id"/>
+    <field name="endEvidenceText" type="text-long"/>
+    <relationship type="one" title="MessageDeliveryChannel" related="moqui.basic.Enumeration">
+      <key-map field-name="channelEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" title="Organization" related="mantle.party.Party">
+      <key-map field-name="organizationPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" title="MessageSuppressionReason" related="moqui.basic.Enumeration">
+      <key-map field-name="reasonEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" title="MessageSuppressionSource" related="moqui.basic.Enumeration">
+      <key-map field-name="sourceEnumId" related="enumId"/>
+    </relationship>
+    <index name="MESSAGE_SUPPRESSION_DEST">
+      <index-field name="channelEnumId"/>
+      <index-field name="destinationKey"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Message suppression reason" enumTypeId="MessageSuppressionReason"/>
+      <moqui.basic.Enumeration enumId="MsrHardBounce" description="Hard bounce" sequenceNum="1" enumTypeId="MessageSuppressionReason"/>
+      <moqui.basic.Enumeration enumId="MsrComplaint" description="Complaint" sequenceNum="2" enumTypeId="MessageSuppressionReason"/>
+      <moqui.basic.Enumeration enumId="MsrSoftFailures" description="Repeated soft failures" sequenceNum="3" enumTypeId="MessageSuppressionReason"/>
+      <moqui.basic.Enumeration enumId="MsrStaff" description="Staff block" sequenceNum="4" enumTypeId="MessageSuppressionReason"/>
+      <moqui.basic.EnumerationType description="Message suppression source" enumTypeId="MessageSuppressionSource"/>
+      <moqui.basic.Enumeration enumId="MssProvider" description="Provider callback" sequenceNum="1" enumTypeId="MessageSuppressionSource"/>
+      <moqui.basic.Enumeration enumId="MssReport" description="Delivery status or abuse report" sequenceNum="2" enumTypeId="MessageSuppressionSource"/>
+      <moqui.basic.Enumeration enumId="MssStaff" description="Staff entry" sequenceNum="3" enumTypeId="MessageSuppressionSource"/>
+    </seed-data>
+  </entity>
+
+  <!-- ===== Marketing P6: templates, sending profiles and bounce intake (impl-marketing P6, F13, F14, F17, F18, F76, F78; design-marketing
+    §5 MessageTemplates, MessageTemplateDetail, §12 SendingProfiles, §14.1, §15.1, §15.2; Comms' owner contract, design-drawers-commons'
+    Mailboxes row) ===== -->
+  <!-- Comms' template library: a template of an organization, channel, purpose and locale, its EmailTemplate for email (the relay and a
+    sender a profile replaces), and its content as dated rows (MessageTemplateContent): a draft is edited, a published content is never
+    changed (a change is a new draft, published at its own date, which ends the one before). mantle.party.MessageServices
+    find#Templates, create#Template, store#Template, store#TemplateContent, preview#Template, publish#Template, end#Template
+    (MessageTemplates.js). -->
+  <entity entity-name="MessageTemplate" package="mantle.party" cache="never">
+    <description>A reusable message of an organization: its name, channel (MessageDeliveryChannel), purpose (MessageTemplatePurpose:
+      promotional or transactional, different kinds of one library, not delivery permissions), locale, its EmailTemplate for email
+      (made with it), and from and thru dates: a template ended is no longer offered; its contents stay.</description>
+    <field name="messageTemplateId" type="id" is-pk="true"/>
+    <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+    <field name="templateName" type="text-medium" enable-audit-log="true"/>
+    <field name="channelEnumId" type="id"/>
+    <field name="purposeEnumId" type="id" enable-audit-log="true"/>
+    <field name="localeId" type="text-short"/>
+    <field name="emailTemplateId" type="id"/>
+    <field name="copiedFromTemplateId" type="id"/>
+    <field name="fromDate" type="date-time"/>
+    <field name="thruDate" type="date-time" enable-audit-log="true"/>
+    <field name="endReason" type="text-medium"/>
+    <field name="createdByUserId" type="id"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" title="Organization" related="mantle.party.Party">
+      <key-map field-name="organizationPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" title="MessageDeliveryChannel" related="moqui.basic.Enumeration">
+      <key-map field-name="channelEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" title="MessageTemplatePurpose" related="moqui.basic.Enumeration">
+      <key-map field-name="purposeEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" related="moqui.basic.email.EmailTemplate"/>
+    <index name="MESSAGE_TEMPLATE_ORG">
+      <index-field name="organizationPartyId"/>
+      <index-field name="templateName"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Message template purpose" enumTypeId="MessageTemplatePurpose"/>
+      <moqui.basic.Enumeration enumId="MtpPromotional" description="Promotional" sequenceNum="1" enumTypeId="MessageTemplatePurpose"/>
+      <moqui.basic.Enumeration enumId="MtpTransactional" description="Transactional" sequenceNum="2" enumTypeId="MessageTemplatePurpose"/>
+    </seed-data>
+  </entity>
+
+  <entity entity-name="MessageTemplateContent" package="mantle.party" cache="never">
+    <description>One dated content of a template: its subject and preheader, the body as a dbresource:// file named .html.fancy-locked
+      and the text alternative as a .fancy-locked file (F78: the locked renderer renders by location with an explicit map, so each
+      store writes a file of its own), and the variables it may name with each one's label, fallback and whether it is required
+      (variablesJson). A draft has no fromDate; a published content has the date it takes effect and is never changed; the next
+      published content ends it (thruDate). Who wrote and who published it, with the publication's reason.</description>
+    <field name="messageTemplateId" type="id" is-pk="true"/>
+    <field name="contentSeqId" type="id" is-pk="true"/>
+    <field name="subject" type="text-medium" enable-audit-log="true"/>
+    <field name="preheader" type="text-medium"/>
+    <field name="bodyLocation" type="text-medium" enable-audit-log="true"/>
+    <field name="bodyTextLocation" type="text-medium"/>
+    <field name="variablesJson" type="text-long"/>
+    <field name="fromDate" type="date-time" enable-audit-log="true"/>
+    <field name="thruDate" type="date-time" enable-audit-log="true"/>
+    <field name="createdByUserId" type="id"/>
+    <field name="createdDate" type="date-time"/>
+    <field name="changedByUserId" type="id"/>
+    <field name="publishedByUserId" type="id"/>
+    <field name="publishReason" type="text-medium"/>
+    <relationship type="one" related="mantle.party.MessageTemplate"/>
+  </entity>
+
+  <!-- Comms' sending profiles: the business use of infrastructure Admin approved (an outgoing relay, an EmailServer no mail account
+    owns), with the sender, reply-to, purpose, throttle, quiet hours, tracking policy, bounce domain and permitted site; a profile shows
+    readiness, never a host or credential. find#SendingProfiles, get#SendingProfile, store#SendingProfile, check#SendingProfile
+    (MessageSendingProfiles.js). -->
+  <entity entity-name="MessageSendingProfile" package="mantle.party" cache="never">
+    <description>A sending profile of an organization: its name, channel, the relay it sends through (emailServerId: an EmailServer no
+      mail account owns), the sender (fromAddress, fromName) and reply-to, its purpose (MessageTemplatePurpose; empty: both), a throttle
+      (at most so many messages an hour), quiet hours (from and to as HH:mm in its time zone, when nothing is sent), its tracking policy
+      (MessageTrackingPolicy), the bounce domain of its VERP addresses (bounces+(delivery)@ the domain, received by the hosted account
+      bounces@ the domain), the PASS site whose Account page takes its unsubscribes, and dates; with its last readiness check.</description>
+    <field name="sendingProfileId" type="id" is-pk="true"/>
+    <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+    <field name="profileName" type="text-medium"/>
+    <field name="channelEnumId" type="id"/>
+    <field name="emailServerId" type="id" enable-audit-log="true"/>
+    <field name="fromAddress" type="text-medium" enable-audit-log="true"/>
+    <field name="fromName" type="text-medium"/>
+    <field name="replyToAddress" type="text-medium" enable-audit-log="true"/>
+    <field name="purposeEnumId" type="id"/>
+    <field name="throttlePerHour" type="number-integer"/>
+    <field name="quietFrom" type="text-short"/>
+    <field name="quietThru" type="text-short"/>
+    <field name="timeZone" type="text-short"/>
+    <field name="trackingPolicyEnumId" type="id"/>
+    <field name="bounceDomain" type="text-medium" enable-audit-log="true"/>
+    <field name="siteId" type="id"/>
+    <field name="fromDate" type="date-time"/>
+    <field name="thruDate" type="date-time" enable-audit-log="true"/>
+    <field name="lastCheckDate" type="date-time"/>
+    <field name="lastCheckReady" type="text-indicator"/>
+    <field name="createdByUserId" type="id"/>
+    <relationship type="one" title="Organization" related="mantle.party.Party">
+      <key-map field-name="organizationPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" related="moqui.basic.email.EmailServer"/>
+    <relationship type="one" title="MessageTrackingPolicy" related="moqui.basic.Enumeration">
+      <key-map field-name="trackingPolicyEnumId" related="enumId"/>
+    </relationship>
+    <index name="MESSAGE_PROFILE_ORG">
+      <index-field name="organizationPartyId"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Message tracking policy" enumTypeId="MessageTrackingPolicy"/>
+      <moqui.basic.Enumeration enumId="MtrNone" description="No tracking" sequenceNum="1" enumTypeId="MessageTrackingPolicy"/>
+      <moqui.basic.Enumeration enumId="MtrConsented" description="Links and opens of recipients who allow tracking" sequenceNum="2" enumTypeId="MessageTrackingPolicy"/>
+    </seed-data>
+  </entity>
+
+  <!-- The ledger's receipts (F14): the later facts of a delivery apart from its hand-off, each kind recorded once; and each report
+    the intake read (process#DeliveryReport; MessageDeliveryReports.js), so a report read again changes nothing and the ones it
+    could not read stay listed. -->
+  <entity entity-name="MessageDeliveryReceipt" package="mantle.party" cache="never">
+    <description>One later fact of a delivery, once per kind (MessageDeliveryReceipt: delivered, soft bounce, hard bounce,
+      complaint): when, the report it came from and its safe detail (a status code and the remote server's diagnostic).</description>
+    <field name="deliveryId" type="id" is-pk="true"/>
+    <field name="receiptEnumId" type="id" is-pk="true"/>
+    <field name="receiptDate" type="date-time"/>
+    <field name="reportId" type="id"/>
+    <field name="detail" type="text-medium"/>
+    <relationship type="one" related="mantle.party.MessageDelivery"/>
+    <relationship type="one" title="MessageDeliveryReceipt" related="moqui.basic.Enumeration">
+      <key-map field-name="receiptEnumId" related="enumId"/>
+    </relationship>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Message delivery receipt" enumTypeId="MessageDeliveryReceipt"/>
+      <moqui.basic.Enumeration enumId="MdrDelivered" description="Delivered" sequenceNum="1" enumTypeId="MessageDeliveryReceipt"/>
+      <moqui.basic.Enumeration enumId="MdrSoftBounce" description="Soft bounce" sequenceNum="2" enumTypeId="MessageDeliveryReceipt"/>
+      <moqui.basic.Enumeration enumId="MdrHardBounce" description="Hard bounce" sequenceNum="3" enumTypeId="MessageDeliveryReceipt"/>
+      <moqui.basic.Enumeration enumId="MdrComplaint" description="Complaint" sequenceNum="4" enumTypeId="MessageDeliveryReceipt"/>
+    </seed-data>
+  </entity>
+
+  <entity entity-name="MessageDeliveryReport" package="mantle.party" cache="never">
+    <description>One message the bounce intake read: the EmailMessage (a report a bounce account received, or a sent message the edge
+      relay marked bounced), its kind (MessageDeliveryReportKind: DSN, ARF, the edge's bounce), the delivery its key found, the fact
+      it recorded, its outcome (MessageDeliveryReportStatus: applied, no change, unknown key, unreadable, ignored, failed) with the
+      reason, and the tries of a failed one. One row a message, so reading it again changes nothing.</description>
+    <field name="reportId" type="id" is-pk="true"/>
+    <field name="emailMessageId" type="id"/>
+    <field name="reportKindEnumId" type="id"/>
+    <field name="deliveryId" type="id"/>
+    <field name="receiptEnumId" type="id"/>
+    <field name="statusEnumId" type="id"/>
+    <field name="reasonText" type="text-medium"/>
+    <field name="attempts" type="number-integer"/>
+    <field name="receivedDate" type="date-time"/>
+    <field name="processedDate" type="date-time"/>
+    <relationship type="one" related="mantle.party.MessageDelivery"/>
+    <relationship type="one" title="MessageDeliveryReportKind" related="moqui.basic.Enumeration">
+      <key-map field-name="reportKindEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" title="MessageDeliveryReportStatus" related="moqui.basic.Enumeration">
+      <key-map field-name="statusEnumId" related="enumId"/>
+    </relationship>
+    <index name="MESSAGE_REPORT_MESSAGE" unique="true">
+      <index-field name="emailMessageId"/>
+    </index>
+    <index name="MESSAGE_REPORT_STATUS">
+      <index-field name="statusEnumId"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Message delivery report kind" enumTypeId="MessageDeliveryReportKind"/>
+      <moqui.basic.Enumeration enumId="MrkDsn" description="Delivery status notification" sequenceNum="1" enumTypeId="MessageDeliveryReportKind"/>
+      <moqui.basic.Enumeration enumId="MrkArf" description="Abuse feedback report" sequenceNum="2" enumTypeId="MessageDeliveryReportKind"/>
+      <moqui.basic.Enumeration enumId="MrkEdge" description="Bounce reported by the edge relay" sequenceNum="3" enumTypeId="MessageDeliveryReportKind"/>
+      <moqui.basic.EnumerationType description="Message delivery report status" enumTypeId="MessageDeliveryReportStatus"/>
+      <moqui.basic.Enumeration enumId="MrsApplied" description="Applied" sequenceNum="1" enumTypeId="MessageDeliveryReportStatus"/>
+      <moqui.basic.Enumeration enumId="MrsNoChange" description="No change: already recorded" sequenceNum="2" enumTypeId="MessageDeliveryReportStatus"/>
+      <moqui.basic.Enumeration enumId="MrsUnknownKey" description="Unknown delivery" sequenceNum="3" enumTypeId="MessageDeliveryReportStatus"/>
+      <moqui.basic.Enumeration enumId="MrsUnreadable" description="Not a readable report" sequenceNum="4" enumTypeId="MessageDeliveryReportStatus"/>
+      <moqui.basic.Enumeration enumId="MrsIgnored" description="Nothing to record" sequenceNum="5" enumTypeId="MessageDeliveryReportStatus"/>
+      <moqui.basic.Enumeration enumId="MrsFailed" description="Failed, tried again" sequenceNum="6" enumTypeId="MessageDeliveryReportStatus"/>
+    </seed-data>
+  </entity>
+
+    <!-- ========================================================= -->
+    <!--  - mantle.party -->
+    <!--  - mantle.party.agreement -->
+    <!--  - mantle.party.communication -->
+    <!--  - mantle.party.contact -->
+    <!--  - mantle.party.time -->
+    <!-- ========================================================= -->
+    <!-- ========================================================= -->
+    <!-- mantle.party -->
+    <!-- ========================================================= -->
+    <entity entity-name="Party" package="mantle.party" short-alias="parties">
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="pseudoId" type="text-short" default="partyId"/>
+        <field name="partyTypeEnumId" type="id"/>
+        <field name="disabled" type="text-indicator" enable-audit-log="true" default="'N'"/>
+        <field name="customerStatusId" type="id"/>
+        <field name="ownerPartyId" type="id" enable-audit-log="update" default="'_NA_'">
+            <description>If applicable, such as for customer records, the other Party that 'owns' the data for this Party.</description></field>
+        <field name="externalId" type="id"/>
+        <field name="dataSourceId" type="id"/>
+        <field name="gatewayCimId" type="text-short" ai-opt-out="true" enable-audit-log="update"/>
+        <field name="comments" type="text-long"/>
+        <field name="shippingInstructions" type="text-long"/>
+        <field name="hasDuplicates" type="text-indicator"/>
+        <field name="lastDupCheckDate" type="date-time"/>
+        <field name="mergedToPartyId" type="id"/><!-- no fk to avoid circular dependency, set automatically -->
+        <field name="privateOwnerUserId" type="id" enable-audit-log="update">
+            <description>For a personal contact, the user it belongs to: only that user sees the party (the MANTLE_USER_ORG and
+                MANTLE_ACTIVE_ORG entity filters, and the party finds, searches, lookups and duplicate services). Empty for a
+                directory party; cleared when the contact is linked to the directory.</description></field>
+
+        <relationship type="one" title="PartyType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="partyTypeEnumId"/></relationship>
+        <relationship type="one" title="CustomerStatus" related="moqui.basic.StatusItem">
+            <key-map field-name="customerStatusId" related="statusId"/></relationship>
+        <relationship type="one" title="Owner" related="mantle.party.Party" short-alias="owner">
+            <key-map field-name="ownerPartyId"/></relationship>
+        <relationship type="one" related="moqui.basic.DataSource"/>
+        <relationship type="one" title="PrivateOwner" related="moqui.security.UserAccount" short-alias="privateOwnerUser">
+            <key-map field-name="privateOwnerUserId" related="userId"/></relationship>
+
+        <relationship type="one-nofk" related="mantle.party.Organization" short-alias="organization" mutable="true"/>
+        <relationship type="one-nofk" related="mantle.party.Person" short-alias="person" mutable="true"/>
+        <relationship type="many" related="mantle.party.PartyBadge" short-alias="badges">
+            <key-map field-name="partyId"/></relationship>
+        <relationship type="many" related="mantle.party.PartyClassificationAppl" short-alias="classifications">
+            <key-map field-name="partyId"/></relationship>
+        <relationship type="many" related="mantle.party.PartyContent" short-alias="contents">
+            <key-map field-name="partyId"/></relationship>
+        <relationship type="many" related="mantle.party.PartyIdentification" short-alias="identifications">
+            <key-map field-name="partyId"/></relationship>
+        <relationship type="many" related="mantle.party.PartyNote" short-alias="notes">
+            <key-map field-name="partyId"/></relationship>
+        <relationship type="many" related="mantle.party.PartyRole" short-alias="roles">
+            <key-map field-name="partyId"/></relationship>
+        <relationship type="many" related="mantle.party.PartySetting" short-alias="settings">
+            <key-map field-name="partyId"/></relationship>
+
+        <relationship type="many" title="From" related="mantle.party.PartyRelationship" short-alias="fromRelationships">
+            <key-map field-name="partyId" related="fromPartyId"/></relationship>
+        <relationship type="many" title="To" related="mantle.party.PartyRelationship" short-alias="toRelationships">
+            <key-map field-name="partyId" related="toPartyId"/></relationship>
+        <relationship type="many" related="mantle.party.contact.PartyContactMech" short-alias="contactMechs">
+            <key-map field-name="partyId"/></relationship>
+
+        <relationship type="many" related="mantle.account.financial.FinancialAccount" short-alias="financialAccounts">
+            <key-map field-name="partyId" related="ownerPartyId"/></relationship>
+        <relationship type="many" related="mantle.account.method.PaymentMethod" short-alias="paymentMethods">
+            <key-map field-name="partyId" related="ownerPartyId"/></relationship>
+
+        <relationship type="many" related="moqui.security.UserAccount" short-alias="userAccounts">
+            <key-map field-name="partyId"/></relationship>
+
+        <index name="PARTY_ID_PSEUDO" unique="true"><index-field name="pseudoId"/><index-field name="ownerPartyId"/></index>
+        <index name="PARTY_ID_EXT"><index-field name="externalId"/></index>
+        <index name="PARTY_ID_MERGETO"><index-field name="mergedToPartyId"/></index>
+        <index name="PARTY_PRIV_OWNER"><index-field name="privateOwnerUserId"/></index>
+
+
+        <seed-data>
+            <!-- Party Type -->
+            <moqui.basic.EnumerationType description="Party Type" enumTypeId="PartyType"/>
+            <moqui.basic.Enumeration description="Automated Agent" enumId="PtyAutomatedAgent" enumTypeId="PartyType"/>
+            <moqui.basic.Enumeration description="Person" enumId="PtyPerson" enumTypeId="PartyType"/>
+            <moqui.basic.Enumeration description="Organization" enumId="PtyOrganization" enumTypeId="PartyType"/>
+
+            <!-- _NA_ Party -->
+            <Party partyId="_NA_" partyTypeEnumId="PtyPerson"/>
+            <Person partyId="_NA_" firstName="Not" lastName="Applicable"/>
+        </seed-data>
+        <master name="default">
+            <detail relationship="type"/>
+            <detail relationship="organization"/>
+            <detail relationship="person"/>
+            <!-- TODO: do something with UserAccount, exclude certain fields like PW/etc? -->
+            <detail relationship="badges"/>
+            <detail relationship="classifications">
+                <detail relationship="classification"><detail relationship="type"/></detail>
+            </detail>
+            <detail relationship="contents"><detail relationship="type"/></detail>
+            <detail relationship="identifications"><detail relationship="type"/></detail>
+            <detail relationship="notes"/>
+            <detail relationship="roles"><detail relationship="role"/></detail>
+            <detail relationship="fromRelationships">
+                <detail relationship="fromRole"/>
+                <detail relationship="toParty">
+                    <detail relationship="organization"/>
+                    <detail relationship="person"/>
+                </detail>
+                <detail relationship="toRole"/>
+                <detail relationship="status"/>
+                <detail relationship="type"/>
+            </detail>
+            <detail relationship="toRelationships">
+                <detail relationship="fromParty">
+                    <detail relationship="organization"/>
+                    <detail relationship="person"/>
+                </detail>
+                <detail relationship="fromRole"/>
+                <detail relationship="toRole"/>
+                <detail relationship="status"/>
+                <detail relationship="type"/>
+            </detail>
+            <detail relationship="contactMechs">
+                <detail relationship="contactMech" use-master="default"/>
+                <detail relationship="purpose"/>
+            </detail>
+        </master>
+        <master name="contact">
+            <detail relationship="type"/>
+            <detail relationship="organization"/>
+            <detail relationship="person"/>
+            <detail relationship="identifications"><detail relationship="type"/></detail>
+            <detail relationship="contactMechs">
+                <detail relationship="contactMech" use-master="default"/>
+                <detail relationship="purpose"/>
+            </detail>
+        </master>
+        <master name="basic">
+            <detail relationship="organization"/>
+            <detail relationship="person"/>
+            <detail relationship="identifications"><detail relationship="type"/></detail>
+        </master>
+    </entity>
+
+    <entity entity-name="Organization" package="mantle.party">
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="organizationName" type="text-medium"/>
+        <field name="officeSiteName" type="text-medium"/>
+        <field name="annualRevenue" type="currency-amount"/>
+        <field name="numEmployees" type="number-integer"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="many" title="Owner" related="mantle.facility.Facility" short-alias="ownerFacilities">
+            <key-map field-name="partyId" related="ownerPartyId"/></relationship>
+        <index name="PTY_ORG_NAME_IDX"><index-field name="organizationName"/></index>
+    </entity>
+
+    <entity entity-name="Person" package="mantle.party">
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="salutation" type="text-medium"/>
+        <field name="firstName" type="text-medium"/>
+        <field name="middleName" type="text-medium"/>
+        <field name="lastName" type="text-medium" enable-audit-log="update"/>
+        <field name="personalTitle" type="text-medium"/>
+        <field name="suffix" type="text-medium"/>
+        <field name="nickname" type="text-medium"/>
+        <field name="gender" type="text-indicator"/>
+        <field name="birthDate" type="date"/>
+        <field name="deceasedDate" type="date"/>
+        <field name="height" type="number-float"/>
+        <field name="weight" type="number-float"/>
+        <field name="mothersMaidenName" type="text-medium" encrypt="true"/>
+        <field name="maritalStatusEnumId" type="id"/>
+        <field name="employmentStatusEnumId" type="id"/>
+        <field name="residenceStatusEnumId" type="id"/>
+        <field name="occupation" type="text-medium"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" title="MaritalStatus" related="moqui.basic.Enumeration">
+            <key-map field-name="maritalStatusEnumId"/></relationship>
+        <relationship type="one" title="EmploymentStatus" related="moqui.basic.Enumeration">
+            <key-map field-name="employmentStatusEnumId"/></relationship>
+        <relationship type="one" title="ResidenceStatus" related="moqui.basic.Enumeration">
+            <key-map field-name="residenceStatusEnumId"/></relationship>
+        <index name="FIRST_NAME_IDX"><index-field name="firstName"/></index>
+        <index name="LAST_NAME_IDX"><index-field name="lastName"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Marital Status" enumTypeId="MaritalStatus"/>
+            <moqui.basic.Enumeration description="Single" enumId="MarsSingle" enumTypeId="MaritalStatus"/>
+            <moqui.basic.Enumeration description="Married" enumId="MarsMarried" enumTypeId="MaritalStatus"/>
+            <moqui.basic.Enumeration description="Divorced" enumId="MarsDivorced" enumTypeId="MaritalStatus"/>
+            <moqui.basic.Enumeration description="Widowed/Widower" enumId="MarsWidow" enumTypeId="MaritalStatus"/>
+
+            <moqui.basic.EnumerationType description="Employment Status" enumTypeId="EmploymentStatus"/>
+            <moqui.basic.Enumeration description="Full-time Employed" enumId="EmpsFullTime" enumTypeId="EmploymentStatus"/>
+            <moqui.basic.Enumeration description="Part-time Employed" enumId="EmpsPartTime" enumTypeId="EmploymentStatus"/>
+            <moqui.basic.Enumeration description="Self Employed" enumId="EmpsSelf" enumTypeId="EmploymentStatus"/>
+            <moqui.basic.Enumeration description="House-Person" enumId="EmpsHouse" enumTypeId="EmploymentStatus"/>
+            <moqui.basic.Enumeration description="Retired" enumId="EmpsRetired" enumTypeId="EmploymentStatus"/>
+            <moqui.basic.Enumeration description="Student" enumId="EmpsStudent" enumTypeId="EmploymentStatus"/>
+            <moqui.basic.Enumeration description="Unemployed" enumId="EmpsUnemployed" enumTypeId="EmploymentStatus"/>
+
+            <moqui.basic.EnumerationType description="Residence Status" enumTypeId="ResidenceStatus"/>
+            <moqui.basic.Enumeration description="Own Home" enumId="RessOwn" enumTypeId="ResidenceStatus"/>
+            <moqui.basic.Enumeration description="Private Tenant" enumId="RessPrivateTenant" enumTypeId="ResidenceStatus"/>
+            <moqui.basic.Enumeration description="Public Tenant" enumId="RessPublicTenant" enumTypeId="ResidenceStatus"/>
+            <moqui.basic.Enumeration description="With Parents" enumId="RessParents" enumTypeId="ResidenceStatus"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PartyBadge" package="mantle.party">
+        <field name="partyBadgeId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="serialNumber" type="text-short"/>
+        <field name="storedValue" type="text-medium"><description>For RFID this is the unique tracking identifier
+            (the TID can be tracked in the serialNumber field)</description></field>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
+        <index name="PartyBadgeSerial" unique="true"><index-field name="serialNumber"/></index>
+        <index name="PartyBadgeStored" unique="true"><index-field name="storedValue"/></index>
+    </entity>
+
+    <entity entity-name="PartyBadgeScan" package="mantle.party">
+        <field name="partyBadgeId" type="id" is-pk="true"/>
+        <field name="scanDate" type="date-time" is-pk="true"/>
+        <field name="scanValue" type="text-short"/>
+        <field name="scanPurposeEnumId" type="id"/>
+        <field name="scanResultEnumId" type="id"/>
+        <field name="facilityId" type="id"/>
+        <field name="timeEntryId" type="id"/>
+        <relationship type="one" related="mantle.party.PartyBadge"/>
+        <relationship type="one" title="PartyBadgeScanPurpose" related="moqui.basic.Enumeration">
+            <key-map field-name="scanPurposeEnumId"/></relationship>
+        <relationship type="one" title="PartyBadgeScanResult" related="moqui.basic.Enumeration">
+            <key-map field-name="scanResultEnumId"/></relationship>
+        <relationship type="one" related="mantle.facility.Facility"/>
+        <relationship type="one" related="mantle.work.time.TimeEntry"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Party Badge Scan Purpose" enumTypeId="PartyBadgeScanPurpose"/>
+            <moqui.basic.Enumeration description="Access" enumId="PbspAccess" enumTypeId="PartyBadgeScanPurpose"/>
+            <moqui.basic.Enumeration description="Clock In" enumId="PbspClockIn" enumTypeId="PartyBadgeScanPurpose"/>
+            <moqui.basic.Enumeration description="Clock Out" enumId="PbspClockOut" enumTypeId="PartyBadgeScanPurpose"/>
+
+            <moqui.basic.EnumerationType description="Party Badge Scan Result" enumTypeId="PartyBadgeScanResult"/>
+            <moqui.basic.Enumeration description="Success" enumId="PbsrSuccess" enumTypeId="PartyBadgeScanResult"/>
+            <moqui.basic.Enumeration description="Not Yet Valid" enumId="PbsrNotYetValid" enumTypeId="PartyBadgeScanResult"/>
+            <moqui.basic.Enumeration description="Expired" enumId="PbsrExpired" enumTypeId="PartyBadgeScanResult"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PartyClassification" package="mantle.party" cache="true">
+        <field name="partyClassificationId" type="id" is-pk="true"/>
+        <field name="classificationTypeEnumId" type="id"/>
+        <field name="parentClassificationId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <field name="standardCode" type="text-medium"/>
+        <relationship type="one" title="PartyClassificationType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="classificationTypeEnumId"/></relationship>
+        <relationship type="one" title="Parent" related="mantle.party.PartyClassification">
+            <key-map field-name="parentClassificationId" related="partyClassificationId"/></relationship>
+        <seed-data>
+            <moqui.basic.Enumeration description="Customer" enumId="PcltCustomer" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="EEOC (Equal Opportunity)" enumId="PcltEeoc" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="Minority" enumId="PcltMinority" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="Income" enumId="PcltIncome" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="Industry" enumId="PcltIndustry" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="Revenue" enumId="PcltRevenue" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="Number of Employees" enumId="PcltNumberEmployees" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="SIC Code" enumId="PcltSicCode" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="NAICS Code" enumId="PcltNaicsCode" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="Ownership" enumId="PcltOwnership" enumTypeId="PartyClassificationType"/>
+
+            <!-- commenting these to simplify options; most are redundant with or less specific than remaining types:
+            <moqui.basic.Enumeration description="Trade" enumId="PcltTrade" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="Trade - Wholesale" parentEnumId="PcltTrade" enumId="PcltTradeWholesale" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="Trade - Retail" parentEnumId="PcltTrade" enumId="PcltTradeRetail" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="Organization" enumId="PcltOrganization" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="Person" enumId="PcltPerson" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="Size" enumId="PcltSize" enumTypeId="PartyClassificationType"/>
+            <moqui.basic.Enumeration description="Value Rating" enumId="PcltValueRating" enumTypeId="PartyClassificationType"/>
+            -->
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PartyClassificationAppl" package="mantle.party">
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="partyClassificationId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="mantle.party.PartyClassification" short-alias="classification"/>
+    </entity>
+
+    <!-- in general PartyClassificationAppl is better, enforce single through service while retaining history
+    <entity entity-name="PartyClassificationSingle" package="mantle.party">
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="classificationTypeEnumId" type="id" is-pk="true"/>
+        <field name="partyClassificationId" type="id"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" title="PartyClassificationType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="classificationTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.party.PartyClassification" short-alias="classification"/>
+    </entity>
+    -->
+    <!-- not currently used, likely useful at some point for dimensions applicable to a PartyClassification
+    <entity entity-name="PartyClassDimension" package="mantle.party">
+        <field name="partyClassificationId" type="id" is-pk="true"/>
+        <field name="uomDimensionTypeId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.party.PartyClassification" short-alias="classification"/>
+        <relationship type="one" related="moqui.basic.UomDimensionType" short-alias="type"/>
+    </entity>
+    -->
+    <entity entity-name="PartyDimension" package="mantle.party">
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="uomDimensionTypeId" type="id" is-pk="true"/>
+        <field name="dimensionDate" type="date-time" is-pk="true" default="ec.user.nowTimestamp"/>
+        <field name="value" type="number-decimal"/>
+        <field name="uomId" type="id"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="moqui.basic.UomDimensionType" short-alias="type"/>
+        <relationship type="one" related="moqui.basic.Uom" short-alias="uom"/>
+    </entity>
+
+    <entity entity-name="PartyConsent" package="mantle.party" cache="never">
+        <description>A party's consent, granted or withdrawn, for a purpose (marketing email, SMS, phone, data processing):
+            for one of its addresses (contactMechId) or the party as a whole (none), and for a list subscription change
+            (contactListId), with when, how (sourceEnumId), the evidence and who recorded it. History only: each change is
+            a new row and rows are not updated. The current state of a purpose for an address (or for the party, with no
+            contactMechId) is its latest row without a contactListId, by consentDate; a row with a contactListId is the
+            history of that list's subscription, whose state is the ContactListParty status. Whether an address may be
+            solicited is PartyContactMech.allowSolicitation, which mantle.party.ConsentServices.store#PartyConsent keeps
+            in step with the marketing purposes of the address.</description>
+        <field name="partyConsentId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"/>
+        <field name="contactMechId" type="id"/>
+        <field name="purposeEnumId" type="id"/>
+        <field name="statusId" type="id"/>
+        <field name="consentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="sourceEnumId" type="id"/>
+        <field name="evidenceText" type="text-long"><description>What shows the consent or its withdrawal: the form and
+            its wording, the import file, the message whose link was used</description></field>
+        <field name="contactListId" type="id"><description>Set on a list subscription change</description></field>
+        <field name="userId" type="id"><description>The user who recorded it; empty for the anonymous unsubscribe
+            page</description></field>
+        <field name="comments" type="text-medium"/>
+        <field name="organizationPartyId" type="id"><description>The organization a grant or withdrawal of a purpose is for
+            (impl-marketing P3, F9); empty is global, for every organization. A party's state of a purpose for an organization is its
+            latest row of that organization unless its latest global row withdraws it: a scoped grant never undoes a global
+            withdrawal (mantle.party.ConsentServices get#PartyConsentState). A list's row needs none: the list's owner is its
+            organization.</description></field>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.party.contact.ContactMech" short-alias="contactMech"/>
+        <relationship type="one" title="PartyConsentPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId"/></relationship>
+        <relationship type="one" title="PartyConsent" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one" title="PartyConsentSource" related="moqui.basic.Enumeration" short-alias="source">
+            <key-map field-name="sourceEnumId"/></relationship>
+        <relationship type="one" related="mantle.marketing.contact.ContactList" short-alias="contactList"/>
+        <relationship type="one" related="moqui.security.UserAccount" short-alias="user"/>
+        <index name="PARTY_CONSENT_PARTY"><index-field name="partyId"/></index>
+        <seed-data>
+            <!-- Party Consent Purpose -->
+            <moqui.basic.EnumerationType description="Party Consent Purpose" enumTypeId="PartyConsentPurpose"/>
+            <moqui.basic.Enumeration enumId="PcpMarketingEmail" description="Marketing Email" sequenceNum="1" enumTypeId="PartyConsentPurpose"/>
+            <moqui.basic.Enumeration enumId="PcpSms" description="SMS" sequenceNum="2" enumTypeId="PartyConsentPurpose"/>
+            <moqui.basic.Enumeration enumId="PcpPhone" description="Phone" sequenceNum="3" enumTypeId="PartyConsentPurpose"/>
+            <moqui.basic.Enumeration enumId="PcpDataProcessing" description="Data Processing" sequenceNum="4" enumTypeId="PartyConsentPurpose"/>
+
+            <!-- Party Consent Source -->
+            <moqui.basic.EnumerationType description="Party Consent Source" enumTypeId="PartyConsentSource"/>
+            <moqui.basic.Enumeration enumId="PcsForm" description="Form" sequenceNum="1" enumTypeId="PartyConsentSource"/>
+            <moqui.basic.Enumeration enumId="PcsImport" description="Import" sequenceNum="2" enumTypeId="PartyConsentSource"/>
+            <moqui.basic.Enumeration enumId="PcsEmailLink" description="Email Link" sequenceNum="3" enumTypeId="PartyConsentSource"/>
+            <moqui.basic.Enumeration enumId="PcsStaff" description="Staff" sequenceNum="4" enumTypeId="PartyConsentSource"/>
+            <moqui.basic.Enumeration enumId="PcsApi" description="API" sequenceNum="5" enumTypeId="PartyConsentSource"/>
+            <!-- impl-marketing P19: a withdrawal kept for the kept party of a merge (mantle/marketing/MarketingPartyMerge.js) -->
+            <moqui.basic.Enumeration enumId="PcsMerge" description="Party merge" sequenceNum="6" enumTypeId="PartyConsentSource"/>
+
+            <!-- Party Consent Status: each change is a new row, so there are no transitions -->
+            <moqui.basic.StatusType description="Party Consent" statusTypeId="PartyConsent"/>
+            <moqui.basic.StatusItem description="Granted" sequenceNum="1" statusId="PconGranted" statusTypeId="PartyConsent"/>
+            <moqui.basic.StatusItem description="Withdrawn" sequenceNum="2" statusId="PconWithdrawn" statusTypeId="PartyConsent"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PartyContent" package="mantle.party">
+        <field name="partyContentId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="partyContentTypeEnumId" type="id"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="viewedDate" type="date-time" enable-audit-log="true"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <field name="partyIdTypeEnumId" type="id"/>
+        <field name="originalPartyContentId" type="id">
+            <description>Set this when copying content from one Party to another, may have same or different contentLocation</description></field>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" title="PartyContentType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="partyContentTypeEnumId"/></relationship>
+        <relationship type="one" title="PartyIdType" related="moqui.basic.Enumeration" short-alias="partyIdTypeEnum">
+            <key-map field-name="partyIdTypeEnumId"/></relationship>
+        <relationship type="one" title="Original" related="mantle.party.PartyContent" short-alias="originalPartyContent">
+            <key-map field-name="originalPartyContentId"/></relationship>
+
+        <seed-data>
+            <!-- Party Content Type -->
+            <moqui.basic.EnumerationType description="Party Content Type" enumTypeId="PartyContentType"/>
+            <moqui.basic.Enumeration description="Internal Content" enumId="PcntInternal" enumTypeId="PartyContentType"/>
+            <moqui.basic.Enumeration description="User Defined Content"  enumId="PcntUserDefined" enumTypeId="PartyContentType"/>
+            <moqui.basic.Enumeration description="Primary Image"  enumId="PcntPrimaryImage" enumTypeId="PartyContentType"/>
+            <moqui.basic.Enumeration description="Logo Image"  enumId="PcntLogoImage" enumTypeId="PartyContentType"/>
+            <moqui.basic.Enumeration description="Face Image"  enumId="PcntFaceImage" enumTypeId="PartyContentType"/>
+            <moqui.basic.Enumeration description="Vendor Shipping Info"  enumId="PcntVendorShipping" enumTypeId="PartyContentType"/>
+            <moqui.basic.Enumeration description="Invoice Message - When From Party" enumId="PcntInvoiceMessageFrom" enumTypeId="PartyContentType"/>
+            <moqui.basic.Enumeration description="Invoice Message - When To Party" enumId="PcntInvoiceMessageTo" enumTypeId="PartyContentType"/>
+            <moqui.basic.Enumeration description="Payment Signature Primary"  enumId="PcntPaymentSignaturePrimary" enumTypeId="PartyContentType"/>
+            <moqui.basic.Enumeration description="Payment Signature Secondary"  enumId="PcntPaymentSignatureSecondary" enumTypeId="PartyContentType"/>
+            <moqui.basic.Enumeration description="Identity Document"  enumId="PcntIdentityDocument" enumTypeId="PartyContentType"/>
+            <moqui.basic.Enumeration description="Employment Authorization Document"  enumId="PcntEmplAuthzDocument" enumTypeId="PartyContentType"/>
+            <moqui.basic.Enumeration description="Bio"  enumId="PcntBio" enumTypeId="PartyContentType"/>
+            <!-- an internal organization's own Constitution (mr-moqui docs/ai/Constitution.md), one per organization -->
+            <moqui.basic.Enumeration description="Constitution" enumId="PcntConstitution" enumTypeId="PartyContentType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PartyGeoPoint" package="mantle.party">
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="geoPointId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="moqui.basic.GeoPoint"/>
+    </entity>
+
+    <entity entity-name="PartyIdentification" package="mantle.party">
+        <!-- FUTURE? support multiple/history of IDs; single sequenced PK; update lookup/etc services -->
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="partyIdTypeEnumId" type="id" is-pk="true"/>
+        <field name="idValue" type="text-medium" encrypt="true"/>
+        <field name="issuedBy" type="text-medium"/>
+        <field name="issuedByPartyId" type="id"/>
+        <field name="expireDate" type="date"/>
+        <relationship type="one" title="PartyIdType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="partyIdTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" title="IssuedBy" related="mantle.party.Party">
+            <key-map field-name="issuedByPartyId"/></relationship>
+        <index name="PARTY_ID_VALUE"><index-field name="idValue"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Party Identification Type" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="Passport Number" enumId="PtidPassport" enumTypeId="PartyIdType" optionValue="*{4,10}"/>
+            <moqui.basic.Enumeration description="Driver License Number" enumId="PtidDriverLicense" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="Social Security Number" enumId="PtidSsn" enumTypeId="PartyIdType" optionValue="999-99-9999"/>
+            <moqui.basic.Enumeration description="Federal Agent Indicator Code" enumId="PtidFaic" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="Federal EIN" enumId="PtidFein" enumTypeId="PartyIdType" optionValue="99-9999999"/>
+            <moqui.basic.Enumeration description="Federal User ID" enumId="PtidFuid" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="Matricula Consular ID" enumId="PtidMcid" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="Global Location Number" enumId="PtidGln" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="Alien Registration Number" enumId="PtidArn" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="Immigrant Admission Number" enumId="PtidIan" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="Dun and Bradstreet DUNS" enumId="PtidDuns" enumTypeId="PartyIdType" optionValue="99-999-9999"/>
+            <moqui.basic.Enumeration description="Dun and Bradstreet DUNS+4" enumId="PtidDuns4" enumTypeId="PartyIdType" optionValue="99-999-9999-9999"/>
+            <moqui.basic.Enumeration description="Customer Assigned" enumId="PtidCust" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="Vendor Assigned" enumId="PtidVend" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="Permanent Resident" enumId="PtidPermReg" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="I-551" enumId="PtidI551" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="I-766" enumId="PtidI766" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="I-94" enumId="PtidI94" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="I-94A" enumId="Ptid94A" enumTypeId="PartyIdType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PartyNote" package="mantle.party">
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="noteDate" type="date-time" is-pk="true" default="ec.user.nowTimestamp"/>
+        <field name="noteText" type="text-long" enable-audit-log="true"/>
+        <field name="internalNote" type="text-indicator"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+    </entity>
+
+    <entity entity-name="PartyNotDuplicate" package="mantle.party" cache="never">
+        <description>A decision that two parties are not duplicates (mantle.party.DuplicateServices mark#PartyNotDuplicate and
+            unmark#PartyNotDuplicate). The duplicate services leave the pair out: find#PartyDuplicates, find#PartyHasDuplicates,
+            find#PartyNameMatches and so the check#AllPartyDuplicates scan. One row per pair either way round: partyId is the
+            lower id of the two and otherPartyId the higher, so a party's decisions are the rows with its id in either field.
+            merge#Parties moves the merged party's decisions to the party it is merged into.</description>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="otherPartyId" type="id" is-pk="true"/>
+        <field name="decidedByUserId" type="id"/>
+        <field name="decidedDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="comments" type="text-medium"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" title="Other" related="mantle.party.Party" short-alias="otherParty">
+            <key-map field-name="otherPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="DecidedBy" related="moqui.security.UserAccount" short-alias="decidedByUser">
+            <key-map field-name="decidedByUserId" related="userId"/></relationship>
+        <index name="PTY_NOTDUP_OTHER"><index-field name="otherPartyId"/></index>
+    </entity>
+
+    <entity entity-name="PartyRelationship" package="mantle.party">
+        <field name="partyRelationshipId" type="id" is-pk="true"/>
+        <field name="relationshipTypeEnumId" type="id"/>
+        <field name="fromPartyId" type="id"/>
+        <field name="fromRoleTypeId" type="id"/>
+        <field name="toPartyId" type="id"/>
+        <field name="toRoleTypeId" type="id"/>
+        <field name="fromDate" type="date-time"/>
+        <!-- audit-logged: ending an organization membership keeps who ended it, when and why (impl-admin P4, F23); a create
+            with no end writes no row -->
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <!-- not used: <field name="priorityTypeEnumId" type="id"/> -->
+        <!-- not used: <field name="permissionsEnumId" type="id"/> -->
+        <field name="comments" type="text-medium"/>
+        <field name="relationshipName" type="text-medium">
+            <description>Official name of relationship, such as title in an organization.</description>
+        </field>
+        <relationship type="one" title="PartyRelationshipType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="relationshipTypeEnumId"/></relationship>
+        <relationship type="one" title="From" related="mantle.party.Party" short-alias="fromParty">
+            <key-map field-name="fromPartyId"/></relationship>
+        <relationship type="one" title="From" related="mantle.party.RoleType" short-alias="fromRole">
+            <key-map field-name="fromRoleTypeId"/></relationship>
+        <relationship type="one" title="To" related="mantle.party.Party" short-alias="toParty">
+            <key-map field-name="toPartyId"/></relationship>
+        <relationship type="one" title="To" related="mantle.party.RoleType" short-alias="toRole">
+            <key-map field-name="toRoleTypeId"/></relationship>
+        <relationship type="one" title="PartyRelationship" related="moqui.basic.StatusItem" short-alias="status"/>
+        <!-- not used: <relationship type="one" title="PriorityType" related="moqui.basic.Enumeration" short-alias="priorityType">
+            <key-map field-name="priorityTypeEnumId"/></relationship> -->
+        <seed-data>
+            <!-- NOTE: The partyRelationshipTypeEnumId describes the FROM Party, ie Joe is a customer of ACME, so Joe
+                is the fromPartyId (fromRoleTypeId=Customer) and ACME is the toPartyId (toRoleTypeId=OrgInternal); for
+                other examples see Table 2.5 in "The Data Model Resource Book, Revised Edition, Volume 1"-->
+            <moqui.basic.EnumerationType description="Party Relationship Type" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Agent" enumId="PrtAgent" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Child" enumId="PrtChild" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Contact" enumId="PrtContact" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Customer" enumId="PrtCustomer" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Employee" enumId="PrtEmployee" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Friend" enumId="PrtFriend" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Manager" enumId="PrtManager" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Organization Member" enumId="PrtMember" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Organization Rollup (Child)" enumId="PrtOrgRollup" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Partner" enumId="PrtPartner" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Representative" enumId="PrtRepresentative" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Sales Affiliate" enumId="PrtSalesAffiliate" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Spouse" enumId="PrtSpouse" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Supplier" enumId="PrtSupplier" enumTypeId="PartyRelationshipType"/>
+
+            <moqui.basic.StatusType description="Party Relationship" statusTypeId="PartyRelationship"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PartyRole" package="mantle.party">
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="mantle.party.RoleType" short-alias="role"/>
+        <!-- This relationship is necessary as a backward relationship used in a DataDocument, otherwise wouldn't be needed -->
+        <relationship type="many" title="Vendor" related="mantle.order.OrderPart">
+            <key-map field-name="partyId" related="vendorPartyId"/></relationship>
+    </entity>
+
+    <entity entity-name="RoleGroupMember" package="mantle.party">
+        <field name="roleGroupEnumId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <relationship type="one" title="RoleGroup" related="moqui.basic.Enumeration">
+            <key-map field-name="roleGroupEnumId"/></relationship>
+        <relationship type="one" related="mantle.party.RoleType"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Role Group" enumTypeId="RoleGroup"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="RoleType" package="mantle.party" cache="true">
+        <!-- NOTE: RoleType is not moved to Enumeration because there are many of them (ID conflicts) and it is referred to in many places. -->
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <field name="parentTypeId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" title="Parent" related="mantle.party.RoleType">
+            <key-map field-name="parentTypeId" related="roleTypeId"/></relationship>
+        <seed-data>
+            <!-- Role to use when a role is not really applicable for the party association with a record. -->
+            <mantle.party.RoleType description="Not Applicable" roleTypeId="_NA_"/>
+
+            <!-- General Roles -->
+            <mantle.party.RoleType description="Agent" roleTypeId="Agent"/>
+            <mantle.party.RoleType description="Affiliate" roleTypeId="Affiliate"/>
+            <mantle.party.RoleType description="Asset Owner" roleTypeId="AssetOwner"/>
+            <mantle.party.RoleType description="Bad Actor (Banned)" roleTypeId="BadActor"/>
+            <mantle.party.RoleType description="Carrier" roleTypeId="Carrier"/>
+            <mantle.party.RoleType description="Competitor" roleTypeId="Competitor"/>
+            <mantle.party.RoleType description="Consumer" roleTypeId="Consumer"/>
+            <mantle.party.RoleType description="Contractor" roleTypeId="Contractor"/>
+            <mantle.party.RoleType description="Distributor" roleTypeId="Distributor"/>
+            <mantle.party.RoleType description="Garnishment Payee" roleTypeId="GarnishmentPayee"/>
+            <mantle.party.RoleType description="Internet Service Provider" roleTypeId="InternetSp"/>
+            <mantle.party.RoleType description="Hosting Provider" roleTypeId="HostingProvider"/>
+            <mantle.party.RoleType description="Manufacturer" roleTypeId="Manufacturer"/>
+            <mantle.party.RoleType description="Owner"  roleTypeId="Owner"/>
+            <mantle.party.RoleType description="Partner" roleTypeId="Partner"/>
+            <mantle.party.RoleType description="Payroll Other Payee" roleTypeId="PayrollOtherPayee"/>
+            <mantle.party.RoleType description="Prospect" roleTypeId="Prospect"/>
+            <mantle.party.RoleType description="Referrer" roleTypeId="Referrer"/>
+            <mantle.party.RoleType description="Sales Account" roleTypeId="Account"/>
+            <mantle.party.RoleType description="Sales Account Lead" roleTypeId="AccountLead"/>
+            <mantle.party.RoleType description="Shareholder" roleTypeId="Shareholder"/>
+            <mantle.party.RoleType description="Subscriber" roleTypeId="Subscriber"/>
+            <mantle.party.RoleType description="Supplier" roleTypeId="Supplier"/>
+            <mantle.party.RoleType description="Visitor" roleTypeId="Visitor"/>
+            <mantle.party.RoleType description="Web Master" roleTypeId="WebMaster"/>
+
+            <!-- Person Roles -->
+            <mantle.party.RoleType description="Accountant" roleTypeId="Accountant"/>
+            <mantle.party.RoleType description="Administrator" roleTypeId="Administrator"/>
+            <mantle.party.RoleType description="Assignee" roleTypeId="Assignee"/>
+            <mantle.party.RoleType description="Buyer" roleTypeId="Buyer"/>
+            <mantle.party.RoleType description="Cashier" roleTypeId="Cashier"/>
+            <mantle.party.RoleType description="Client Billing Rep" roleTypeId="ClientBilling"/>
+            <mantle.party.RoleType description="Client Manager" roleTypeId="ClientManager"/>
+            <mantle.party.RoleType description="Email Administrator" roleTypeId="EmailAdmin"/>
+            <mantle.party.RoleType description="Employee" roleTypeId="Employee"/>
+            <mantle.party.RoleType description="Executive" roleTypeId="Executive"/>
+            <mantle.party.RoleType description="Family Member" roleTypeId="FamilyMember"/>
+            <mantle.party.RoleType description="Human Resources Manager" roleTypeId="HumanResourcesManager"/>
+            <mantle.party.RoleType description="Inventory Manager" roleTypeId="InventoryManager"/>
+            <mantle.party.RoleType description="Manager" roleTypeId="Manager"/>
+            <mantle.party.RoleType description="Operator" roleTypeId="Operator"/>
+            <mantle.party.RoleType description="Order Clerk" roleTypeId="OrderClerk"/>
+            <mantle.party.RoleType description="Packer" roleTypeId="Packer"/>
+            <mantle.party.RoleType description="Payroll" roleTypeId="Payroll"/>
+            <mantle.party.RoleType description="Picker" roleTypeId="Picker"/>
+            <mantle.party.RoleType description="Production Manager" roleTypeId="ProductionManager"/>
+            <mantle.party.RoleType description="Production Worker" roleTypeId="ProductionWorker"/>
+            <mantle.party.RoleType description="Receiver" roleTypeId="Receiver"/>
+            <mantle.party.RoleType description="Reporter" roleTypeId="Reporter"/>
+            <mantle.party.RoleType description="Sales Contact" roleTypeId="Contact"/>
+            <mantle.party.RoleType description="Sales Representative" roleTypeId="SalesRepresentative"/>
+            <mantle.party.RoleType description="Shipment Clerk" roleTypeId="ShipmentClerk"/>
+            <mantle.party.RoleType description="Sponsor" roleTypeId="Sponsor"/>
+            <mantle.party.RoleType description="Spouse" roleTypeId="Spouse"/>
+            <mantle.party.RoleType description="Stocker" roleTypeId="Stocker"/>
+            <mantle.party.RoleType description="Supplier Agent" roleTypeId="SupplierAgent"/>
+            <mantle.party.RoleType description="Technical Contact" roleTypeId="TechContact"/>
+            <mantle.party.RoleType description="Watcher" roleTypeId="Watcher"/>
+            <mantle.party.RoleType description="Worker" roleTypeId="Worker"/>
+
+            <mantle.party.RoleType description="Business Analyst" roleTypeId="BusinessAnalyst"/>
+            <mantle.party.RoleType description="Default Assignee" roleTypeId="DefaultAssignee"/>
+            <mantle.party.RoleType description="Expert User" roleTypeId="ExpertUser"/>
+            <mantle.party.RoleType description="Programmer" roleTypeId="Programmer"/>
+            <mantle.party.RoleType description="Programmer Lead" roleTypeId="ProgrammerLead"/>
+            <mantle.party.RoleType description="Project Manager" roleTypeId="ProjectManager"/>
+            <mantle.party.RoleType description="Quality Analyst" roleTypeId="QualityAnalyst"/>
+            <mantle.party.RoleType description="Quality Lead" roleTypeId="QualityLead"/>
+            <mantle.party.RoleType description="System Administrator" roleTypeId="SysAdmin"/>
+            <mantle.party.RoleType description="System Architect" roleTypeId="SysArchitect"/>
+            <mantle.party.RoleType description="UI Designer" roleTypeId="UiDesigner"/>
+
+
+            <moqui.basic.Enumeration description="Person Roles" enumId="RgpPerson" enumTypeId="RoleGroup"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Accountant"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Administrator"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Assignee"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Buyer"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Cashier"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="ClientBilling"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="ClientManager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Contact"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="EmailAdmin"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Employee"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="FamilyMember"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="HumanResourcesManager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="InventoryManager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Manager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Operator"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="OrderClerk"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Packer"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Picker"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="ProductionManager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Receiver"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Reporter"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="SalesRepresentative"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="ShipmentClerk"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Sponsor"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Spouse"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Stocker"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="SupplierAgent"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Watcher"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Worker"/>
+
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="BusinessAnalyst"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="DefaultAssignee"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="ExpertUser"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Programmer"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="ProgrammerLead"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="ProjectManager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="QualityAnalyst"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="QualityLead"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="SysAdmin"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="SysArchitect"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="UiDesigner"/>
+
+            <!-- Organization Roles -->
+            <mantle.party.RoleType description="Association" roleTypeId="OrgAssociation"/>
+            <mantle.party.RoleType description="Corporation" roleTypeId="OrgCorporation"/>
+            <mantle.party.RoleType description="Department" roleTypeId="OrgDepartment"/>
+            <mantle.party.RoleType description="Division" roleTypeId="OrgDivision"/>
+            <mantle.party.RoleType description="Employer" roleTypeId="OrgEmployer"/>
+            <mantle.party.RoleType description="Family" roleTypeId="OrgFamily"/>
+            <mantle.party.RoleType description="Government" roleTypeId="OrgGovernment"/>
+            <mantle.party.RoleType description="Government Agency" roleTypeId="OrgGovernmentAgency"/>
+            <mantle.party.RoleType description="Household" roleTypeId="OrgHousehold"/>
+            <mantle.party.RoleType description="Team" roleTypeId="OrgTeam"/>
+            <mantle.party.RoleType description="Unit" roleTypeId="OrgUnit"/>
+            <mantle.party.RoleType description="Parent" roleTypeId="OrgParent"/>
+            <mantle.party.RoleType description="Regulatory Agency" roleTypeId="OrgRegulatoryAgency"/>
+            <mantle.party.RoleType description="Subsidiary" roleTypeId="OrgSubsidiary"/>
+            <mantle.party.RoleType description="Tax Authority" roleTypeId="OrgTaxAuthority"/>
+            <mantle.party.RoleType description="Union" roleTypeId="OrgUnion"/>
+
+            <moqui.basic.Enumeration description="Organization Roles" enumId="RgpOrganization" enumTypeId="RoleGroup"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgAssociation"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgCorporation"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgDepartment"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgDivision"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgFamily"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgGovernment"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgGovernmentAgency"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgHousehold"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgInternal"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgTeam"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgUnit"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgParent"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgRegulatoryAgency"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgSubsidiary"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgTaxAuthority"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrganization" roleTypeId="OrgUnion"/>
+
+            <!-- Calendar Roles -->
+            <mantle.party.RoleType description="Attendee" roleTypeId="Attendee"/>
+            <mantle.party.RoleType description="Delegate" roleTypeId="Delegate"/>
+            <mantle.party.RoleType description="Host" roleTypeId="Host"/>
+            <mantle.party.RoleType description="Organizer" roleTypeId="Organizer"/>
+
+            <moqui.basic.Enumeration description="Calendar Roles" enumId="RgpCalendar" enumTypeId="RoleGroup"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpCalendar" roleTypeId="Attendee"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpCalendar" roleTypeId="Delegate"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpCalendar" roleTypeId="Host"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpCalendar" roleTypeId="Organizer"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpCalendar" roleTypeId="Owner"/>
+
+            <!-- Customer and Vendor Roles -->
+            <!-- NOTE: these don't use RoleGroupMember because they are an actual hierarchy of roles (Customer and Vendor are valid roles with sub-roles) -->
+            <mantle.party.RoleType description="Customer" roleTypeId="Customer"/>
+            <mantle.party.RoleType description="Customer - Bill To" parentTypeId="Customer" roleTypeId="CustomerBillTo"/>
+            <mantle.party.RoleType description="Customer - End User" parentTypeId="Customer" roleTypeId="CustomerEndUser"/>
+            <mantle.party.RoleType description="Customer - Placing" parentTypeId="Customer" roleTypeId="CustomerPlacing"/>
+            <mantle.party.RoleType description="Customer - Ship To" parentTypeId="Customer" roleTypeId="CustomerShipTo"/>
+            <mantle.party.RoleType description="Vendor" roleTypeId="Vendor"/>
+            <mantle.party.RoleType description="Vendor - Bill From" parentTypeId="Vendor" roleTypeId="VendorBillFrom"/>
+            <mantle.party.RoleType description="Vendor - Ship From" parentTypeId="Vendor" roleTypeId="VendorShipFrom"/>
+            <mantle.party.RoleType description="Vendor - Pick Up From" parentTypeId="Vendor" roleTypeId="VendorPickUpFrom"/>
+
+            <moqui.basic.Enumeration description="Order Roles" enumId="RgpOrder" enumTypeId="RoleGroup"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="Customer"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="CustomerBillTo"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="CustomerEndUser"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="CustomerPlacing"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="CustomerShipTo"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="Vendor"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="VendorBillFrom"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="VendorShipFrom"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="VendorPickUpFrom"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="Supplier"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="Account"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="Agent"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="Affiliate"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="Carrier"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="Competitor"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="Partner"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="Referrer"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="Buyer"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="Cashier"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="ClientBilling"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="OrderClerk"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="SalesRepresentative"/>
+
+            <moqui.basic.Enumeration description="Account Contact Roles" enumId="RgpAccountContact" enumTypeId="RoleGroup"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="Accountant"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="Buyer"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="ClientBilling"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="ClientManager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="InventoryManager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="Manager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="OrderClerk"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="Owner"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="Receiver"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="ProductionManager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="SalesRepresentative"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="ShipmentClerk"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="SupplierAgent"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAccountContact" roleTypeId="TechContact"/>
+
+            <moqui.basic.Enumeration description="Directly Applied Roles" enumId="RgpDirect" enumTypeId="RoleGroup"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpDirect" roleTypeId="Customer"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpDirect" roleTypeId="Account"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpDirect" roleTypeId="Contact"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpDirect" roleTypeId="Supplier"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpDirect" roleTypeId="OrgInternal"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpDirect" roleTypeId="Employee"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpDirect" roleTypeId="BadActor"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PartySetting" package="mantle.party">
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="partySettingTypeId" type="id" is-pk="true"/>
+        <!-- audit-logged (impl-people P29): an organization's settings, such as People's clocking default and case intake handlers,
+            keep their history and the change reason (settingValue_changeReason) -->
+        <field name="settingValue" type="text-medium" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="mantle.party.PartySettingType" short-alias="settingType"/>
+        <relationship type="one-nofk" related="moqui.basic.Enumeration">
+            <description>This is one-nofk because settingValue may by an enumId or may be plain text depending on PartySettingType</description>
+            <key-map field-name="settingValue"/></relationship>
+    </entity>
+
+    <entity entity-name="PartyRelationshipSetting" package="mantle.party">
+        <field name="partyRelationshipId" type="id" is-pk="true"/>
+        <field name="partySettingTypeId" type="id" is-pk="true"/>
+        <field name="settingValue" type="text-medium"/>
+        <relationship type="one" related="mantle.party.PartyRelationship" short-alias="partyRelationship"/>
+        <relationship type="one" related="mantle.party.PartySettingType" short-alias="settingType"/>
+        <relationship type="one-nofk" related="moqui.basic.Enumeration">
+            <description>This is one-nofk because settingValue may by an enumId or may be plain text depending on PartySettingType</description>
+            <key-map field-name="settingValue"/></relationship>
+    </entity>
+
+    <entity entity-name="PartySettingType" package="mantle.party" use="configuration" cache="true">
+        <field name="partySettingTypeId" type="id" is-pk="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="validRegexp" type="text-medium"><description>For non-enum settings, regexp to validate</description></field>
+        <field name="enumTypeId" type="id"/>
+        <field name="defaultValue" type="text-medium"/>
+        <relationship type="one" related="moqui.basic.EnumerationType" short-alias="type"/>
+        <relationship type="many" related="mantle.party.PartySettingTypeRole" short-alias="roles">
+            <key-map field-name="partySettingTypeId"/></relationship>
+        <seed-data>
+            <!-- Signature Required loads here before the shipment records that reference it. -->
+            <moqui.basic.EnumerationType description="Signature Required" enumTypeId="SignatureRequired"/>
+            <moqui.basic.Enumeration enumCode="" description="None" enumId="PsrNone" sequenceNum="1" enumTypeId="SignatureRequired"/>
+            <moqui.basic.Enumeration enumCode="STANDARD" description="Standard" enumId="PsrStandard" sequenceNum="2" enumTypeId="SignatureRequired"/>
+            <moqui.basic.Enumeration enumCode="ADULT" description="Adult" enumId="PsrAdult" sequenceNum="3" enumTypeId="SignatureRequired"/>
+            <moqui.basic.Enumeration enumCode="CERTIFIED" description="Certified (USPS)" enumId="PsrCertified" sequenceNum="4" enumTypeId="SignatureRequired"/>
+            <moqui.basic.Enumeration enumCode="INDIRECT" description="Indirect (FedEx)" enumId="PsrIndirect" sequenceNum="5" enumTypeId="SignatureRequired"/>
+
+            <!-- Customer Settings -->
+            <mantle.party.PartySettingType partySettingTypeId="CustomerSingleLot" description="Single Lot per Order"
+                    enumTypeId="BooleanYN" defaultValue="BlN"><roles roleTypeId="Customer"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="CustomerNewerInventory" description="Newer Inventory each Order"
+                    enumTypeId="BooleanYN" defaultValue="BlN"><roles roleTypeId="Customer"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="CustomerRequireSign" description="Require Signature"
+                    enumTypeId="SignatureRequired" defaultValue="PsrNone"><roles roleTypeId="Customer"/></mantle.party.PartySettingType>
+
+            <mantle.party.PartySettingType partySettingTypeId="OrgInvoiceProductStoreId" description="Default Invoice Product Store ID">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+
+            <!-- Address validate and default shipment gateways -->
+            <mantle.party.PartySettingType partySettingTypeId="ValidateAddressGatewayConfigId" description="Validate Address Gateway Config ID">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="DefaultShipmentGatewayConfigId" description="Default Shipment Gateway Config ID">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <!-- PaymentMethod vault gateway - setting type per org for payment gateway config to use by default for CC vault -->
+            <!-- Support required for each payment gateway integration, org partyId is: PaymentMethod.ownerPartyId => Payment.ownerPartyId -->
+            <mantle.party.PartySettingType partySettingTypeId="VaultPaymentGatewayConfigId" description="Vault Payment Gateway Config ID">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+
+            <!-- Print/PDF Template Location Settings -->
+            <mantle.party.PartySettingType partySettingTypeId="OrgTemplateShipmentInsert" description="Template Location Shipment Insert">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="OrgTemplateShipmentPick" description="Template Location Shipment Pick Sheet">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="OrgTemplateShipmentPack" description="Template Location Shipment Pack Sheet">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="OrgTemplateShipmentByPackage" description="Template Location Shipment By Package">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+
+            <mantle.party.PartySettingType partySettingTypeId="OrgTemplateInvoicePrint" description="Template Location Invoice Print">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="OrgTemplateProjectInvoicePrint" description="Trusted Project Invoice Print Screen">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="OrgTemplateOrderPrint" description="Template Location Order Print">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+
+            <mantle.party.PartySettingType partySettingTypeId="OrgTemplatePaymentCheck" description="Template Location Payment Check">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="OrgTemplatePaymentDetail" description="Template Location Payment Detail">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <!-- TODO: support template location setting  -->
+            <mantle.party.PartySettingType partySettingTypeId="OrgTemplateReceivableStatement" description="Template Location Receivable Statement">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <!-- TODO: support template location setting  -->
+            <mantle.party.PartySettingType partySettingTypeId="OrgTemplateFinancialAccountStatement" description="Template Location Financial Account Statement">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+
+            <!-- Projects app settings of an organization (IronStone Projects Settings), each a JSON object of its page's fields;
+                the defaults of a project's own WorkEffortSetting rows name their key (WorkEffortSettingType optionValue and enumCode) -->
+            <mantle.party.PartySettingType partySettingTypeId="ProjWorkItemTypes" description="Projects - Work Item Types">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="ProjTimesheetPolicy" description="Projects - Timesheet Policy">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="ProjWorkTypes" description="Projects - Work Types Offered">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="ProjBillingDefaults" description="Projects - Billing Defaults">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="ProjRepositoryDefaults" description="Projects - Repository Defaults">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="ProjConventions" description="Projects - Commit and Branch Conventions">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="ProjIntake" description="Projects - Request Intake">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="ProjPublicForm" description="Projects - Public Request Form">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PartySettingTypeRole" package="mantle.party" use="configuration">
+        <field name="partySettingTypeId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.party.PartySettingType" short-alias="settingType"/>
+        <relationship type="one" related="mantle.party.RoleType" short-alias="role"/>
+    </entity>
+
+    <!-- not currently used, likely useful for specifying settings applicable for a PartyClassification
+    <entity entity-name="PartySettingTypeClass" package="mantle.party" use="configuration">
+        <field name="partySettingTypeId" type="id" is-pk="true"/>
+        <field name="partyClassificationId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.party.PartySettingType" short-alias="settingType"/>
+        <relationship type="one" related="mantle.party.PartyClassification" short-alias="classification"/>
+    </entity>
+    -->
+    <entity entity-name="PartySystemMessage" package="mantle.party" cache="never">
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="systemMessageId" type="id" is-pk="true"/>
+        <field name="partyIdTypeEnumId" type="id"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="moqui.service.message.SystemMessage" short-alias="systemMessage"/>
+        <relationship type="one" title="PartyIdType" related="moqui.basic.Enumeration" short-alias="partyIdTypeEnum">
+            <key-map field-name="partyIdTypeEnumId"/></relationship>
+    </entity>
+</entities>

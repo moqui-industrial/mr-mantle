@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+<!-- Drop-ship (impl-purchasing P7, F21, F37, F38), ported from Moqui Java's dropship-moqui branch of mantle-udm: a supplier's
+    drop-ship facility (facility type FcTpDropShip, owned by the supplier, assetAllowOtherOwner Y) names the
+    SystemMessageRemote of the supplier's integration in dropShipRemoteId. A drop-ship purchase order line keeps the customer
+    order line it ships (salesOrderId, salesOrderItemSeqId): the stored link the delivery, the match and the screens read,
+    in place of the branch's match by product or sequence id. The enumerations and roles are in DropShipSetupData.xml. -->
+    <extend-entity entity-name="Facility" package="mantle.facility">
+        <field name="dropShipRemoteId" type="id"><description>For a drop-ship facility (FcTpDropShip), the
+            SystemMessageRemote of the supplier's integration: its sendServiceName implements
+            mantle.order.OrderServices.send#DropShipPurchaseOrderPart. Empty: the purchase order is emailed
+            (send#PurchaseOrder).</description></field>
+        <relationship type="one" title="DropShipSystemMessageRemote" related="moqui.service.message.SystemMessageRemote"
+                short-alias="dropShipRemote">
+            <key-map field-name="dropShipRemoteId" related="systemMessageRemoteId"/></relationship>
+    </extend-entity>
+
+    <extend-entity entity-name="FacilityLocation" package="mantle.facility">
+        <field name="lastCountDate" type="date-time"><description>When stock here was last counted and posted
+            (InventoryCountServices.post#Count); find#DueCounts reads it.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="ProductFacility" package="mantle.facility">
+        <field name="lastCountDate" type="date-time"><description>When the product here was last counted and posted
+            (post#Count).</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="FacilityLocation" package="mantle.facility">
+        <field name="storageTypeEnumId" type="id"><description>What the location stores (StorageType): it takes only
+            products of that storage type. Empty takes any product without one.</description></field>
+        <relationship type="one" title="StorageType" related="moqui.basic.Enumeration" short-alias="storageType">
+            <key-map field-name="storageTypeEnumId"/></relationship>
+    </extend-entity>
+
+    <!-- the tracking policy's inspection flag (design-warehouse §4 Receive): a receipt of the product posts into quarantine
+        and creates its inspection (WarehousePolicy.js's tracking family) -->
+    <extend-entity entity-name="WarehousePolicy" package="mantle.facility">
+        <field name="inspectionRequired" type="text-indicator" enable-audit-log="true"/>
+    </extend-entity>
+
+<!-- A product's reorder rule at a facility is its ProductFacility row (minimum and maximum stock, reorder quantity and
+    method; Products P7), kept through Warehouse's mantle.facility.FacilityServices.store#ProductFacilityPolicy
+    (CX-FACILITY-POLICY). Purchasing's snooze of a rule (impl-purchasing P14a, design-purchasing §8 ReorderRules): until
+    snoozeThruDate, for snoozeReason, an automatic conversion leaves the rule's shortage, which the supply plan still
+    shows. -->
+    <extend-entity entity-name="ProductFacility" package="mantle.facility">
+        <field name="snoozeThruDate" type="date-time" enable-audit-log="true"><description>Until when the reorder rule is
+            snoozed: an automatic conversion leaves its shortage, which is still planned and shown.</description></field>
+        <field name="snoozeReason" type="text-medium" enable-audit-log="true"><description>Why the rule is
+            snoozed.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="FacilityPrinter" package="mantle.facility">
+        <field name="copies" type="number-integer"><description>The copies a document of this purpose prints here;
+            empty is one.</description></field>
+        <field name="fromDate" type="date-time" enable-audit-log="update"><description>From when the binding is in
+            effect; empty is always.</description></field>
+        <field name="thruDate" type="date-time" enable-audit-log="update"><description>When the binding ended; a
+            document of the purpose then has no printer here.</description></field>
+        <seed-data>
+            <moqui.basic.Enumeration description="Lot Label" enumId="PtpLotLabel" enumTypeId="PrinterPurpose"/>
+            <moqui.basic.Enumeration description="Location Label" enumId="PtpLocationLabel" enumTypeId="PrinterPurpose"/>
+            <moqui.basic.Enumeration description="Count Documents" enumId="PtpCountDocuments" enumTypeId="PrinterPurpose"/>
+        </seed-data>
+    </extend-entity>
+
+    <extend-entity entity-name="WarehousePolicy" package="mantle.facility">
+        <!-- operation policy (store#OperationPolicy, P15 review B3): Y makes create#Request and update#Request refuse a
+            stock request (RqtInventory) without a facility of the user's organizations; empty or N keeps Mantle's default -->
+        <field name="inventoryRequestCheck" type="text-indicator" enable-audit-log="true"/>
+    </extend-entity>
+</entities>

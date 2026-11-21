@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+<!-- Theme authoring and preview (impl-commerce P5; design-commerce §5, design-shop §12.6; mantle.public.ThemeServices'
+    authoring part, service/mantle/public/ThemeAuthoring.js). A site host has a kind: a live host serves the site, a preview
+    host (impl-commerce F54) serves only the preview render of a draft, framed by the configured BOSS origins. A preview is a
+    short-lived capability for one site, Shop mount, theme draft and actor, carried in the preview URL (never a cookie): the
+    row keeps only the token's digest. -->
+  <extend-entity entity-name="PublicSiteHost" package="mantle.public">
+    <field name="hostKindEnumId" type="id"><description>PshkLive (or empty) serves the site; PshkPreview serves only the theme
+      preview render and is never the canonical host.</description></field>
+    <relationship type="one" title="PublicSiteHostKind" related="moqui.basic.Enumeration">
+      <key-map field-name="hostKindEnumId"/></relationship>
+  </extend-entity>
+
+  <extend-entity entity-name="PublicTheme" package="mantle.public">
+    <field name="description" type="text-medium"><description>The theme's description (ThemeDetail's ThemeIdentity).</description></field>
+  </extend-entity>
+</entities>

@@ -674,7 +674,7 @@ landed costs and repairs cost data. Every read checks Accounting's report read i
 
 `mantle.other.BudgetServices` and `BudgetReportServices`, with `other/Budgets.js`; the records are Mantle's `Budget`,
 `BudgetItem`, `BudgetRevision`, `BudgetRevisionImpact`, `BudgetReview` and `BudgetParty`, with `BudgetControlPolicy`,
-`BudgetCommitment` and `BudgetContent` (`entity/BudgetControlEntities.xml`). A budget's organization is its period's
+`BudgetCommitment` and `BudgetContent` (`entity/other/BudgetAndTaxEntities.xml`). A budget's organization is its period's
 party (`TimePeriod.partyId`); its other parties are `BudgetParty` rows (`store#BudgetParty`, `BUDGET_EDIT`).
 
 - **States.** Draft, Approved, Closed and Cancelled (`StatusFlowTransition`). `create#Budget` makes a draft and records
@@ -767,7 +767,7 @@ caller are scoped (F6), and answers `asOf` with `complete` and the reasons a fig
 
 ## Returns and order changes (P17)
 
-**Flags.** Two audit-logged `PartyAcctgPreference` fields (`entity/ReturnSettlementEntities.xml`), off by default and set
+**Flags.** Two audit-logged `PartyAcctgPreference` fields (`entity/ledger/AccountAndConfigAndTransactionExtensions.xml`), off by default and set
 through `store#Preferences`, since Mantle's ReturnToResponse and OrderToCash flows assert the old behavior:
 - `returnSettlementRequired` (D11): `ReturnApprovedProcess` only creates the return shipment, `ShipmentDeliveredReturnReceive`
   and `ReturnReceivedProcess` stand aside, and responses come only from `settle#Return`. `ReturnServices.get#ReturnSettlementMode`

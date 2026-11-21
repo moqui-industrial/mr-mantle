@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- Purchasing's service acceptance (design-purchasing PUR-RECEIPT, R-PUR-09): a service or non-stock purchase line's
+        accepted quantity and unit, date, acceptor and evidence (the output receipt and its inspection for a subcontract
+        line; an order file), written by mantle.order.OrderServices.accept#ServiceItem, which InvoiceMatch reads under the
+        match policy's service-acceptance rule. -->
+    <entity entity-name="ServiceAcceptance" package="mantle.order.purchase" cache="never">
+        <field name="serviceAcceptanceId" type="id" is-pk="true"/>
+        <field name="orderId" type="id" enable-audit-log="true"/>
+        <field name="orderItemSeqId" type="id" enable-audit-log="true"/>
+        <field name="acceptedQuantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"/>
+        <field name="acceptedDate" type="date-time" enable-audit-log="true"/>
+        <field name="acceptedByUserId" type="id"/>
+        <field name="acceptorPartyId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="assetReceiptId" type="id"/>
+        <field name="qualityInspectionId" type="id"/>
+        <field name="orderContentId" type="id"/>
+        <field name="comments" type="text-medium"/>
+        <relationship type="one" related="mantle.order.OrderHeader" short-alias="order"/>
+        <relationship type="one" related="mantle.order.OrderItem" short-alias="orderItem"/>
+        <relationship type="one" related="moqui.security.UserAccount" title="AcceptedBy" short-alias="acceptedByUser">
+            <key-map field-name="acceptedByUserId" related="userId"/></relationship>
+        <relationship type="one" related="mantle.party.Party" title="Acceptor" short-alias="acceptorParty">
+            <key-map field-name="acceptorPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" related="mantle.product.receipt.AssetReceipt" short-alias="assetReceipt"/>
+        <relationship type="one" related="mantle.product.quality.QualityInspection" short-alias="qualityInspection"/>
+        <relationship type="one" related="mantle.order.OrderContent" short-alias="orderContent"/>
+        <index name="SERVACCEPT_ITEM"><index-field name="orderId"/><index-field name="orderItemSeqId"/></index>
+    </entity>
+
+<!-- Purchase approval policies (design-purchasing ApprovalPolicies, Approvals; impl-purchasing P4, §2): the effective-dated
+    steps an organization's purchase orders, requests, awards and suppliers are approved in, by amount band, currency,
+    category or facility, each step with its approvers, quorum, self-approval, separation and expiry, its key fields
+    audit-logged; and the decision's record of being superseded by a later revision. PurchaseApprovals.js reads and writes
+    them (mantle.order.PurchaseServices store#PurchaseApprovalPolicy, preview#PurchaseApproval, decide#PurchaseApproval). -->
+    <entity entity-name="PurchaseApprovalPolicy" package="mantle.order.purchase" cache="never">
+        <description>One approval step of an organization's purchase source type (a purchase order, request, award or
+            supplier), effective-dated: a source whose amount is in the band (fromAmount up to, not including, thruAmount; no
+            thruAmount is no upper limit) in the currency, and of the category or facility when one is set, is approved in the
+            steps of its band by sequenceNum. Each step is decided by quorum distinct approvers: the user named, else the
+            members of the user group named, else any holder of PURCHASE_APPROVE in the organization, each holding
+            PURCHASE_APPROVE. A change ends the row in effect and starts the next (store#PurchaseApprovalPolicy); a decision
+            keeps the row it was evaluated against. With no row in effect for an organization and source type, one purchase
+            approver decides (the no-policy rule).</description>
+        <field name="purchaseApprovalPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="sourceTypeEnumId" type="id" enable-audit-log="true"><description>PurchaseApprovalSource: PasOrder,
+            PasRequest, PasAward, PasSupplier</description></field>
+        <field name="fromAmount" type="currency-amount" enable-audit-log="true"><description>The band's lower amount,
+            included; empty is zero</description></field>
+        <field name="thruAmount" type="currency-amount" enable-audit-log="true"><description>The band's upper amount, not
+            included; empty has no upper limit</description></field>
+        <field name="currencyUomId" type="id" enable-audit-log="true"><description>The band's currency; a source in another
+            currency is not in the band</description></field>
+        <field name="productCategoryId" type="id" enable-audit-log="true"><description>Only a source with a line of a product
+            in the category</description></field>
+        <field name="facilityId" type="id" enable-audit-log="true"><description>Only a source for the facility</description>
+        </field>
+        <field name="sequenceNum" type="number-integer" enable-audit-log="true"><description>The step's place in its band,
+            from 1</description></field>
+        <field name="approverUserId" type="id" enable-audit-log="true"/>
+        <field name="approverUserGroupId" type="id" enable-audit-log="true"/>
+        <field name="quorum" type="number-integer" enable-audit-log="true"><description>The distinct approvers the step
+            needs (1 when empty)</description></field>
+        <field name="selfApprovalAllowed" type="text-indicator" enable-audit-log="true"><description>Y: the user who entered
+            or placed the source may decide the step; N: never; empty: as the buying policy's selfApprovalAllowed</description>
+        </field>
+        <field name="separateApprover" type="text-indicator" enable-audit-log="true"><description>Y: a user who decided an
+            earlier step of the source's revision may not decide this one</description></field>
+        <field name="expiryDays" type="number-integer" enable-audit-log="true"><description>Days a step's approval stays good
+            while later steps are waiting; empty never expires</description></field>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="PurchaseApprovalSource" related="moqui.basic.Enumeration" short-alias="sourceType">
+            <key-map field-name="sourceTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one-nofk" related="mantle.product.category.ProductCategory"/>
+        <relationship type="one-nofk" related="mantle.facility.Facility"/>
+        <relationship type="one-nofk" title="Approver" related="moqui.security.UserAccount" short-alias="approverUser">
+            <key-map field-name="approverUserId" related="userId"/></relationship>
+        <relationship type="one-nofk" title="Approver" related="moqui.security.UserGroup" short-alias="approverUserGroup">
+            <key-map field-name="approverUserGroupId" related="userGroupId"/></relationship>
+        <index name="PUR_APR_POL_ORG"><index-field name="organizationPartyId"/><index-field name="sourceTypeEnumId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Purchase Approval Source" enumTypeId="PurchaseApprovalSource"/>
+            <moqui.basic.Enumeration enumId="PasOrder" description="Purchase order" sequenceNum="1"
+                    enumTypeId="PurchaseApprovalSource"/>
+            <moqui.basic.Enumeration enumId="PasRequest" description="Purchase request" sequenceNum="2"
+                    enumTypeId="PurchaseApprovalSource"/>
+            <moqui.basic.Enumeration enumId="PasAward" description="Award" sequenceNum="3"
+                    enumTypeId="PurchaseApprovalSource"/>
+            <moqui.basic.Enumeration enumId="PasSupplier" description="Supplier" sequenceNum="4"
+                    enumTypeId="PurchaseApprovalSource"/>
+        </seed-data>
+    </entity>
+
+<!-- Purchase orders (design-purchasing §6; impl-purchasing P3, F7, F18, F36, F42): the approval decision, a fact of its own
+    (§2), the audit log on the purchase order's key fields Mantle did not log (the header's revision, a line's unit,
+    cancelled quantity and description), so the order as of a date and time is read back from the audit log
+    (mantle.order.OrderServices.get#PurchaseOrderPrint), the buying policy's commercial revision flag, and the content type
+    of an issued purchase order's PDF (send#PurchaseOrder). -->
+    <entity entity-name="PurchaseApprovalDecision" package="mantle.order.purchase" cache="never">
+        <description>One approval decision on a purchase source (a purchase order now; requests, awards and agreements in
+            later phases) at a revision: who decided, what, when and why, and the policy rows it was evaluated against.
+            Written only by mantle.order.PurchaseServices.decide#PurchaseApproval. A decision is current while the source's
+            revision is the one it names; check#PurchaseApprovalRequired reads it.</description>
+        <field name="purchaseApprovalDecisionId" type="id" is-pk="true"/>
+        <field name="sourceEntityName" type="text-medium"><description>mantle.order.OrderHeader for a purchase
+            order</description></field>
+        <field name="sourceId" type="id"/>
+        <field name="sourceRevision" type="number-integer"><description>The source's revision the decision is bound to
+            (OrderHeader.orderRevision)</description></field>
+        <field name="organizationPartyId" type="id"/>
+        <field name="decisionEnumId" type="id"/>
+        <field name="decisionDate" type="date-time"/>
+        <field name="decidedByUserId" type="id"/>
+        <field name="decidedByPartyId" type="id"/>
+        <field name="reason" type="text-long"/>
+        <field name="policyFromDate" type="date-time"><description>The PurchasePolicy row in effect (its fromDate), empty
+            when the organization has none</description></field>
+        <field name="approvalPolicyId" type="id"><description>The approval policy row and step (P4); empty under the
+            no-policy rule, one step by a purchase approver</description></field>
+        <field name="stepSeqId" type="id"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one" title="PurchaseApprovalDecision" related="moqui.basic.Enumeration" short-alias="decision">
+            <key-map field-name="decisionEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="DecidedBy" related="moqui.security.UserAccount" short-alias="decidedBy">
+            <key-map field-name="decidedByUserId" related="userId"/></relationship>
+        <index name="PUR_APR_DEC_SOURCE"><index-field name="sourceId"/><index-field name="sourceRevision"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Purchase Approval Decision" enumTypeId="PurchaseApprovalDecision"/>
+            <moqui.basic.Enumeration enumId="PadApproved" description="Approved" sequenceNum="1"
+                    enumTypeId="PurchaseApprovalDecision"/>
+            <moqui.basic.Enumeration enumId="PadRefused" description="Refused" sequenceNum="2"
+                    enumTypeId="PurchaseApprovalDecision"/>
+            <!-- the PDF of a purchase order as sent, stored once per print (send#PurchaseOrder) -->
+            <moqui.basic.Enumeration enumId="OctPurchaseOrderIssued" description="Issued purchase order"
+                    enumTypeId="OrderContentType"/>
+        </seed-data>
+    </entity>
+
+<!-- Purchasing's buying policy (design-purchasing PurchasePolicy; impl-purchasing P2, F34). It follows the shared
+    effective-date rule (impl-drawers-commons §4), on ProductionPolicy's pattern: a change ends the row in effect and starts
+    the next, with its fields audit-logged, so a document reads the policy as of the time it was evaluated. PurchasePolicy.js
+    reads and writes it; the supplier category classification type is seeded here too. -->
+    <entity entity-name="PurchasePolicy" package="mantle.order.purchase" cache="never">
+        <description>Dated buying policy of an organization: the buying defaults and the controls of its purchase documents. An
+            empty field takes the built-in default, which is Mantle's behavior with no row: every flag that changes an
+            existing Mantle service is off by default (impl-purchasing §2). Written by
+            mantle.order.PurchaseServices.store#PurchasePolicy, read by get#PurchasePolicy and, with no permission check, by
+            the purchase rules through PurchasePolicy.js's effective().</description>
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <!-- buying defaults -->
+        <field name="currencyUomId" type="id" enable-audit-log="true"><description>The currency of a new purchase order
+            when the supplier's profile sets none</description></field>
+        <field name="priceListId" type="id" enable-audit-log="true"><description>The purchase price list a new order
+            prices from first</description></field>
+        <field name="facilityId" type="id" enable-audit-log="true"><description>The receiving facility of a new purchase
+            order</description></field>
+        <field name="buyerPartyId" type="id" enable-audit-log="true"><description>The buyer of a supplier with no buyer of
+            its own (no Buyer-to-Supplier relationship)</description></field>
+        <field name="settlementTermId" type="id" enable-audit-log="true"><description>The payment term of a supplier whose
+            profile sets none</description></field>
+        <field name="incotermEnumId" type="id" enable-audit-log="true"><description>The Incoterm (a TermType under TtInco)
+            of a supplier whose profile sets none</description></field>
+        <!-- controls -->
+        <field name="rfqResponseDays" type="number-integer" enable-audit-log="true"><description>Days a supplier has to
+            answer an RFQ (7 with no row)</description></field>
+        <field name="quoteExpiryWarnDays" type="number-integer" enable-audit-log="true"><description>Days before a quote's
+            expiry it shows as expiring (7 with no row)</description></field>
+        <field name="reminderDays" type="number-integer" enable-audit-log="true"><description>Days after a purchase order is
+            sent that an unacknowledged order is reminded (3 with no row)</description></field>
+        <field name="lockSentOrders" type="text-indicator" enable-audit-log="true"><description>Y: a sent purchase order
+            changes only through a revision (P9); N with no row</description></field>
+        <field name="supplierApprovalRequired" type="text-indicator" enable-audit-log="true"><description>Y: a new
+            supplier's profile starts Pending approval; N with no row</description></field>
+        <field name="unapprovedSupplierEnumId" type="id" enable-audit-log="true"><description>PurchaseUnapprovedSupplier:
+            what an RFQ or purchase order to a supplier that is not Approved gets, a warning (the default) or a
+            stop</description></field>
+        <field name="approvalGateEnabled" type="text-indicator" enable-audit-log="true"><description>Y: a purchase part
+            reaches Approved only through decide#PurchaseApproval, and check#PurchaseApprovalRequired warns
+            approve#Order and autoApprove#Order (impl-purchasing §2, P3, P4); N with no row, so Mantle's approval is
+            unchanged</description></field>
+        <field name="selfApprovalAllowed" type="text-indicator" enable-audit-log="true"><description>Y: under the approval
+            gate, the user who placed a purchase order may approve it; N with no row</description></field>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" related="mantle.party.Party"><key-map field-name="organizationPartyId" related="partyId"/>
+        </relationship>
+        <relationship type="one-nofk" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one-nofk" related="mantle.product.ProductPriceList"/>
+        <relationship type="one-nofk" related="mantle.facility.Facility"/>
+        <relationship type="one-nofk" title="Buyer" related="mantle.party.Party" short-alias="buyer">
+            <key-map field-name="buyerPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.account.invoice.SettlementTerm"/>
+        <relationship type="one-nofk" title="Incoterm" related="moqui.basic.Enumeration" short-alias="incotermEnum">
+            <key-map field-name="incotermEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="PurchaseUnapprovedSupplier" related="moqui.basic.Enumeration"
+                short-alias="unapprovedSupplierEnum"><key-map field-name="unapprovedSupplierEnumId" related="enumId"/>
+        </relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Purchase Unapproved Supplier" enumTypeId="PurchaseUnapprovedSupplier"/>
+            <moqui.basic.Enumeration enumId="PusWarn" description="Warn" sequenceNum="1"
+                    enumTypeId="PurchaseUnapprovedSupplier"/>
+            <moqui.basic.Enumeration enumId="PusStop" description="Stop" sequenceNum="2"
+                    enumTypeId="PurchaseUnapprovedSupplier"/>
+            <!-- the supplier categories buyers assign (design-purchasing SupplierClassifications, F11): PartyClassification
+                rows of this type -->
+            <moqui.basic.Enumeration description="Supplier Category" enumId="PcltSupplierCategory"
+                    enumTypeId="PartyClassificationType"/>
+        </seed-data>
+    </entity>
+</entities>

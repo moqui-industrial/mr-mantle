@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- Change evidence of the records that belong to an internal organization (mantle.party.IdentityServices
     find#IdentityChanges; mr-boss impl-admin P17, design-admin §12 AuditChanges), named to load after MantleSetupData (its
-    filter sets): the organization filters of the audit-log views (entity/IdentityEntities.xml), and the projections the
+    filter sets): the organization filters of the audit-log views (entity/party/PartyAndAgreementAndCommunicationViews.xml), and the projections the
     framework's org.moqui.admin.AuditServices answers through Mantle's source, each within the caller's organizations. The
     framework registers its own records of the whole instance (its data/AdminAuditData.xml); a user's account, its
     memberships, invitations and lifecycle belong to the organizations the user works for, which only Mantle knows. -->
