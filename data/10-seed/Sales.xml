@@ -144,7 +144,7 @@
         chargeable warranty decision tells the organization's default Sales team (SalesRepairToQuote: requestId, customerName,
         productName), and a repair's quote tells the claim's assignee or queue (SalesRepairQuoted: requestId, orderId, customerName,
         madeByName, the claim as the record). Neither title carries the fault text, diagnosis, decision or an amount. The apps that
-        work them set the links (IronStone: BossSetupSalesData.xml, BossSetupData.xml). -->
+        work them set the links (IronStone: BossSetupSalesData.xml, BossSetupData05PurchasingAndCustomerService.xml). -->
     <moqui.security.user.NotificationTopic topic="SalesRepairToQuote" inboxEnumId="NinNotifications"
             description="Repair to quote" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
             isPrivate="Y" emailTemplateId="NOTIFICATION"

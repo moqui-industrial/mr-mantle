@@ -325,7 +325,7 @@
         (IdentityServices.request#Provisioning and request#AccessEnd, Lifecycle.js notifyOperators) tells the employer's identity
         operators, who act from the tray or LifecycleOperations. The message holds operationId, kind, actionText, personName,
         organizationName and dateText: the person and employer an operator reads on the operation, no email, reason or terms. The app
-        that shows it sets the link (IronStone: BossSetupData.xml, LifecycleDetail). -->
+        that shows it sets the link (IronStone: BossSetupData11AttentionAndAdministration.xml, LifecycleDetail). -->
     <moqui.security.user.NotificationTopic topic="IdentityOperatorRequest" inboxEnumId="NinNotifications"
             description="Account request waiting for an identity operator" typeString="info" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" titleTemplate="${actionText}: ${personName} (${organizationName})"/>

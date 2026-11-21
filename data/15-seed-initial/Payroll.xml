@@ -9,7 +9,7 @@
         business approval (the invoice stays received, for finance), an advance's makes it payable by finance; a refusal needs a
         reason. The messages hold peopleApprovalId, the claim's invoiceId or the advance's employeeAdvanceId, sourceRevision,
         partyId, personName, subjectText, organizationName, departmentName and stepText: never an amount, a line or a purpose. The
-        app that shows them sets the links (IronStone People: BossSetupData.xml). -->
+        app that shows them sets the links (IronStone People: BossSetupData15PeopleTimeAndPayroll.xml). -->
     <moqui.security.user.NotificationTopic topic="PeopleExpenseApproval" inboxEnumId="NinNotifications"
             description="Expense claim to approve" typeString="info" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
@@ -41,7 +41,7 @@
         PeopleApprovalServices.record#Decision): the last approval approves its inputs, a refusal (its reason required) refuses
         them. The message holds peopleApprovalId, sourceRevision, payrollInputId, subjectText ("a pay adjustment"),
         organizationName and stepText: never a person, an amount or a component. The app that shows them sets the link
-        (IronStone People: BossSetupData.xml). -->
+        (IronStone People: BossSetupData15PeopleTimeAndPayroll.xml). -->
     <moqui.basic.Enumeration enumId="PakPayAdjustment" description="Pay adjustment" sequenceNum="11" enumTypeId="PeopleApprovalKind"/>
     <moqui.security.user.NotificationTopic topic="PeoplePayAdjustmentApproval" inboxEnumId="NinNotifications"
             description="Pay adjustments to approve" typeString="info" showAlert="Y" persistOnSend="Y"
@@ -58,7 +58,7 @@
         return#Run over PeopleApprovalServices.record#Decision): the approval approves the run, a return (its reason required)
         sends it back to review. The message holds peopleApprovalId, sourceRevision, payrollRunId, subjectText ("a pay run"),
         groupName, periodText, organizationName and stepText: never a person or an amount. The app that shows them sets the link
-        (IronStone People: BossSetupData.xml). -->
+        (IronStone People: BossSetupData15PeopleTimeAndPayroll.xml). -->
     <moqui.basic.Enumeration enumId="PakPayrollRun" description="Pay run" sequenceNum="12" enumTypeId="PeopleApprovalKind"/>
     <moqui.security.user.NotificationTopic topic="PayrollRunApproval" inboxEnumId="NinNotifications"
             description="Pay runs to approve" typeString="info" showAlert="Y" persistOnSend="Y"
@@ -85,7 +85,7 @@
         the last approval publishes the draft, a refusal (its reason required) leaves it a draft. The message holds peopleApprovalId,
         sourceRevision, payrollComponentId and payrollComponentTermId or payrollStructureId, sourceText, subjectText,
         organizationName and stepText: never an amount, a formula or a rate. The app that shows them sets the link (IronStone
-        People: BossSetupData.xml). -->
+        People: BossSetupData15PeopleTimeAndPayroll.xml). -->
     <moqui.basic.Enumeration enumId="PakPayrollConfig" description="Payroll configuration" sequenceNum="10" enumTypeId="PeopleApprovalKind"/>
     <!-- impl-people P23 review (the user's call of Nov 12, 2026): a pay change (PeopleServices.apply#EmploymentChange, changeKind
         pay), the first salary included, waits for a People approval of its own kind, on the PeopleEmploymentChangeApproval topic:
@@ -104,7 +104,7 @@
         issued (PayrollResultServices issue#Payslip) tells its person, and them alone (directOnly: a subscription to every message of
         the topic receives none), that it is available: the message holds payslipId, organizationName, periodText and payDateText,
         never an amount; its link needs a sign-in and no attachment is mailed. The app that shows it sets the link (IronStone
-        People: BossSetupData.xml, the person's own payslip in their self-service). -->
+        People: BossSetupData15PeopleTimeAndPayroll.xml, the person's own payslip in their self-service). -->
     <moqui.security.user.NotificationTopic topic="PayslipIssued" inboxEnumId="NinNotifications"
             description="Your payslip is available" typeString="info" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"

@@ -186,7 +186,7 @@
         <person>"): this title names nothing of the person or the change, only who assigned it and when it is due, so a lock screen
         shows nothing private. Sent by its owning service, mantle.humanres.PeopleServices.notify#PeopleTaskAssigned, which
         mantle.work.TaskServices.notify#TaskAssigned hands People's work to. The message holds workEffortId, assignedByName and
-        dueDateText, and the task as its record; the app that shows it sets the link (IronStone: BossSetupData.xml). -->
+        dueDateText, and the task as its record; the app that shows it sets the link (IronStone: BossSetupData14PeopleAccess.xml). -->
     <moqui.security.user.NotificationTopic topic="PeopleTaskAssigned" inboxEnumId="NinNotifications"
             description="People task assigned to you" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
             isPrivate="Y" emailTemplateId="NOTIFICATION" titleTemplate="${assignedByName} assigned you a People task, due ${dueDateText}"/>

@@ -42,7 +42,7 @@
         the revision in the message (sourceRevision) and refuse a stale one naming the current revision; a refusal needs a
         reason. The message holds sourceEntityName, sourceId, sourceRevision, organizationPartyId, organizationName,
         supplierName, amountText, stepText and, for an order, orderId; for a supplier, supplierPartyId. The app that shows
-        them sets the links (IronStone Purchasing: BossSetupData.xml). P10 seeds PurchaseRequestApproval and P12
+        them sets the links (IronStone Purchasing: BossSetupData05PurchasingAndCustomerService.xml). P10 seeds PurchaseRequestApproval and P12
         PurchaseAwardApproval the same way; an agreement's activation comes on PurchaseOrderApproval (P13). -->
     <moqui.security.user.NotificationTopic topic="PurchaseOrderApproval" inboxEnumId="NinNotifications"
             description="Purchase order to approve" typeString="info" showAlert="Y" persistOnSend="Y"
@@ -88,7 +88,7 @@
         approve#PurchaseSource and refuse#PurchaseSource as the user, which decide the request at the revision in the message
         (sourceRevision, the time of its last line change) and refuse a changed one; a refusal needs a reason. The message
         holds requestId, requestName, revisionText, organizationPartyId, organizationName, amountText (the lines' maximum
-        amounts) and stepText. The app that shows them sets the link (IronStone Purchasing: BossSetupData.xml). -->
+        amounts) and stepText. The app that shows them sets the link (IronStone Purchasing: BossSetupData05PurchasingAndCustomerService.xml). -->
     <moqui.security.user.NotificationTopic topic="PurchaseRequestApproval" inboxEnumId="NinNotifications"
             description="Purchase request to approve" typeString="info" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
@@ -126,7 +126,7 @@
         the revision in the message (sourceRevision, the time it was submitted) through decide#AwardApproval; the last step's
         approval places the award's quotes, a refusal leaves them unplaced and needs a reason. The message holds requestId,
         requestName, awardKey (the award's operation key), revisionText, organizationName, supplierText, amountText and
-        stepText. The app that shows them sets the link (IronStone Purchasing: BossSetupData.xml). -->
+        stepText. The app that shows them sets the link (IronStone Purchasing: BossSetupData05PurchasingAndCustomerService.xml). -->
     <moqui.security.user.NotificationTopic topic="PurchaseAwardApproval" inboxEnumId="NinNotifications"
             description="Award of supplier quotes to approve" typeString="info" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
@@ -149,7 +149,7 @@
     <!-- A supplier's response from the PASS Supplier app (mantle.order.SupplierPortalServices, impl-purchasing P16): a quote
         submitted, a purchase order acknowledged or a drop-ship delivery reported, each a claim for the buyers of the
         organization (PURCHASE_ORDER_EDIT) to review. The message holds orderId, responseKind, kindText, supplierName,
-        and detailText (the revision, and late when it is). The app that shows them sets the link (IronStone Purchasing: BossSetupData.xml). -->
+        and detailText (the revision, and late when it is). The app that shows them sets the link (IronStone Purchasing: BossSetupData05PurchasingAndCustomerService.xml). -->
     <moqui.security.user.NotificationTopic topic="PurchaseSupplierResponse" inboxEnumId="NinNotifications"
             description="Supplier response to review" typeString="info" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y"

@@ -159,7 +159,7 @@ These three files contain initial data: loading one again puts back its rows as 
 (a resumed job paused again, a group's changed grant). On a database made during the build, load only the files it lacks,
 or the rows it lacks by hand. The last phases, dispatch (P8) and customer repair (P12), added rows to
 `10-seed/Maintenance.xml` (loaded again by `types=seed`) and to `BossSetupMaintenanceData` (Teams' grant to planners and
-supervisors among them), so a database made before them takes those rows too. mr-boss `BossSetupData.xml` also gained
+supervisors among them), so a database made before them takes those rows too. mr-boss `BossSetupData02Projects.xml` also gained
 `maintenance` in the client deny patterns of `BOSS_PROJECTS_INTERNAL` (Maintenance P1), and the `RequestTriage` topic's
 link opens Maintenance's RequestDetail for a maintenance request (Maintenance P4; before it the planners' triage notice
 opens Projects'); a deployment that keeps that file's rows as shipped loads it again, others add the package to the

@@ -14,7 +14,7 @@
             errorHistoryOnly="Y" transactionTimeout="1800"/>
     <!-- a low score's follow-up, to the follow-up team's managers (followUpId, formResponseId, requestId, requestName,
         customerName, scoreText; the case as the record; never the comment). The app that works cases sets the link (IronStone
-        Customer Service: BossSetupData.xml). -->
+        Customer Service: BossSetupData05PurchasingAndCustomerService.xml). -->
     <moqui.security.user.NotificationTopic topic="CaseFeedbackFollowUp" inboxEnumId="NinNotifications" description="Low Feedback Score to Follow Up"
             typeString="warning" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${customerName} rated case ${requestId} ${scoreText}: ${requestName}"/>

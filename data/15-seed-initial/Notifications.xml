@@ -47,13 +47,13 @@
             titleTemplate="Reminder: ${workEffortName}, ${whenText}" linkTemplate=""/>
     <!-- a work item of a project assigned to the user by someone else (mantle.work.TaskServices.notify#TaskAssigned):
         workEffortId, workEffortName, rootWorkEffortId, projectName, assignedByName, the task as the record; in the
-        Notifications inbox. The app that shows work items sets the link (IronStone Projects: BossSetupData.xml). -->
+        Notifications inbox. The app that shows work items sets the link (IronStone Projects: BossSetupData02Projects.xml). -->
     <moqui.security.user.NotificationTopic topic="WorkItemAssigned" inboxEnumId="NinNotifications" description="Work Item Assigned to You" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${assignedByName} assigned you ${workEffortId}: ${workEffortName} (${projectName})"/>
     <!-- a status update posted on a project the user is on (mantle.work.ProjectServices.post#ProjectUpdate): workEffortId,
         workEffortName, healthEnumId, healthLabel, percentComplete, subject, authorName, communicationEventId, the project as
-        the record; in the Updates inbox. The app that shows projects sets the link (IronStone Projects: BossSetupData.xml). -->
+        the record; in the Updates inbox. The app that shows projects sets the link (IronStone Projects: BossSetupData02Projects.xml). -->
     <moqui.security.user.NotificationTopic topic="ProjectStatusUpdate" inboxEnumId="NinUpdates" description="Project Status Update" typeString="info"
             showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${workEffortName} is ${healthLabel}: ${subject} (${authorName})"/>
@@ -62,7 +62,7 @@
         projectName and projectSuffix (" (name)", both empty for one with no project), channelLabel (app, email, form), fromName,
         the request as the record; to the
         project's triage assignee, else its managers (for one with no project the organization's triage assignee); in the
-        Notifications inbox. The app that triages requests sets the link (IronStone Projects: BossSetupData.xml). -->
+        Notifications inbox. The app that triages requests sets the link (IronStone Projects: BossSetupData02Projects.xml). -->
     <moqui.security.user.NotificationTopic topic="RequestTriage" inboxEnumId="NinNotifications" description="New Request to Triage" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="New request ${requestId}: ${requestName}${projectSuffix}"/>
@@ -77,7 +77,7 @@
         approve and refuse services approve or return it; a return needs a reason); the person hears of a return or reopen
         (TimesheetReturned) and of the approval (TimesheetApproved, Updates); TimesheetMissing reminds a person of a week not
         submitted (weekText, hoursText, expectedText; send#MissingTimeReminders). The app that shows timesheets sets the links
-        (IronStone Projects: BossSetupData.xml). -->
+        (IronStone Projects: BossSetupData02Projects.xml). -->
     <moqui.security.user.NotificationTopic topic="TimesheetApproval" inboxEnumId="NinNotifications" description="Timesheet to Approve" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             approveServiceName="mantle.work.TimesheetServices.approve#TimesheetNotice" refuseServiceName="mantle.work.TimesheetServices.return#TimesheetNotice"
@@ -95,7 +95,7 @@
         whoText (the person, or the role of a placeholder), hoursText, periodText, requesterName, actorName, decision and reasonSuffix (": " and the reason, or empty), the
         allocation as the record. A request asks the approvers (the holders of ALLOCATION_APPROVE) for a decision (AllocationRequest,
         whose approve and refuse services approve or reject it; a rejection needs a reason); its requester and the person hear the
-        decision (AllocationDecision, Updates). The app that shows allocations sets the links (IronStone Projects: BossSetupData.xml). -->
+        decision (AllocationDecision, Updates). The app that shows allocations sets the links (IronStone Projects: BossSetupData02Projects.xml). -->
     <moqui.security.user.NotificationTopic topic="AllocationRequest" inboxEnumId="NinNotifications" description="Allocation to Approve" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             approveServiceName="mantle.work.ResourceServices.approve#AllocationNotice" refuseServiceName="mantle.work.ResourceServices.reject#AllocationNotice"
@@ -107,7 +107,7 @@
         milestoneName, rootWorkEffortId, projectName, approverName, requesterName, actorName, decision and reasonSuffix, the request
         (WorkEffortApproval) as the record. A request asks the approver's users for a decision (MilestoneApproval, whose approve and refuse
         services decide it; a refusal needs a reason); the one who asked hears the decision (MilestoneDecision, Updates). The app that
-        shows milestones sets the links (IronStone Projects: BossSetupData.xml). -->
+        shows milestones sets the links (IronStone Projects: BossSetupData02Projects.xml). -->
     <moqui.security.user.NotificationTopic topic="MilestoneApproval" inboxEnumId="NinNotifications" description="Milestone to Approve" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             approveServiceName="mantle.work.ProjectServices.approve#MilestoneApprovalNotice" refuseServiceName="mantle.work.ProjectServices.refuse#MilestoneApprovalNotice"
@@ -124,7 +124,7 @@
     <!-- a release's notes published (mantle.work.ProjectServices.publish#ReleaseNotes) to the followers of the release and of its
         project: workEffortId, version, rootWorkEffortId, projectName, actorName, dateText, wikiPageId (the published page), the
         release as the record; in the Updates inbox. The app that shows releases sets the link (IronStone Projects:
-        BossSetupData.xml). -->
+        BossSetupData02Projects.xml). -->
     <moqui.security.user.NotificationTopic topic="ReleasePublished" inboxEnumId="NinUpdates" description="Release Notes Published" typeString="info"
             showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${projectName} ${version} released: the notes (${actorName})"/>
@@ -132,7 +132,7 @@
         rules of service/WorkGit.secas.xml): mergeRequestId, mergeRequestNum, title, repositoryId, sourceRef, targetRef,
         actorName and change, the merge request as the record; a check: repositoryId, commitId, shortId, summary, checkContext,
         state, stateLabel, description, targetUrl. Review requests and failed checks in the Notifications inbox, the other
-        changes in Updates. The app that shows code sets the links (IronStone Projects: BossSetupData.xml). -->
+        changes in Updates. The app that shows code sets the links (IronStone Projects: BossSetupData02Projects.xml). -->
     <moqui.security.user.NotificationTopic topic="MergeRequestReview" inboxEnumId="NinNotifications" description="Merge Request Review Requested" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${actorName} asks for your review of !${mergeRequestNum} ${title} (${repositoryId})"/>
@@ -206,7 +206,7 @@
         approvers of its kind with requestId, orderId, sourceRevision (the proposal's revision), kindText, customerName,
         organizationName and requestedByName, the change Request as the record; approve and refuse decide it at the message's
         revision (decide#OrderChange), so a superseded proposal is refused naming the current one. The app that decides it
-        sets the link (IronStone Customer Service: BossSetupData.xml). -->
+        sets the link (IronStone Customer Service: BossSetupData05PurchasingAndCustomerService.xml). -->
     <moqui.security.user.NotificationTopic topic="OrderChangeApproval" inboxEnumId="NinNotifications"
             description="Order change to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
             isPrivate="Y" emailTemplateId="NOTIFICATION"
@@ -233,7 +233,7 @@
         one; a refusal needs a reason. The message holds returnId, sourceRevision, organizationPartyId, organizationName,
         customerName, exceptionText, reason and requestedByName. A decision on a return (authorized, an exception approved or
         refused) to its assignee (ReturnDecision: returnId, customerName, decisionText, decidedByName). The app that works
-        returns sets the links (IronStone Customer Service: BossSetupData.xml). -->
+        returns sets the links (IronStone Customer Service: BossSetupData05PurchasingAndCustomerService.xml). -->
     <moqui.security.user.NotificationTopic topic="ReturnExceptionApproval" inboxEnumId="NinNotifications"
             description="Return exception to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
             isPrivate="Y" emailTemplateId="NOTIFICATION"
@@ -247,7 +247,7 @@
     <!-- A warranty claim's repair finished (impl-customer-service P11, F67; mantle.request.WarrantyServices,
         SupportWarranty.eecas.xml): AsMntCompleted on the AssetMaintenance linked to an RqtWarranty case, to the case's assignee,
         else the agent who linked the repair: requestId, requestName, customerName, assetText, the case as the record. It
-        resolves nothing. The app that works cases sets the link (IronStone Customer Service: BossSetupData.xml). -->
+        resolves nothing. The app that works cases sets the link (IronStone Customer Service: BossSetupData05PurchasingAndCustomerService.xml). -->
     <moqui.security.user.NotificationTopic topic="WarrantyRepairFinished" inboxEnumId="NinNotifications"
             description="Warranty repair finished" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
             isPrivate="Y" emailTemplateId="NOTIFICATION"
