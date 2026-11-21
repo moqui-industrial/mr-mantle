@@ -9,7 +9,7 @@
         (decide#PositionApproval over PeopleApprovalServices.record#Decision): the last step's approval activates the position,
         a refusal needs a reason. The message holds peopleApprovalId, emplPositionId, sourceRevision, positionName,
         organizationName, departmentName and stepText, and no pay. The app that shows them sets the link (IronStone People:
-        BossSetupData.xml). Later phases add PeopleLeaveApproval, PeopleExpenseApproval and the others of design §12. -->
+        BossSetupData14PeopleAccess.xml). Later phases add PeopleLeaveApproval, PeopleExpenseApproval and the others of design §12. -->
     <moqui.security.user.NotificationTopic topic="PeoplePositionApproval" inboxEnumId="NinNotifications"
             description="Position activation to approve" typeString="info" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
@@ -69,7 +69,7 @@
         (decide#Correction over PeopleApprovalServices.record#Decision): the last approval makes it the day's attendance, a refusal
         needs a reason. The message holds peopleApprovalId, attendanceCorrectionId, attendanceDayId, sourceRevision, personName,
         dayText, workedText, subjectText, organizationName, departmentName and stepText: never the reason. The app that shows them sets
-        the link (IronStone People: BossSetupData.xml). -->
+        the link (IronStone People: BossSetupData15PeopleTimeAndPayroll.xml). -->
     <moqui.security.user.NotificationTopic topic="PeopleAttendanceApproval" inboxEnumId="NinNotifications"
             description="Attendance correction to approve" typeString="info" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
@@ -136,7 +136,7 @@
     <!-- impl-people P21 (design-people §4 Grievances, §1.4 notification topics): a confidential case filed with a handler, assigned to
         one, or changed (a move, a note, a message) is told to its people on this topic. The message holds requestId and one of a few
         fixed sentences (noticeText), never a person, the employer or what the case is about, so neither a lock screen nor an inbox
-        shows anything of it; no push. The app that shows it sets the link (IronStone People: BossSetupData.xml). Sent by its owning
+        shows anything of it; no push. The app that shows it sets the link (IronStone People: BossSetupData15PeopleTimeAndPayroll.xml). Sent by its owning
         services, mantle.request.RequestServices' case services and notify#PeopleCaseUpdate, which the record notices of a case
         (notify#RecordMention, notify#RecordFollowers) hand to it. -->
     <moqui.security.user.NotificationTopic topic="PeopleCaseUpdate" inboxEnumId="NinNotifications"
@@ -150,7 +150,7 @@
     <!-- impl-people P18 (design-people §10 Qualifications, §1.4 notification topics): a person is reminded once per expiry that a
         verified qualification of theirs expires within thirty days (and not renewed by a later one). The message holds
         partyQualificationId, typeText and expiryText, never the reference, issuer or a file, so the title is safe on a lock
-        screen. The app that shows them sets the link (IronStone People: BossSetupData.xml). -->
+        screen. The app that shows them sets the link (IronStone People: BossSetupData15PeopleTimeAndPayroll.xml). -->
     <moqui.security.user.NotificationTopic topic="QualificationExpiring" inboxEnumId="NinNotifications"
             description="Your qualification expiring" typeString="warning" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
@@ -169,7 +169,7 @@
         enrolls the person (an attendee of the session's event), a refusal needs its reason. The message holds peopleApprovalId,
         personTrainingId, workEffortId, sourceRevision, partyId, personName, subjectText (the course and the session's day),
         organizationName, departmentName and stepText: no reason, result or score. The app that shows them sets the link
-        (IronStone People: BossSetupData.xml). -->
+        (IronStone People: BossSetupData15PeopleTimeAndPayroll.xml). -->
     <moqui.basic.Enumeration enumId="PakTraining" description="Training enrollment" sequenceNum="8" enumTypeId="PeopleApprovalKind"/>
     <moqui.security.user.NotificationTopic topic="PeopleTrainingApproval" inboxEnumId="NinNotifications"
             description="Training place to approve" typeString="info" showAlert="Y" persistOnSend="Y"
@@ -179,7 +179,7 @@
             titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
     <!-- impl-people P19 review: the person (and who asked for them, when another) is told the outcome of the place they asked for,
         approved or refused (decide#Enrollment). The message holds personTrainingId, workEffortId, courseText, dayText and
-        outcomeText, never the reason. The app that shows them sets the link (IronStone People: BossSetupData.xml). -->
+        outcomeText, never the reason. The app that shows them sets the link (IronStone People: BossSetupData15PeopleTimeAndPayroll.xml). -->
     <moqui.security.user.NotificationTopic topic="PeopleTrainingDecision" inboxEnumId="NinNotifications"
             description="Your training place decided" typeString="info" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
@@ -195,7 +195,7 @@
     <!-- impl-people P12 (design-people §7 LeaveRequestDetail, §15 the leave decision statement): the person (and an HR officer who
         asked for them) is told the outcome of their leave request: approved, refused, cancelled or the cancellation refused. The
         message holds leaveRequestId, datesText and outcomeText, never the leave type or the reason. The app that shows them sets the
-        link (IronStone People: BossSetupData.xml). -->
+        link (IronStone People: BossSetupData15PeopleTimeAndPayroll.xml). -->
     <moqui.security.user.NotificationTopic topic="PeopleLeaveDecision" inboxEnumId="NinNotifications"
             description="Your leave request decided" typeString="info" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
@@ -286,7 +286,7 @@
         over PeopleApprovalServices.record#Decision): the last approval approves the offer for issue, a refusal (its reason required)
         makes it a draft again. The message holds peopleApprovalId, employmentOfferId, sourceRevision, partyId, personName, the
         opening's and position's names, subjectText, organizationName, departmentName and stepText: never pay. The app that shows them
-        sets the link (IronStone People: BossSetupData.xml). -->
+        sets the link (IronStone People: BossSetupData15PeopleTimeAndPayroll.xml). -->
     <moqui.security.user.NotificationTopic topic="PeopleOfferApproval" inboxEnumId="NinNotifications"
             description="Offer of employment to approve" typeString="info" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
@@ -315,7 +315,7 @@
         reviewer's assessment to them. The message holds peopleApprovalId, performanceReviewId, sourceRevision, partyId, personName,
         subjectText (the cycle: a lock-screen-safe title names no person, design-people §1.4), organizationName, departmentName and
         stepText: never a rating, an answer or a note.
-        The app that shows them sets the link (IronStone People: BossSetupData.xml). -->
+        The app that shows them sets the link (IronStone People: BossSetupData15PeopleTimeAndPayroll.xml). -->
     <moqui.basic.Enumeration enumId="PakReview" description="Review" sequenceNum="9" enumTypeId="PeopleApprovalKind"/>
     <moqui.security.user.NotificationTopic topic="PeopleReviewStep" inboxEnumId="NinNotifications"
             description="Review to approve" typeString="info" showAlert="Y" persistOnSend="Y"
@@ -327,14 +327,14 @@
         returned with its reason kept on the review) and a review released to its person (the availability notice of design §15).
         The message holds performanceReviewId and noticeText, a sentence naming the cycle and the due date or the release, never
         the person reviewed (a lock-screen-safe title, design-people §1.4), a rating, an answer, a summary or a note. The app that
-        shows it sets the link (IronStone People: BossSetupData.xml). -->
+        shows it sets the link (IronStone People: BossSetupData15PeopleTimeAndPayroll.xml). -->
     <moqui.security.user.NotificationTopic topic="PeopleReviewUpdate" inboxEnumId="NinNotifications"
             description="Review" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
             isPrivate="Y" emailTemplateId="NOTIFICATION" titleTemplate="${noticeText}"/>
 
     <!-- impl-people P14 (design-people §6 ShiftRoster): a worker is told when their shifts are published, and when a published
         shift of theirs is changed or removed. The message holds datesText, firstDay, outcomeText and shiftCount, never who rostered
-        it or why. The app that shows them sets the link (IronStone People: BossSetupData.xml). -->
+        it or why. The app that shows them sets the link (IronStone People: BossSetupData15PeopleTimeAndPayroll.xml). -->
     <moqui.security.user.NotificationTopic topic="PeopleShiftChange" inboxEnumId="NinNotifications"
             description="Your shifts published or changed" typeString="info" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"

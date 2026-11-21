@@ -71,7 +71,7 @@
         (SupportCaseAssigned: requestId, requestName, customerName, assignedByName, the case as the record) and a customer's
         reply on a case the user is assigned (SupportCaseCustomerReply: requestId, requestName, customerName, fromName, the
         case as the record), both in the Notifications inbox. The app that works cases sets the links (IronStone Customer
-        Service: BossSetupData.xml). -->
+        Service: BossSetupData05PurchasingAndCustomerService.xml). -->
     <moqui.security.user.NotificationTopic topic="SupportCaseAssigned" inboxEnumId="NinNotifications" description="Case Assigned to You" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${assignedByName} assigned you case ${requestId}: ${requestName} (${customerName})"/>
@@ -81,7 +81,7 @@
     <!-- the service level topics (mantle.request.SlaServices.scan#CaseSla; impl-customer-service P4, CS-JOBS): a case's clock near
         its due time (SupportCaseSlaWarning) and past it (SupportCaseSlaBreach), each once per episode, to the case's assignee, else
         the managers of the queue's team: requestId, requestName, customerName, clockLabel (First response or Resolution),
-        dueText, the case as the record. The app that works cases sets the links (IronStone Customer Service: BossSetupData.xml). -->
+        dueText, the case as the record. The app that works cases sets the links (IronStone Customer Service: BossSetupData05PurchasingAndCustomerService.xml). -->
     <moqui.security.user.NotificationTopic topic="SupportCaseSlaWarning" inboxEnumId="NinNotifications" description="Case Due Soon" typeString="warning"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${clockLabel} of case ${requestId} is due ${dueText}: ${requestName}"/>
@@ -91,7 +91,7 @@
     <!-- the assignment topic (mantle.request.SupportCaseServices.assign#Case; impl-customer-service P5, CS-ASSIGNMENT): a case
         no eligible agent could take, left unassigned, to the managers of its queue's team: requestId, requestName,
         customerName, queueName, reason, the case as the record. The app that works cases sets the link (IronStone Customer
-        Service: BossSetupData.xml). -->
+        Service: BossSetupData05PurchasingAndCustomerService.xml). -->
     <moqui.security.user.NotificationTopic topic="SupportCaseUnassigned" inboxEnumId="NinNotifications" description="Case Left Unassigned" typeString="warning"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="No agent could take case ${requestId} in ${queueName}: ${requestName}"/>
