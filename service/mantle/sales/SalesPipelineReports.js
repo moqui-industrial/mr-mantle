@@ -6,7 +6,7 @@
 //   is refused (ORGANIZATION_DENIED). Nothing is added across currencies: every amount is by currency, and counts are counts.
 // - A deal as it stood at a time is read from its audit log: a field's value then is the old value of its first change after that
 //   time, else its value now (statusId, typeEnumId, opportunityStageId, estimatedAmount, estimatedProbability, estimatedCloseDate,
-//   recurringAmount and closedDate are audit-logged, SalesEntities.xml). Its owner and team then are its dated party rows.
+//   recurringAmount and closedDate are audit-logged, entity/sales/NeedAndOpportunityAndPolicyAndQuoteEntities.xml). Its owner and team then are its dated party rows.
 // - Stage durations are measured between audited stage changes, reopenings included: a stay whose entry or exit the log does not
 //   show (a deal whose first recorded change starts from a stage, or two changes that do not chain) is counted as unknown, never
 //   guessed. Lead conversion is over an explicit cohort of leads created between two days (convertedDate, set once by

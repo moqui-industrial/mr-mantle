@@ -1,0 +1,960 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!--  - mantle.product.store -->
+    <!-- ========================================================= -->
+    <entity entity-name="ProductStore" package="mantle.product.store" short-alias="productStores" cache="true">
+        <field name="productStoreId" type="id" is-pk="true"/>
+        <field name="storeName" type="text-medium"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true">
+            <description>The Organization Party that Orders, Invoices, GL transactions, etc will be associated with.</description></field>
+
+        <field name="inventoryFacilityId" type="id" enable-audit-log="true"/>
+        <field name="reservationOrderEnumId" type="id" enable-audit-log="true"/>
+        <field name="reservationAutoEnumId" type="id" enable-audit-log="true"/>
+        <field name="requireInventory" type="text-indicator" enable-audit-log="true"/>
+
+        <field name="defaultDisablePromotions" type="text-indicator"/>
+        <field name="defaultDisableShippingCalc" type="text-indicator"/>
+        <field name="defaultDisableTaxCalc" type="text-indicator"/>
+
+        <field name="returnPostalContactMechId" type="id"><description>Return postal address for shipping labels</description></field>
+        <field name="markupOrderShipLabels" type="text-indicator"/>
+        <field name="markupShipmentShipLabels" type="text-indicator"/>
+        <field name="shipmentAnyCarrierMethod" type="text-indicator">
+            <description>If Y don't restrict Shipment Shipping Options by ProductStoreShipOption records during fulfillment, show all Shipment Methods for Carriers associated with shipping gateway</description></field>
+        <field name="insurancePackageThreshold" type="currency-amount">
+            <description>If total cost of items in a package is above this amount buy insurance on that package</description></field>
+
+        <field name="autoApproveDelay" type="number-integer" enable-audit-log="true"><description>Minimum time in minutes to wait before trying to auto-approve;
+            defaults to 0 which means auto-approve immediately (via SECA rule), otherwise delayed auto-approve handled with service job</description></field>
+
+        <field name="storeDomain" type="text-short"><description>Store domain for use in emails</description></field>
+        <field name="profileUrlPath" type="text-medium"><description>Path to profile page for use in emails</description></field>
+        <field name="wikiSpaceId" type="id"><description>For a WikiSpace mounted as content, superceded by ProductStoreWikiSpace with spaceTypeEnumId=PstFull</description></field>
+        <!-- TODO: Warning dataDocumentId fields are to be deprecated in favor of the ProductStoreDataDocument entity -->
+        <field name="contentDataDocumentId" type="id"><description>Warning: this field to be deprecated in favor of a ProductStoreDataDocument entity with a typeEnumId of PsdtContent. The dataDocumentId to use for search of content pages in wikiSpaceId</description></field>
+        <field name="blogDataDocumentId" type="id"><description>Warning: this field to be deprecated in favor a ProductStoreDataDocument entity with a typeEnumId of PsdtBlog. The dataDocumentId to use for search of blog entries</description></field>
+        <field name="productDataDocumentId" type="id"><description>Warning: this field to be deprecated in favor of a ProductStoreDataDocument entity with a typeEnumId of PsdtProduct. The dataDocumentId to use for product search</description></field>
+
+        <!-- the policy fields are audit-logged with the user and reason (impl-commerce P2, §2): organization, currency, locale,
+            channel, approval delay and the tax gateway; StoreAdminServices.store#Store sets the reason -->
+        <field name="defaultLocale" type="text-short" enable-audit-log="true"/>
+        <field name="defaultCurrencyUomId" type="id" enable-audit-log="true"/>
+        <field name="defaultSalesChannelEnumId" type="id" enable-audit-log="true"/>
+
+        <field name="requireCustomerRole" type="text-indicator"/>
+        <field name="taxGatewayConfigId" type="id" enable-audit-log="true"/>
+        <field name="systemMessageRemoteId" type="id"><description>
+            Reference to the SystemMessageRemote record for the remote system this store is for such as a separate, integrated ecommerce app.
+            Note that SystemMessageRemote is extended with a productStoreId so that other SystemMessageRemotes know which store they are for (if applicable).
+        </description></field>
+
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" title="Inventory" related="mantle.facility.Facility" short-alias="inventoryFacility">
+            <key-map field-name="inventoryFacilityId"/></relationship>
+        <relationship type="one" title="AssetReservationOrder" related="moqui.basic.Enumeration" short-alias="assetReservationOrder">
+            <key-map field-name="reservationOrderEnumId"/></relationship>
+        <relationship type="one" title="AssetReservationAuto" related="moqui.basic.Enumeration" short-alias="reservationAutoEnum">
+            <key-map field-name="reservationAutoEnumId"/></relationship>
+        <relationship type="one-nofk" title="Return" related="mantle.party.contact.ContactMech" short-alias="returnPostal">
+            <key-map field-name="returnPostalContactMechId"/></relationship>
+        <relationship type="one" title="Return" related="mantle.party.contact.PostalAddress" short-alias="returnPostalAddress">
+            <key-map field-name="returnPostalContactMechId"/></relationship>
+
+        <relationship type="one" related="moqui.resource.wiki.WikiSpace" short-alias="wikiSpace"/>
+        <relationship type="many" related="mantle.product.store.ProductStoreDataDocument" short-alias="storeDataDocuments">
+            <key-map field-name="productStoreId"/></relationship>
+        <relationship type="one" title="Content" related="moqui.entity.document.DataDocument" short-alias="contentDataDocument">
+            <key-map field-name="contentDataDocumentId"/></relationship>
+        <relationship type="one" title="Blog" related="moqui.entity.document.DataDocument" short-alias="blogDataDocument">
+            <key-map field-name="blogDataDocumentId"/></relationship>
+        <relationship type="one" title="Product" related="moqui.entity.document.DataDocument" short-alias="productDataDocument">
+            <key-map field-name="productDataDocumentId"/></relationship>
+
+        <relationship type="one" title="DefaultCurrency" related="moqui.basic.Uom" short-alias="defaultCurrencyUom">
+            <key-map field-name="defaultCurrencyUomId"/></relationship>
+        <relationship type="one" title="DefaultSalesChannel" related="moqui.basic.Enumeration" short-alias="defaultSalesChannel">
+            <key-map field-name="defaultSalesChannelEnumId"/></relationship>
+        <relationship type="one" related="mantle.other.tax.TaxGatewayConfig" short-alias="taxGatewayConfig"/>
+        <relationship type="one" related="moqui.service.message.SystemMessageRemote" short-alias="remote"/>
+
+        <relationship type="many" related="mantle.product.store.ProductStoreCategory" short-alias="categories">
+            <key-map field-name="productStoreId"/></relationship>
+        <relationship type="many" related="mantle.product.store.ProductStoreEmail" short-alias="emails">
+            <key-map field-name="productStoreId"/></relationship>
+        <relationship type="many" related="mantle.product.store.ProductStoreFacility" short-alias="facilities">
+            <key-map field-name="productStoreId"/></relationship>
+        <relationship type="many" related="mantle.product.store.ProductStoreParty" short-alias="parties">
+            <key-map field-name="productStoreId"/></relationship>
+        <relationship type="many" related="mantle.product.store.ProductStorePaymentGateway" short-alias="paymentGateways">
+            <key-map field-name="productStoreId"/></relationship>
+        <relationship type="many" related="mantle.product.store.ProductStoreSetting" short-alias="settings">
+            <key-map field-name="productStoreId"/></relationship>
+        <relationship type="many" related="mantle.product.store.ProductStoreShippingGateway" short-alias="shippingGateways">
+            <key-map field-name="productStoreId"/></relationship>
+        <relationship type="many" related="mantle.product.store.ProductStoreShipOption" short-alias="shipOptions">
+            <key-map field-name="productStoreId"/></relationship>
+        <relationship type="many" related="mantle.product.store.ProductStoreGroupMember" short-alias="groups">
+            <key-map field-name="productStoreId"/></relationship>
+
+        <seed-data>
+            <!-- Asset (Inventory) Reservation Order -->
+            <moqui.basic.EnumerationType description="Asset (Inventory) Reservation Order" enumTypeId="AssetReservationOrder"/>
+            <!-- for these records enumCode is the order by field (on mantle.product.asset.Asset), makes it easy to add new ones -->
+            <moqui.basic.Enumeration description="FIFO Receive" enumId="AsResOrdFifoRec" enumCode="receivedDate" enumTypeId="AssetReservationOrder"/>
+            <moqui.basic.Enumeration description="LIFO Receive" enumId="AsResOrdLifoRec" enumCode="-receivedDate" enumTypeId="AssetReservationOrder"/>
+            <moqui.basic.Enumeration description="FIFO Expire" enumId="AsResOrdFifoExp" enumCode="expectedEndOfLife" enumTypeId="AssetReservationOrder"/>
+            <moqui.basic.Enumeration description="LIFO Expire" enumId="AsResOrdLifoExp" enumCode="-expectedEndOfLife" enumTypeId="AssetReservationOrder"/>
+            <moqui.basic.Enumeration description="Greatest Unit Cost" enumId="AsResOrdCostGr" enumCode="-acquireCost" enumTypeId="AssetReservationOrder"/>
+            <moqui.basic.Enumeration description="Lowest Unit Cost" enumId="AsResOrdCostLw" enumCode="acquireCost" enumTypeId="AssetReservationOrder"/>
+            <moqui.basic.Enumeration description="No Reservation" enumId="AsResOrdNoRes" enumTypeId="AssetReservationOrder"/>
+
+            <!-- Asset (Inventory) Auto Reservation Trigger -->
+            <moqui.basic.EnumerationType description="Asset Auto Reservation" enumTypeId="AssetReservationAuto"/>
+            <moqui.basic.Enumeration description="No Auto Reserve" enumId="AsResAutoNone" enumTypeId="AssetReservationAuto"/>
+            <moqui.basic.Enumeration description="On Order Placed" enumId="AsResAutoPlaced" enumTypeId="AssetReservationAuto"/>
+            <moqui.basic.Enumeration description="On Order Approved" enumId="AsResAutoApproved" enumTypeId="AssetReservationAuto"/>
+        </seed-data>
+        <master>
+            <detail relationship="organization"/>
+            <detail relationship="inventoryFacility"/>
+            <detail relationship="assetReservationOrder"/>
+            <detail relationship="defaultCurrencyUom"/>
+            <detail relationship="defaultSalesChannel"/>
+            <detail relationship="taxGatewayConfig"/>
+
+            <detail relationship="categories"><detail relationship="category"/><detail relationship="type"/></detail>
+            <detail relationship="emails"><detail relationship="template"/><detail relationship="type"/></detail>
+            <detail relationship="facilities"><detail relationship="facility"/></detail>
+            <detail relationship="parties"><detail relationship="party" use-master="basic"/>
+                <detail relationship="role"/></detail>
+            <detail relationship="paymentGateways"><detail relationship="paymentInstrument"/>
+                <detail relationship="config"/></detail>
+            <detail relationship="shippingGateways"><detail relationship="carrier" use-master="basic"/>
+                <detail relationship="config"/></detail>
+            <detail relationship="groups"><detail relationship="group"/></detail>
+        </master>
+    </entity>
+
+    <entity entity-name="ProductStoreApprove" package="mantle.product.store" use="configuration" cache="true">
+        <description>For per-store configurable pre-approve order validations</description>
+        <field name="storeApproveId" type="id" is-pk="true"/>
+        <field name="productStoreId" type="id"/>
+        <field name="serviceRegisterId" type="id" not-null="true"><description>Registered Service of type OrderValidate that implements the
+            mantle.order.OrderInfoServices.validate#Order interface</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" related="moqui.service.ServiceRegister" short-alias="serviceRegister"/>
+        <relationship type="many" related="mantle.product.store.ProductStoreApproveParam" short-alias="parameters">
+            <key-map field-name="storeApproveId"/></relationship>
+        <seed-data>
+            <moqui.basic.Enumeration description="Order Approve Validate" enumId="OrderValidate" enumTypeId="ServiceRegisterType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductStoreApproveParam" package="mantle.product.store" use="configuration" cache="true">
+        <field name="storeApproveId" type="id" is-pk="true"/>
+        <field name="parameterName" type="text-short" is-pk="true"/>
+        <field name="parameterValue" type="text-medium"/>
+        <relationship type="one" related="mantle.product.store.ProductStoreApprove" short-alias="storeApprove"/>
+    </entity>
+
+    <entity entity-name="ProductStoreCategory" package="mantle.product.store">
+        <field name="productStoreId" type="id" is-pk="true"/>
+        <field name="productCategoryId" type="id" is-pk="true"/>
+        <field name="storeCategoryTypeEnumId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" related="mantle.product.category.ProductCategory" short-alias="category"/>
+        <relationship type="one" title="ProductStoreCategoryType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="storeCategoryTypeEnumId"/></relationship>
+        <seed-data>
+            <!-- Product Store Category Type -->
+            <moqui.basic.EnumerationType description="Product Store Category Type" enumTypeId="ProductStoreCategoryType"/>
+            <moqui.basic.Enumeration description="Home Page (One)" enumId="PsctHomePage" enumTypeId="ProductStoreCategoryType"/>
+            <moqui.basic.Enumeration description="Browse Root (One)" enumId="PsctBrowseRoot" enumTypeId="ProductStoreCategoryType"/>
+            <moqui.basic.Enumeration description="Default Search (One)" enumId="PsctSearch" enumTypeId="ProductStoreCategoryType"/>
+            <moqui.basic.Enumeration description="Quick Add (Many)" enumId="PsctQuickAdd" enumTypeId="ProductStoreCategoryType"/>
+            <moqui.basic.Enumeration description="Quick Add Internal (Many)" enumId="PsctQuickInternal" enumTypeId="ProductStoreCategoryType"/>
+            <moqui.basic.Enumeration description="Promotions (One)" enumId="PsctPromotions" enumTypeId="ProductStoreCategoryType"/>
+            <moqui.basic.Enumeration description="New Products (One)" enumId="PsctNewProducts" enumTypeId="ProductStoreCategoryType"/>
+            <moqui.basic.Enumeration description="Featured (One)" enumId="PsctFeatured" enumTypeId="ProductStoreCategoryType"/>
+            <moqui.basic.Enumeration description="View Allow (One)" enumId="PsctViewAllow" enumTypeId="ProductStoreCategoryType"/>
+            <moqui.basic.Enumeration description="Purchase Allow (One)" enumId="PsctPurchaseAllow" enumTypeId="ProductStoreCategoryType"/>
+            <moqui.basic.Enumeration description="Admin Allow (One)" enumId="PsctAdminAllow" enumTypeId="ProductStoreCategoryType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductStoreEmail" package="mantle.product.store">
+        <field name="productStoreId" type="id" is-pk="true"/>
+        <field name="emailTypeEnumId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="emailTemplateId" type="id"/>
+        <field name="headerImagePath" type="text-medium"/>
+        <field name="detailLinkPath" type="text-medium"/>
+        <field name="webOrderBcc" type="text-medium"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" title="ProductStoreEmailType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="emailTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.basic.email.EmailTemplate" short-alias="template"/>
+        <seed-data>
+            <!-- Product Store Email Type -->
+            <moqui.basic.EnumerationType description="Product Store Email Notification Type" enumTypeId="ProductStoreEmailType"/>
+            <!-- currently generated automatically, triggered by status, based on configuration in mr-mantle -->
+            <moqui.basic.Enumeration description="Order Placed" enumId="PsetOrderPlaced" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Order Approved" enumId="PsetOrderApproved" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Shipment Shipped" enumId="PsetShipmentShipped" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Shipment Delivered" enumId="PsetShipmentDelivered" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Invoice Finalized" enumId="PsetInvoiceFinalized" enumTypeId="ProductStoreEmailType"/>
+            <!-- currently generated manually, based on configuration in mr-mantle -->
+            <moqui.basic.Enumeration description="Invoices Past Due" enumId="PsetInvoicesPastDue" enumTypeId="ProductStoreEmailType"/>
+            <!-- not currently generated by OOTB code -->
+            <moqui.basic.Enumeration description="Registration" enumId="PsetRegistration" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Order Quote Requested" enumId="PsetOrderRequested" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Order Quote Proposed" enumId="PsetOrderProposed" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Order Complete" enumId="PsetOrderComplete" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Order Change" enumId="PsetOrderChange" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Back-Order Notice" enumId="PsetBackOrder" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Payment Retry" enumId="PsetPaymentRetry" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Return Accepted" enumId="PsetReturnAccepted" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Return Completed" enumId="PsetReturnCompleted" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Return Cancelled" enumId="PsetReturnCancelled" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Reset Password" enumId="PsetResetPassword" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Tell-A-Friend" enumId="PsetTellAFriend" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Gift Card Purchase" enumId="PsetGiftCardPurchase" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Gift Card Reload" enumId="PsetGiftCardReload" enumTypeId="ProductStoreEmailType"/>
+            <!-- Commerce's notices (impl-commerce P2, F16), each sent by its phase: cart recovery (P10), subscription renewal (Shop
+                P7, P12), review request (P9) -->
+            <moqui.basic.Enumeration description="Cart Recovery" enumId="PsetCartRecovery" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Subscription Renewal" enumId="PsetSubscriptionRenewal" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Review Request" enumId="PsetReviewRequest" enumTypeId="ProductStoreEmailType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductStoreFacility" package="mantle.product.store">
+        <field name="productStoreId" type="id" is-pk="true"/>
+        <field name="facilityId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" related="mantle.facility.Facility" short-alias="facility"/>
+    </entity>
+
+    <entity entity-name="ProductStoreParty" package="mantle.product.store">
+        <field name="productStoreId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="mantle.party.RoleType" short-alias="role"/>
+        <seed-data>
+            <!-- a store's staff member (impl-commerce P1, §4; design-commerce §1.1): a person with a current StoreStaff row
+                works only those stores of their organizations; a person with none works every store of their organizations.
+                The row narrows a user's stores and grants no permission. -->
+            <mantle.party.RoleType roleTypeId="StoreStaff" description="Store staff"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductStorePaymentGateway" package="mantle.product.store">
+        <!-- not dated (impl-commerce F15): the binding's key fields are audit-logged on create and change; a delete is not
+            logged, so the service that removes one (CheckoutSettings, P6) records it -->
+        <field name="productStoreId" type="id" is-pk="true"/>
+        <field name="paymentInstrumentEnumId" type="id" is-pk="true" enable-audit-log="true"/>
+        <field name="paymentGatewayConfigId" type="id" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" title="PaymentInstrument" related="moqui.basic.Enumeration" short-alias="paymentInstrument">
+            <key-map field-name="paymentInstrumentEnumId"/></relationship>
+        <relationship type="one" related="mantle.account.method.PaymentGatewayConfig" short-alias="config"/>
+    </entity>
+
+    <entity entity-name="ProductStoreProduct" package="mantle.product.store" use="configuration" cache="true">
+        <description>A product's publication in a store (impl-commerce P3, §4; design-commerce §4), effective dated as
+            ProductStoreCategory is: publishing starts a row from a date, withdrawal ends it, a change of template, badge or rank
+            is a new row. A virtual product's published row covers its saleable variants; a variant is left out by its own
+            exclusion row (PspkExcluded). A row with no kind is published (rows made before P3). Read the current row
+            (fromDate at or before the time, thruDate after it or empty), never by the store and product alone.
+            StoreMerchandisingServices writes it; get#StorePublication answers what is public.</description>
+        <field name="productStoreId" type="id" is-pk="true"/>
+        <field name="productId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true" default="ec.user.nowTimestamp"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="publicationKindEnumId" type="id" enable-audit-log="true"/>
+        <field name="templateKey" type="text-short" enable-audit-log="true"><description>The theme's product template for
+            this product in the store (Shop's theme release names the keys); empty for the theme's default.</description></field>
+        <field name="badgeText" type="text-medium" enable-audit-log="true"/>
+        <field name="featuredRank" type="number-integer" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"><description>Why the row was started or
+            ended, on rows written before the reason went to each field's audit row (F63); no longer written.</description></field>
+        <field name="signatureRequiredEnumId" type="id"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" title="SignatureRequired" related="moqui.basic.Enumeration" short-alias="signatureRequiredEnum">
+            <key-map field-name="signatureRequiredEnumId"/></relationship>
+        <relationship type="one" title="PublicationKind" related="moqui.basic.Enumeration" short-alias="publicationKind">
+            <key-map field-name="publicationKindEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Store Publication Kind" enumTypeId="StorePublicationKind"/>
+            <moqui.basic.Enumeration description="Published" enumId="PspkPublished" enumTypeId="StorePublicationKind" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Variant excluded" enumId="PspkExcluded" enumTypeId="StorePublicationKind" sequenceNum="2"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductStorePromotion" package="mantle.product.store" use="configuration" cache="true">
+        <field name="storePromotionId" type="id" is-pk="true"/>
+        <field name="productStoreId" type="id"/>
+        <field name="itemDescription" type="text-medium"><description>Description for the OrderItem (itemDescription), plain text:
+            a promo service puts it on its items as written and never expands it as a template, and a ${ in it is refused by
+            store#Promotion and needs DATABASE_ADMIN to write (StorePromotion.eecas.xml; SEC-BAP-83)</description></field>
+        <field name="serviceRegisterId" type="id" not-null="true"><description>Registered Service of type ProductStorePromotion that implements the
+            mantle.product.PromotionServices.apply#Promotion interface</description></field>
+        <!-- the dates and use limits are audit-logged (impl-commerce P7, §2: promotion limits and dates); the limits are
+            counted again under a lock at place#Order (StorePromotionServices.check#OrderPromotionLimits) -->
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="requireCode" type="text-indicator"/>
+        <field name="useLimitPerOrder" type="number-integer" enable-audit-log="true"/>
+        <field name="useLimitPerCustomer" type="number-integer" enable-audit-log="true"/>
+        <field name="useLimitPerPromotion" type="number-integer" enable-audit-log="true"/>
+        <field name="freeGroundShipping" type="text-indicator"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" related="moqui.service.ServiceRegister" short-alias="serviceRegister"/>
+        <relationship type="many" related="mantle.product.store.ProductStorePromoParameter" short-alias="parameters">
+            <key-map field-name="storePromotionId"/></relationship>
+        <relationship type="many" related="mantle.product.store.ProductStorePromoCode" short-alias="codes">
+            <key-map field-name="storePromotionId"/></relationship>
+        <seed-data>
+            <moqui.basic.Enumeration description="Product Store Promotion" enumId="ProductStorePromotion" enumTypeId="ServiceRegisterType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductStorePromoParameter" package="mantle.product.store" use="configuration" cache="true">
+        <field name="storePromotionId" type="id" is-pk="true"/>
+        <field name="parameterName" type="text-short" is-pk="true"/>
+        <field name="parameterValue" type="text-medium"/>
+        <relationship type="one" related="mantle.product.store.ProductStorePromotion" short-alias="storePromotion"/>
+    </entity>
+
+    <entity entity-name="ProductStorePromoProduct" package="mantle.product.store" use="configuration" cache="true">
+        <field name="storePromotionId" type="id" is-pk="true"/>
+        <field name="productId" type="id" is-pk="true"/>
+        <field name="excludeProduct" type="text-indicator"/>
+        <relationship type="one" related="mantle.product.store.ProductStorePromotion" short-alias="storePromotion"/>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+    </entity>
+
+    <entity entity-name="ProductStorePromoCode" package="mantle.product.store">
+        <field name="promoCodeId" type="id" is-pk="true"/>
+        <field name="promoCode" type="text-short" default="promoCodeId"/>
+        <field name="storePromotionId" type="id"/>
+        <!-- the dates and use limits are audit-logged (impl-commerce P7); a code is expired, never deleted -->
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="useLimitPerCode" type="number-integer" enable-audit-log="true"/>
+        <field name="useLimitPerCustomer" type="number-integer" enable-audit-log="true"/>
+        <!-- Y: customers enter it (Shop applies only these, SEC-PSS-81); N, the default: staff apply it themselves -->
+        <field name="userEntered" type="text-indicator" default="'N'"/>
+        <field name="requireParty" type="text-indicator"/>
+        <relationship type="one" related="mantle.product.store.ProductStorePromotion" short-alias="storePromotion"/>
+        <relationship type="many" related="mantle.product.store.ProductStorePromoCodeParty" short-alias="parties">
+            <key-map field-name="promoCodeId"/></relationship>
+        <!-- a code's text is unique within its store's organization (StorePromotions.js codeTaken), not across the instance, so
+            one organization's staff never learn another's codes (SEC-BAP-108); Shop and add#OrderPromoCode match within the store -->
+        <index name="PSTR_PROMO_CODE"><index-field name="promoCode"/></index>
+    </entity>
+
+    <entity entity-name="ProductStorePromoCodeParty" package="mantle.product.store">
+        <field name="promoCodeId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.product.store.ProductStorePromoCode" short-alias="storePromoCode"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+    </entity>
+
+    <entity entity-name="ProductStoreSetting" package="mantle.product.store">
+        <field name="productStoreId" type="id" is-pk="true"/>
+        <field name="settingTypeEnumId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="settingValue" type="text-medium" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"><description>Why the setting was started or
+            ended (the checkout policy names its reason, impl-commerce P6; the store's History shows it).</description></field>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" title="ProductStoreSettingType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="settingTypeEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Product Store Setting Type" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration enumCode="restApiLocation" description="REST API Location" enumId="PsstRestApiLocation" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration enumCode="contentLocation" description="Content Location" enumId="PsstContentLocation" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration enumCode="contentAttachmentLocation" description="Content Attachment Location" enumId="PsstContentAttachmentLoc" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration enumCode="productImageLocation" description="Product Image Location" enumId="PsstProductImageLoc" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration enumCode="getReturnLabels" description="Get Return Labels (true/false)" enumId="PsstGetReturnLabels" enumTypeId="ProductStoreSettingType"/>
+
+            <moqui.basic.Enumeration description="Product Detail URL GString" enumId="PsstProductDetailUrl" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Product Image URL GString" enumId="PsstProductImageUrl" enumTypeId="ProductStoreSettingType"/>
+
+            <moqui.basic.Enumeration description="Ship Label From Name" enumId="PsstShipLabelName" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Ship Label From Company" enumId="PsstShipLabelCompany" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Ship Restrict Carriers (true/false)" enumId="PsstShipRestrictCarriers" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Shipping Label Cost Markup Percent" enumId="PsstShipLabelMarkup" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Shipping Order Charge Markup Percent" enumId="PsstShipOrderMarkup" enumTypeId="ProductStoreSettingType"/>
+
+            <moqui.basic.Enumeration description="Template Location Shipment Insert" enumId="PsstTemplateShipmentInsert" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Template Location Shipment Pick Sheet" enumId="PsstTemplateShipmentPick" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Template Location Shipment Pack Sheet" enumId="PsstTemplateShipmentPack" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Template Location Shipment By Package" enumId="PsstTemplateShipmentByPackage" enumTypeId="ProductStoreSettingType"/>
+
+            <moqui.basic.Enumeration description="Template Location Invoice Print" enumId="PsstTemplateInvoicePrint" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Template Location Order Print" enumId="PsstTemplateOrderPrint" enumTypeId="ProductStoreSettingType"/>
+
+            <moqui.basic.Enumeration description="Order Approve Warn New Customer (false to disable)" enumId="PsstOrdApproveNewCust" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Order Approve Warn Address not Valid (false to disable)" enumId="PsstOrdApproveAddrNotValid" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Order Approve Warn Address Missing (false to disable)" enumId="PsstOrdApproveAddrMissing" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Order Approve Warn Large Order - Total Above (default 0, 0 to disable)" enumId="PsstOrdApproveLargeOrder" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Order Approve Warn Large Web Order - Total Above (default 0, 0 to disable)" enumId="PsstOrdApproveLargeWebOrder" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Order Approve Warn Std Devs Over Avg Total (default 3.0, 0 to disable)" enumId="PsstOrdApproveStdDevTotal" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Order Approve Warn Std Devs Over Avg Product Qty (default 3.0, 0 to disable)" enumId="PsstOrdApproveStdDevProdQty" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Order Approve Warn Inventory Not Available (false to disable)" enumId="PsstOrdApproveInventoryNotAvail" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Order Approve Warn Percent Available Inventory (default 20, 0 to disable)" enumId="PsstOrdApprovePercAvailInv" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Order Approve Warn Similar within 24hrs (false to disable)" enumId="PsstOrdApproveSimilar" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Order Approve Warn Price Min/Max (false to disable)" enumId="PsstOrdApprovePriceMinMax" enumTypeId="ProductStoreSettingType"/>
+
+            <moqui.basic.Enumeration description="Order Approve Warn Billing and Shipping Addresses Differ (false to disable)" enumId="PsstOrdApproveBillShipAddrDiff" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Order Approve Warn Payment Method Name Differs (false to disable)" enumId="PsstOrdApprovePayMethNameDiff" enumTypeId="ProductStoreSettingType"/>
+            <!-- <moqui.basic.Enumeration description="Order Approve Warn Payment Method Grey/Blacklisted (false to disable)" enumId="PsstOrdApprovePayMethBlacklist" enumTypeId="ProductStoreSettingType"/> -->
+            <moqui.basic.Enumeration description="Order Approve Warn Contact Mech Grey/Blacklisted (false to disable)" enumId="PsstOrdApproveContactBlacklist" enumTypeId="ProductStoreSettingType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductStoreShippingGateway" package="mantle.product.store">
+        <field name="productStoreId" type="id" is-pk="true"/>
+        <field name="carrierPartyId" type="id" is-pk="true"/>
+        <!-- audit-logged (impl-commerce P6): a delete is not logged, so store#StoreShippingGateway records a removal -->
+        <field name="shippingGatewayConfigId" type="id" enable-audit-log="true"/>
+        <field name="billingType" type="text-short"><description>For third party and other carrier account billing;
+            for Shippo valid values are SENDER, RECIPIENT, THIRD_PARTY</description></field>
+        <field name="billingAccount" type="text-short"><description>Third party or other carrier account number</description></field>
+        <field name="billingZip" type="text-short"/>
+        <field name="billingCountry" type="text-short"><description>For Shippo this is the 2 letter ISO country code</description></field>
+        <field name="insurancePercent" type="number-decimal"><description>For insurance estimate records the percent of insured amount that is the cost of the insurance</description></field>
+        <field name="defaultTradeTermEnumId" type="id"/>
+        <!-- on further analysis doesn't make sense to configure at the store/gateway level:
+        <field name="customsCertify" type="text-indicator"/>
+        <field name="customsCertifySigner" type="text-short"/> -->
+        <!-- replaced by customsContentsEnumId, had not yet been used: <field name="customsContentsType" type="text-short"/> -->
+        <field name="customsContentsEnumId" type="id"/>
+        <field name="customsNonDeliveryEnumId" type="id"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" title="Carrier" related="mantle.party.Party" short-alias="carrier">
+            <key-map field-name="carrierPartyId"/></relationship>
+        <relationship type="one" related="mantle.shipment.carrier.ShippingGatewayConfig" short-alias="config"/>
+        <!-- For defaultTradeTermEnumId terms are defined with enumTypeId="TermType" in entity/account/InvoiceEntities.xml -->
+        <relationship type="one" title="TermType" related="moqui.basic.Enumeration" short-alias="defaultTradeTermEnum">
+            <key-map field-name="defaultTradeTermEnumId"/></relationship>
+    </entity>
+
+    <entity entity-name="ProductStoreShipOption" package="mantle.product.store">
+        <!-- not dated (impl-commerce F15): the binding's key fields are audit-logged on create; a delete is not logged, so the
+            service that removes one (CheckoutSettings, P6) records it -->
+        <field name="productStoreId" type="id" is-pk="true"/>
+        <field name="carrierPartyId" type="id" is-pk="true" enable-audit-log="true"/>
+        <field name="shipmentMethodEnumId" type="id" is-pk="true" enable-audit-log="true"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="markupPercent" type="number-decimal"/>
+        <field name="markupAmount" type="currency-amount"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" title="Carrier" related="mantle.party.Party" short-alias="carrier">
+            <key-map field-name="carrierPartyId"/></relationship>
+        <relationship type="one" title="ShipmentMethod" related="moqui.basic.Enumeration" short-alias="shipmentMethodEnum">
+            <key-map field-name="shipmentMethodEnumId"/></relationship>
+    </entity>
+
+    <entity entity-name="ProductStoreWikiSpace" package="mantle.product.store">
+        <description>Used to configure a WikiSpace to use for a given store, space type, and locale instead of directly referencing a wikiSpaceId.</description>
+        <field name="storeWikiSpaceId" type="id" is-pk="true"/>
+        <field name="productStoreId" type="id"/>
+        <field name="spaceTypeEnumId" type="id"/>
+        <field name="locale" type="text-short"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="wikiSpaceId" type="id"/>
+        <!-- future: <field name="allowSplit" type="text-indicator"><description>If all matching records have a 'Y' randomize and remember the
+            wikiSpaceId used instead of using from/thru date pattern (filter, get most recent by fromDate) to determine a single space.</description></field> -->
+        <!-- future, for version tagging once implemented: <field name="spaceTag" type="text-short"/> -->
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" title="ProductStoreWikiSpaceType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="spaceTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.resource.wiki.WikiSpace" short-alias="wikiSpace"/>
+        <seed-data>
+            <!-- NOTE: these enumId values go in URLs to keep small -->
+            <moqui.basic.EnumerationType description="Product Store Wiki Space Type" enumTypeId="ProductStoreWikiSpaceType"/>
+            <!-- full page content like about us, policies, etc -->
+            <moqui.basic.Enumeration description="Content - Full Page" enumId="PstFull" enumTypeId="ProductStoreWikiSpaceType"/>
+            <!-- blog post content like about us, policies, etc -->
+            <moqui.basic.Enumeration description="Content - Blog Posts" enumId="PstBlog" enumTypeId="ProductStoreWikiSpaceType"/>
+            <!-- page snippet content including banners, carousel slides, etc; often referred to through a WikiPageCategory -->
+            <moqui.basic.Enumeration description="Content - Snippet" enumId="PstSnip" enumTypeId="ProductStoreWikiSpaceType"/>
+            <!-- templates for information pages like header, footer, home, category, product, search, etc; server rendered, change frequently -->
+            <moqui.basic.Enumeration description="Template - Information (home, product, etc)" enumId="PstTmpSrv" enumTypeId="ProductStoreWikiSpaceType"/>
+            <!-- templates for interactive pages like checkout, profile, etc; client rendered, change less frequently -->
+            <moqui.basic.Enumeration description="Template - Interactive (checkout, profile, etc)" enumId="PstTmpClt" enumTypeId="ProductStoreWikiSpaceType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductStoreWikiContent" package="mantle.product.store">
+        <description>Used to configure the wiki space type and page path given a store content type.
+            An alternative to directly specifying the spaceTypeEnumId (for ProductStoreWikiSpace) and pagePath for lookup within the WikiSpace.</description>
+        <field name="storeWikiContentId" type="id" is-pk="true"/>
+        <field name="productStoreId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <!-- maybe at this level... <field name="locale" type="text-short"/> -->
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="spaceTypeEnumId" type="id"/>
+        <field name="pagePath" type="text-medium"/>
+        <!-- for AB testing add field with percentage weight for each alternative; should also remember in session for user so the randomly selected option is consistent -->
+        <!-- future: <field name="allowSplit" type="text-indicator"><description>If all matching records have a 'Y' randomize and remember the
+            wikiSpaceId used instead of using from/thru date pattern (filter, get most recent by fromDate) to determine a single space.</description></field> -->
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" title="ProductStoreContentType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" title="ProductStoreWikiSpaceType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="spaceTypeEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Product Store Content Type" enumTypeId="ProductStoreContentType"/>
+
+            <moqui.basic.Enumeration enumCode="template_client_header" description="Header Template - Client" enumId="PsctHeaderTemplate" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_client_footer" description="Footer Template - Client" enumId="PsctFooterTemplate" enumTypeId="ProductStoreContentType"/>
+
+            <moqui.basic.Enumeration enumCode="template_client_home" description="Home Template - Client" enumId="PsctHomeTemplate" enumTypeId="ProductStoreContentType"/>
+
+            <moqui.basic.Enumeration enumCode="template_client_search" description="Search Template - Client" enumId="PsctSearchTemplate" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_client_category" description="Category Template - Client" enumId="PsctCategoryTemplate" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_client_product" description="Product Template - Client" enumId="PsctProductTemplate" enumTypeId="ProductStoreContentType"/>
+            <!-- consolidate these
+            <moqui.basic.Enumeration enumCode="template_client_categoryProduct" description="Category Product Template - Client" enumId="PsctCategoryProductTemplate" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_client_productImage" description="Product Image Template - Client" enumId="PsctProductImageTemplate" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_client_productReview" description="Product Review Template - Client" enumId="PsctProductReviewTemplate" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_client_starRating" description="Star Rating Template - Client" enumId="PsctProductTemplate" enumTypeId="ProductStoreContentType"/>
+            -->
+
+            <moqui.basic.Enumeration enumCode="template_client_login" description="Login Template - Client" enumId="PsctLoginTemplate" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_client_resetPassword" description="Reset Password Template - Client" enumId="PsctResetPasswordTemplate" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_client_account" description="Account Template - Client" enumId="PsctAccountTemplate" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_client_accountCreate" description="Account Create Template - Client" enumId="PsctAccountCreateTemplate" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_client_orderHistory" description="Order History Template - Client" enumId="PsctOrderHistoryTemplate" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_client_orderDetail" description="Order Detail Template - Client" enumId="PsctOrderDetailTemplate" enumTypeId="ProductStoreContentType"/>
+
+            <moqui.basic.Enumeration enumCode="template_client_checkout" description="Checkout Template - Client" enumId="PsctCheckoutTemplate" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_client_checkoutHeader" description="Checkout Header Template - Client" enumId="PsctCheckoutHeaderTemplate" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_client_checkoutSuccess" description="Checkout Success Template - Client" enumId="PsctCheckoutSuccessTemplate" enumTypeId="ProductStoreContentType"/>
+
+            <moqui.basic.Enumeration enumCode="template_server_root" description="Root Template - Server" enumId="PsctRootTemplateServer" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_server_header" description="Header Template - Server" enumId="PsctHeaderTemplateServer" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_server_footer" description="Footer Template - Server" enumId="PsctFooterTemplateServer" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_server_home" description="Home Template - Server" enumId="PsctHomeTemplateServer" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_server_category" description="Category Template - Server" enumId="PsctCategoryTemplateServer" enumTypeId="ProductStoreContentType"/>
+            <moqui.basic.Enumeration enumCode="template_server_product" description="Product Template - Server" enumId="PsctProductTemplateServer" enumTypeId="ProductStoreContentType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductStoreDataDocument" package="mantle.product.store">
+        <description>Relationship between the ProductStore and DataDocument Entities meant to replace ProductStore.productDataDocumentId fields and the like. See: https://forum.moqui.org/t/productstore-datadocument-options/303.</description>
+        <field name="productStoreId" type="id" is-pk="true"/>
+        <field name="typeEnumId" type="id" is-pk="true"/>
+        <field name="dataDocumentId" type="id"/>
+
+        <!-- TODO: Are these many relationships? -->
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" related="moqui.entity.document.DataDocument" short-alias="dataDocument"/>
+        <relationship type="one" title="StoreDataDocumentType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="typeEnumId"/></relationship>
+
+        <seed-data>
+            <moqui.basic.EnumerationType description="Product Store Data Document Type" enumTypeId="ProductStoreDataDocumentType"/>
+            <moqui.basic.Enumeration description="Product Search" enumId="PsdtProduct" enumTypeId="ProductStoreDataDocumentType"/>
+            <moqui.basic.Enumeration description="Category Search" enumId="PsdtCategory" enumTypeId="ProductStoreDataDocumentType"/>
+            <moqui.basic.Enumeration description="Blog Search" enumId="PsdtBlog" enumTypeId="ProductStoreDataDocumentType"/>
+            <!-- TODO: What type of Content was the ProductStore.contentDataDocumentId for? -->
+            <moqui.basic.Enumeration description="Content Search" enumId="PsdtContent" enumTypeId="ProductStoreDataDocumentType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductStoreGroup" package="mantle.product.store">
+        <field name="productStoreGroupId" type="id" is-pk="true"/>
+        <field name="storeGroupTypeEnumId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" title="ProductStoreGroupType" related="moqui.basic.Enumeration">
+            <key-map field-name="storeGroupTypeEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Product Store Group Type" enumTypeId="ProductStoreGroupType"/>
+            <!-- impl-commerce P2 (F13): groups select stores for reports and bulk work; they share no settings -->
+            <moqui.basic.Enumeration description="Reporting" enumId="PsgtReporting" enumTypeId="ProductStoreGroupType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Region" enumId="PsgtRegion" enumTypeId="ProductStoreGroupType" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Brand" enumId="PsgtBrand" enumTypeId="ProductStoreGroupType" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Sales channel" enumId="PsgtChannel" enumTypeId="ProductStoreGroupType" sequenceNum="4"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductStoreGroupMember" package="mantle.product.store">
+        <field name="productStoreGroupId" type="id" is-pk="true"/>
+        <field name="productStoreId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" related="mantle.product.store.ProductStoreGroup" short-alias="group"/>
+    </entity>
+
+    <entity entity-name="ProductStoreGroupParty" package="mantle.product.store">
+        <field name="productStoreGroupId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="mantle.product.store.ProductStoreGroup"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.RoleType"/>
+    </entity>
+
+<!-- A store's checkout records (impl-commerce P6, COM-CHECKOUT; design-commerce §8 CheckoutSettings): the local shipping rates
+    that replace get#OrderShippingRateLocal's zero for a store with rules, and the checkout policy setting types (dated
+    ProductStoreSetting rows, impl-commerce §4, F14). mantle.product.StoreAdminServices writes them (StoreCheckout.js) after
+    its permission and store checks. -->
+    <entity entity-name="ProductStoreShippingRate" package="mantle.product.store" cache="never">
+        <description>A local shipping rate of a store: the charge for an order part going to a destination zone (a Geo, often a
+            group of GAT_GROUP_MEMBER members: it matches when it is one of the address's geos, from get#PostalAddressGeoIdSet,
+            or a group holding one), optionally for one carrier and method, within a weight band and a value band (each lower
+            bound inclusive, upper bound exclusive, empty for none), in its currency, from a date. Among the rules that match,
+            the lowest priority number wins; rules of the same priority whose zone, method, bands and dates overlap are refused.
+            A store with a rule in effect now or later is rated by its rules: no matching rule means no delivery, never free
+            shipping; a store with none keeps Mantle's local default. A change ends the rule and starts its successor.</description>
+        <field name="shippingRateId" type="id" is-pk="true"/>
+        <field name="productStoreId" type="id" enable-audit-log="true"/>
+        <field name="geoId" type="id" enable-audit-log="true"><description>The destination zone.</description></field>
+        <field name="carrierPartyId" type="id" enable-audit-log="true"><description>Empty for any carrier.</description></field>
+        <field name="shipmentMethodEnumId" type="id" enable-audit-log="true"><description>Empty for any method.</description></field>
+        <field name="fromWeight" type="number-decimal" enable-audit-log="true"/>
+        <field name="thruWeight" type="number-decimal" enable-audit-log="true"/>
+        <field name="weightUomId" type="id" enable-audit-log="true"/>
+        <field name="fromAmount" type="currency-amount" enable-audit-log="true"/>
+        <field name="thruAmount" type="currency-amount" enable-audit-log="true"/>
+        <field name="shippingAmount" type="currency-amount" enable-audit-log="true"><description>The charge for the part.</description></field>
+        <field name="currencyUomId" type="id" enable-audit-log="true"/>
+        <field name="priority" type="number-integer" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="previousRateId" type="id"><description>The rule this one replaced from its start.</description></field>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" related="moqui.basic.Geo" short-alias="geo"/>
+        <relationship type="one" title="Carrier" related="mantle.party.Party" short-alias="carrier">
+            <key-map field-name="carrierPartyId"/></relationship>
+        <relationship type="one" title="ShipmentMethod" related="moqui.basic.Enumeration" short-alias="shipmentMethod">
+            <key-map field-name="shipmentMethodEnumId"/></relationship>
+        <relationship type="one" title="Weight" related="moqui.basic.Uom" short-alias="weightUom">
+            <key-map field-name="weightUomId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId"/></relationship>
+        <index name="PS_SHIP_RATE_STORE"><index-field name="productStoreId"/></index>
+        <seed-data>
+            <!-- the checkout policy (CheckoutSettings' CheckoutPolicy and TaxDisplay), each a dated ProductStoreSetting type that
+                StoreAdmin.js settingTypes validates by its kind; Shop's checkout reads them, an absent one meaning its default -->
+            <moqui.basic.Enumeration description="Checkout: guest or account (either, account, guest; default either)"
+                    enumId="PsstCheckoutAccount" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Checkout: destinations (countries or zones, comma separated; default any)"
+                    enumId="PsstCheckoutDestinations" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Checkout: stock disclosure (hidden, availability, backorder; default availability)"
+                    enumId="PsstCheckoutStockDisclosure" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Checkout: buyers accept the Terms page (true/false; default true)"
+                    enumId="PsstCheckoutTerms" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Checkout: purchase contact phone (hidden, optional, required; default optional)"
+                    enumId="PsstCheckoutPhone" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Checkout: support queue (one the organization offers)"
+                    enumId="PsstCheckoutSupportQueue" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Tax display (exclusive, inclusive; default exclusive)"
+                    enumId="PsstTaxDisplay" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Tax origin (a fulfillment facility of the store)"
+                    enumId="PsstTaxOrigin" enumTypeId="ProductStoreSettingType"/>
+            <!-- SEC-PSS-05: Shop's new guest carts an hour for the store (ShopCart.js createCart) -->
+            <moqui.basic.Enumeration description="Shop: new guest carts an hour (a whole number; default 1000)"
+                    enumId="PsstGuestCartsHourly" enumTypeId="ProductStoreSettingType"/>
+        </seed-data>
+    </entity>
+
+<!-- Shop's digital delivery (mr-pass impl-shop P6; design-shop §8.3 Digital items, §10 Downloads, §14.2; SHOP-DIGITAL;
+    mantle.product.ShopFulfillmentServices, service/mantle/product/ShopFulfillment.js). An approved Shop order's digital
+    lines are fulfilled by StoreItemFulfillment, one row per line, each step resumable by its marker: the internal invoice
+    of the lines (create#InvoiceFromSource's split service), the payment's capture and the invoice's finalization (the
+    receipt), the part's completion, then a StoreDownloadGrant per file of the product. The invoices, payments and orders stay
+    Mantle's own records; a grant binds a settled line to a ProductContent download (its file and version) for its
+    recipient, never a public location. -->
+  <entity entity-name="StoreItemFulfillment" package="mantle.product.store" cache="never">
+    <description>The fulfillment of one digital line of an approved Shop order (a StoreCheckout's): its step
+      (StoreItemFulfillmentStep: pending, invoiced, paid, completed, held when the capture did not succeed, revoked after a
+      refund or return) with the marker of each step done (the invoice, the capture and finalization, the part's completion,
+      the grants), the tries and the last safe failure. One row per order line; a retry resumes at the first step not
+      done, so no second invoice, capture or grant is made.</description>
+    <field name="fulfillmentId" type="id" is-pk="true"/>
+    <field name="orderId" type="id"/>
+    <field name="orderItemSeqId" type="id"/>
+    <field name="orderPartSeqId" type="id"/>
+    <field name="productId" type="id"/>
+    <field name="productStoreId" type="id"/>
+    <field name="siteId" type="id"/>
+    <field name="recipientPartyId" type="id"><description>The order part's customer, who the grant is for.</description></field>
+    <field name="stepEnumId" type="id"/>
+    <field name="invoiceId" type="id"/>
+    <field name="paymentId" type="id"/>
+    <field name="invoicedDate" type="date-time"/>
+    <field name="paidDate" type="date-time"><description>The payment captured and the invoice finalized.</description></field>
+    <field name="completedDate" type="date-time"><description>The part completed and the grants issued.</description></field>
+    <field name="noticeDate" type="date-time"><description>The download-ready notice handed to the delivery ledger.</description></field>
+    <field name="revokedDate" type="date-time"/>
+    <field name="tries" type="number-integer"/>
+    <field name="nextTryDate" type="date-time"/>
+    <field name="failureCode" type="id"/>
+    <field name="failureMessage" type="text-medium"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.order.OrderHeader"/>
+    <relationship type="one" related="mantle.order.OrderItem"/>
+    <relationship type="one" related="mantle.product.store.ProductStore"/>
+    <relationship type="one" related="mantle.account.invoice.Invoice"/>
+    <relationship type="one" title="StoreItemFulfillmentStep" related="moqui.basic.Enumeration">
+      <key-map field-name="stepEnumId" related="enumId"/>
+    </relationship>
+    <index name="STORE_FULFILL_ITEM" unique="true">
+      <index-field name="orderId"/>
+      <index-field name="orderItemSeqId"/>
+    </index>
+    <index name="STORE_FULFILL_DUE">
+      <index-field name="stepEnumId"/>
+      <index-field name="nextTryDate"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Store item fulfillment step" enumTypeId="StoreItemFulfillmentStep"/>
+      <moqui.basic.Enumeration enumId="SifPending" description="Waiting for its invoice" sequenceNum="1" enumTypeId="StoreItemFulfillmentStep"/>
+      <moqui.basic.Enumeration enumId="SifInvoiced" description="Invoiced, waiting for payment" sequenceNum="2" enumTypeId="StoreItemFulfillmentStep"/>
+      <moqui.basic.Enumeration enumId="SifPaid" description="Paid, waiting for delivery" sequenceNum="3" enumTypeId="StoreItemFulfillmentStep"/>
+      <moqui.basic.Enumeration enumId="SifCompleted" description="Delivered" sequenceNum="4" enumTypeId="StoreItemFulfillmentStep"/>
+      <moqui.basic.Enumeration enumId="SifHeld" description="Payment not captured" sequenceNum="5" enumTypeId="StoreItemFulfillmentStep"/>
+      <moqui.basic.Enumeration enumId="SifRevoked" description="Refunded or returned" sequenceNum="6" enumTypeId="StoreItemFulfillmentStep"/>
+    </seed-data>
+  </entity>
+
+  <entity entity-name="StoreDownloadGrant" package="mantle.product.store" cache="never">
+    <description>A recipient's entitlement to one downloadable file (a ProductContent of type PcntDownload, its version
+      the content's own) of a settled order line, from the line's fulfillment: from and thru dates, the revocation with its
+      reason (StoreDownloadRevokeReason: a refund, a return's settlement, a chargeback, staff), and the use count. The file's
+      location is read from the ProductContent at each download and never kept or answered here. It follows its
+      recipient through merge#Parties.</description>
+    <field name="downloadGrantId" type="id" is-pk="true"/>
+    <field name="fulfillmentId" type="id"/>
+    <field name="orderId" type="id"/>
+    <field name="orderItemSeqId" type="id"/>
+    <field name="productId" type="id"/>
+    <field name="productContentId" type="id"/>
+    <field name="versionText" type="text-short"><description>The file's version when granted (the content's
+      sequence and date), shown to the buyer.</description></field>
+    <field name="recipientPartyId" type="id"/>
+    <field name="productStoreId" type="id"/>
+    <field name="siteId" type="id"/>
+    <field name="fromDate" type="date-time"/>
+    <field name="thruDate" type="date-time"/>
+    <field name="revokedDate" type="date-time"/>
+    <field name="revokeReasonEnumId" type="id"/>
+    <field name="downloadCount" type="number-integer"/>
+    <field name="lastDownloadDate" type="date-time"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.product.store.StoreItemFulfillment"/>
+    <relationship type="one" related="mantle.order.OrderHeader"/>
+    <relationship type="one" related="mantle.product.ProductContent"/>
+    <relationship type="one" title="Recipient" related="mantle.party.Party">
+      <key-map field-name="recipientPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" title="StoreDownloadRevokeReason" related="moqui.basic.Enumeration">
+      <key-map field-name="revokeReasonEnumId" related="enumId"/>
+    </relationship>
+    <index name="STORE_GRANT_SOURCE" unique="true">
+      <index-field name="orderId"/>
+      <index-field name="orderItemSeqId"/>
+      <index-field name="productContentId"/>
+    </index>
+    <index name="STORE_GRANT_RECIPIENT">
+      <index-field name="recipientPartyId"/>
+      <index-field name="productStoreId"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Store download revoke reason" enumTypeId="StoreDownloadRevokeReason"/>
+      <moqui.basic.Enumeration enumId="SdrRefunded" description="Refunded" sequenceNum="1" enumTypeId="StoreDownloadRevokeReason"/>
+      <moqui.basic.Enumeration enumId="SdrReturned" description="Returned" sequenceNum="2" enumTypeId="StoreDownloadRevokeReason"/>
+      <moqui.basic.Enumeration enumId="SdrChargeback" description="Charged back" sequenceNum="3" enumTypeId="StoreDownloadRevokeReason"/>
+      <moqui.basic.Enumeration enumId="SdrStaff" description="Ended by staff" sequenceNum="4" enumTypeId="StoreDownloadRevokeReason"/>
+    </seed-data>
+  </entity>
+
+<!-- A store's channel integrations and channel import (impl-commerce P13, COM-CHANNEL; design-commerce §9;
+    mantle.product.StoreChannelServices, StoreChannels.js). A binding is a SystemMessageRemote with the store
+    (productStoreId, this file) and a registered connector: its transport, credentials and keys stay the
+    operator's (set in the System tools, never by a store service, never returned). Messages are SystemMessages: each
+    received channel order its own message, kept by the store, remote, kind (docType) and external ID (messageId) with the
+    hash of its canonical content, so a matching replay answers the original and a conflicting one is kept, rejected, as
+    the evidence. A channel import batch is a SystemMessage of its own (StoreChannelImport) holding the file, Staged until
+    it is committed; its orders are its children (parentMessageId), received through the same connector path as the API. -->
+    <entity entity-name="StoreChannelConnector" package="mantle.product.store" use="configuration" cache="true">
+        <description>A registered connector a store may be bound through: its message type, the kind of business message it
+            carries, its direction and the mapping versions StoreChannels.js implements. Only a registered, enabled connector
+            with a handler in StoreChannels.js is offered; disabling one stops its intake (the messages are kept).</description>
+        <field name="connectorId" type="id" is-pk="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="systemMessageTypeId" type="id"/>
+        <field name="messageKind" type="text-short"><description>The business message (docType): ChannelOrder; EdiX12 for an
+            EDI partner, whose documents are the EDI services'</description></field>
+        <field name="direction" type="text-short"><description>in, out or both</description></field>
+        <field name="mappingVersion" type="number-integer"><description>The current mapping version a new binding takes</description></field>
+        <field name="managedBy" type="text-short"><description>Empty when a store's channel operator binds it; edi when the
+            binding is the EDI administrator's (an EdiConnection), which Commerce only reads and retries</description></field>
+        <field name="disabled" type="text-indicator"/>
+        <relationship type="one" related="moqui.service.message.SystemMessageType" short-alias="type"/>
+        <seed-data>
+            <!-- the registered connectors are data/10-seed/MarketingAndCommerce.xml's, after their message types -->
+            <moqui.basic.EnumerationType description="Store channel import format" enumTypeId="StoreChannelImportFormat"/>
+            <moqui.basic.Enumeration enumId="SciCsv" description="Channel orders, CSV (one row per line)" enumTypeId="StoreChannelImportFormat"/>
+            <moqui.basic.Enumeration enumId="SciJson" description="Channel orders, JSON (as the API takes them)" enumTypeId="StoreChannelImportFormat"/>
+            <!-- a channel import batch is staged by prepare#ChannelImport and consumed by commit#ChannelImport in the
+                framework's SmsgStaged status (ServiceEntities.xml, Commerce F162), so no framework job consumes a batch
+                nobody committed -->
+        </seed-data>
+    </entity>
+
+<!-- A store's product feeds and their builds (impl-commerce P14, COM-FEED; design-commerce §9 Feeds, FeedDetail): a feed
+    binds a store's Shop site to a registered format and destination; a build is an immutable artifact made from Shop's
+    public catalog projection (ShopCatalog.js) at the site's publication generation, with its rows, skips and errors; the
+    feed's active build is the one Shop serves at its reserved feed path (mr-pass, feeds/{feedKey}.{extension} under the
+    Shop mount), checked against the current generation. StoreFeeds.js writes both; nothing else does. -->
+    <entity entity-name="ProductStoreFeed" package="mantle.product.store">
+        <description>A product feed of a store (find#StoreFeeds, store#StoreFeed): its Shop site, a registered format and
+            destination (StoreFeeds.js formats, destinations), the product scope (a category and below, or the whole published
+            assortment), whether images and products that cannot be bought now are included, a schedule for the feed job, and
+            the active build. A feed is current from fromDate until thruDate (ending it stops serving); a change of its key
+            fields is audit-logged and names its reason. A change of site, key, format or category clears the active build,
+            which then needs a new one.</description>
+        <field name="productStoreFeedId" type="id" is-pk="true"/>
+        <field name="productStoreId" type="id" enable-audit-log="true"/>
+        <field name="siteId" type="id" enable-audit-log="true"/>
+        <field name="feedName" type="text-medium" enable-audit-log="true"/>
+        <field name="feedKey" type="text-short" enable-audit-log="true"><description>The feed's name in its public path
+            (feeds/{feedKey}.{extension} under the Shop mount): lower case letters, digits and hyphens, one current feed of a
+            site each.</description></field>
+        <field name="formatEnumId" type="id" enable-audit-log="true"/>
+        <field name="destinationEnumId" type="id" enable-audit-log="true"/>
+        <field name="locale" type="text-short"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="productCategoryId" type="id" enable-audit-log="true"/>
+        <field name="includeImages" type="text-indicator" enable-audit-log="true"/>
+        <field name="includeUnavailable" type="text-indicator" enable-audit-log="true"><description>Y keeps a product that
+            cannot be bought now (out of stock) as a row with its availability; otherwise it is a skip.</description></field>
+        <field name="scheduleEnumId" type="id" enable-audit-log="true"/>
+        <field name="activeBuildId" type="id" enable-audit-log="true"/>
+        <field name="activatedDate" type="date-time"/>
+        <field name="activatedByUserId" type="id"/>
+        <field name="lastScheduledDate" type="date-time"><description>When the feed job last built it.</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" related="mantle.public.PublicSite" short-alias="site"/>
+        <relationship type="one" title="Format" related="moqui.basic.Enumeration" short-alias="format">
+            <key-map field-name="formatEnumId"/></relationship>
+        <relationship type="one" title="Destination" related="moqui.basic.Enumeration" short-alias="destination">
+            <key-map field-name="destinationEnumId"/></relationship>
+        <relationship type="one" title="Schedule" related="moqui.basic.Enumeration" short-alias="schedule">
+            <key-map field-name="scheduleEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.category.ProductCategory" short-alias="category"/>
+        <relationship type="one-nofk" title="Active" related="mantle.product.store.ProductStoreFeedBuild" short-alias="activeBuild">
+            <key-map field-name="activeBuildId" related="feedBuildId"/></relationship>
+        <relationship type="one" related="moqui.basic.Uom" short-alias="currency"><key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <index name="PSFEED_SITE_KEY"><index-field name="siteId"/><index-field name="feedKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Store Feed Format" enumTypeId="StoreFeedFormat"/>
+            <moqui.basic.Enumeration description="Product feed (RSS 2.0, Google Merchant fields)" enumId="PsffGoogleXml" enumTypeId="StoreFeedFormat" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Product feed (CSV)" enumId="PsffCsv" enumTypeId="StoreFeedFormat" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Product feed (JSON)" enumId="PsffJson" enumTypeId="StoreFeedFormat" sequenceNum="3"/>
+            <moqui.basic.EnumerationType description="Store Feed Destination" enumTypeId="StoreFeedDestination"/>
+            <moqui.basic.Enumeration description="The store's Shop site" enumId="PsfdShopSite" enumTypeId="StoreFeedDestination" sequenceNum="1"/>
+            <moqui.basic.EnumerationType description="Store Feed Schedule" enumTypeId="StoreFeedSchedule"/>
+            <moqui.basic.Enumeration description="When asked" enumId="PsfsManual" enumTypeId="StoreFeedSchedule" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Every hour" enumId="PsfsHourly" enumTypeId="StoreFeedSchedule" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Every day" enumId="PsfsDaily" enumTypeId="StoreFeedSchedule" sequenceNum="3"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductStoreFeedBuild" package="mantle.product.store" cache="never">
+        <description>One build of a feed (build#StoreFeed, the feed job), never changed once written: complete (its artifact,
+            digest, rows, skips and errors) or failed (its failure, no artifact; the feed's active build is left as it was).
+            generation is the site's publication generation the build read; productIds are its rows' products, which serving
+            re-checks against the resolver once the generation has moved on, so a product withdrawn after the build blocks the
+            build until a rebuild without it is active.</description>
+        <field name="feedBuildId" type="id" is-pk="true"/>
+        <field name="productStoreFeedId" type="id"/>
+        <field name="productStoreId" type="id"/>
+        <field name="siteId" type="id"/>
+        <field name="buildStatusEnumId" type="id"/>
+        <field name="formatEnumId" type="id"/>
+        <field name="locale" type="text-short"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="generation" type="number-integer"/>
+        <field name="startedDate" type="date-time"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="builtByUserId" type="id"><description>Empty for the feed job.</description></field>
+        <field name="scheduled" type="text-indicator"/>
+        <field name="rowCount" type="number-integer"/>
+        <field name="skipCount" type="number-integer"/>
+        <field name="errorCount" type="number-integer"/>
+        <field name="productIds" type="text-very-long"/>
+        <field name="skipsJson" type="text-very-long"/>
+        <field name="errorsJson" type="text-long"/>
+        <field name="sampleJson" type="text-long"><description>The first rows' public projection, for FeedPreview.</description></field>
+        <field name="failureCode" type="text-short"/>
+        <field name="failureText" type="text-medium"/>
+        <field name="contentType" type="text-short"/>
+        <field name="artifactDigest" type="text-medium"/>
+        <field name="artifactSize" type="number-integer"/>
+        <field name="artifactText" type="text-very-long"/>
+        <relationship type="one" related="mantle.product.store.ProductStoreFeed" short-alias="feed"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" title="BuildStatus" related="moqui.basic.Enumeration" short-alias="buildStatus">
+            <key-map field-name="buildStatusEnumId"/></relationship>
+        <index name="PSFEEDBLD_FEED"><index-field name="productStoreFeedId"/><index-field name="startedDate"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Store Feed Build Status" enumTypeId="StoreFeedBuildStatus"/>
+            <moqui.basic.Enumeration description="Complete" enumId="PsfbComplete" enumTypeId="StoreFeedBuildStatus" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Failed" enumId="PsfbFailed" enumTypeId="StoreFeedBuildStatus" sequenceNum="2"/>
+        </seed-data>
+    </entity>
+</entities>

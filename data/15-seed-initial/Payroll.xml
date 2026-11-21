@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed-initial">
+    <!-- impl-people P15 (design-people §9 ExpenseClaimDetail and EmployeeAdvances, §12 ApprovalPolicies; F42): an expense claim
+        submitted (ExpenseServices.submit#Claim) and an employee advance asked (request#Advance), each sent to the approvers of the
+        step waiting (the person's manager unless a rule says otherwise; never the claimant or who asked). approve#NotificationMessage
+        and refuse#NotificationMessage call the topic's approve and refuse services as the user, which decide it at the revision in
+        the message (decide#Claim and decide#Advance over PeopleApprovalServices.record#Decision): a claim's last approval is its
+        business approval (the invoice stays received, for finance), an advance's makes it payable by finance; a refusal needs a
+        reason. The messages hold peopleApprovalId, the claim's invoiceId or the advance's employeeAdvanceId, sourceRevision,
+        partyId, personName, subjectText, organizationName, departmentName and stepText: never an amount, a line or a purpose. The
+        app that shows them sets the links (IronStone People: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PeopleExpenseApproval" inboxEnumId="NinNotifications"
+            description="Expense claim to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.ExpenseServices.approve#Claim"
+            refuseServiceName="mantle.humanres.ExpenseServices.refuse#Claim" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
+    <moqui.security.user.NotificationTopic topic="PeopleAdvanceApproval" inboxEnumId="NinNotifications"
+            description="Employee advance to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.ExpenseServices.approve#Advance"
+            refuseServiceName="mantle.humanres.ExpenseServices.refuse#Advance" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
+
+    <!-- impl-people P15 (design-people §1.4 Mail intake, PE-24; F65): the mail rule action createExpenseLine, run by
+        org.moqui.mail.EmailClientServices.run#EmailRules (the service in optionValue for the action in enumCode, with authorization
+        off). The service finds its own target: the claimant is the person whose current employment's work address (EmailWork) sent
+        the message; the message's files become receipts of one draft line on the claimant's open draft claim with that employer
+        (or a new draft), to review before it is submitted; never submitted by mail, so a forged sender adds a draft line at most.
+        A message makes one line once. -->
+    <moqui.basic.Enumeration enumId="ErActCreateExpenseLine" enumTypeId="EmailRuleAction" enumCode="createExpenseLine" sequenceNum="5"
+            description="Add an expense line to the sender's claim" optionValue="mantle.humanres.ExpenseServices.create#ClaimLineFromEmail"/>
+
+    <!-- impl-people P24 (design-people §8 PayAdjustments, §12 ApprovalPolicies): a payroll editor's adjustment of an employment
+        (PayrollInputServices store#Adjustment: an amount of a component, an advance's recovery, or a day's hours payroll resolves)
+        waits for a People approval of kind PakPayAdjustment, sent to the approvers of the step waiting: the employer's payroll
+        approvers (PAYROLL_APPROVE, reading payroll) unless a rule says otherwise; never one who made or changed it, nor the person
+        it pays; with none it waits. approve#NotificationMessage and refuse#NotificationMessage call the topic's approve and refuse
+        services as the user, which decide it at the revision in the message (PayrollInputServices decide#Adjustment over
+        PeopleApprovalServices.record#Decision): the last approval approves its inputs, a refusal (its reason required) refuses
+        them. The message holds peopleApprovalId, sourceRevision, payrollInputId, subjectText ("a pay adjustment"),
+        organizationName and stepText: never a person, an amount or a component. The app that shows them sets the link
+        (IronStone People: BossSetupData.xml). -->
+    <moqui.basic.Enumeration enumId="PakPayAdjustment" description="Pay adjustment" sequenceNum="11" enumTypeId="PeopleApprovalKind"/>
+    <moqui.security.user.NotificationTopic topic="PeoplePayAdjustmentApproval" inboxEnumId="NinNotifications"
+            description="Pay adjustments to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.PayrollInputServices.approve#Adjustment"
+            refuseServiceName="mantle.humanres.PayrollInputServices.refuse#Adjustment" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
+
+    <!-- impl-people P25 (design-people §8.2 step 5 Approve, PayRunDetail's Approval, §12 ApprovalPolicies): a payroll editor asks
+        approval of a calculated pay run (PayrollRunServices submit#Run), a People approval of kind PakPayrollRun bound to the run's
+        exact population, amounts and source revisions; with no rule the employer's payroll approvers decide (PAYROLL_APPROVE,
+        reading payroll), never one who selected or calculated the run or asked. approve#NotificationMessage and
+        refuse#NotificationMessage call the topic's approve and return services as the user (PayrollRunServices approve#Run and
+        return#Run over PeopleApprovalServices.record#Decision): the approval approves the run, a return (its reason required)
+        sends it back to review. The message holds peopleApprovalId, sourceRevision, payrollRunId, subjectText ("a pay run"),
+        groupName, periodText, organizationName and stepText: never a person or an amount. The app that shows them sets the link
+        (IronStone People: BossSetupData.xml). -->
+    <moqui.basic.Enumeration enumId="PakPayrollRun" description="Pay run" sequenceNum="12" enumTypeId="PeopleApprovalKind"/>
+    <moqui.security.user.NotificationTopic topic="PayrollRunApproval" inboxEnumId="NinNotifications"
+            description="Pay runs to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.PayrollRunServices.approve#Run"
+            refuseServiceName="mantle.humanres.PayrollRunServices.return#Run" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${groupName}, ${periodText}, ${stepText})"/>
+
+    <!-- SEC-BOS-82: a payroll bank account added or changed by payroll (PayrollSetupServices store#PayrollBankAccount) tells its
+        person, and them alone (directOnly), in the app and by email (emailNotifications Y, the NOTIFICATION template): the
+        employer, the bank and last four digits, and who changed it, never the number. -->
+    <moqui.security.user.NotificationTopic topic="PayrollBankAccountChanged" inboxEnumId="NinNotifications"
+            description="Your payroll bank account was changed" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" emailNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Your payroll bank account at ${organizationName} was ${actionText}: ${accountText}, by ${changedByName} on ${changedDateText}"/>
+
+    <!-- impl-people P22 review (the user's calls of Nov 12, 2026; design-people §8 PayComponentDetail, PayStructureDetail, §12
+        ApprovalPolicies): publishing a pay component's term or a pay structure's draft lines takes effect only on a People approval
+        of kind PakPayrollConfig (PayrollSetupServices publish#Component and publish#Structure ask for it), sent to the approvers of
+        the step waiting: the employer's payroll approvers (PAYROLL_APPROVE) and HR editors who read payroll configuration
+        (PAYROLL_VIEW) unless a rule says otherwise; never one who drafted it or asked to publish it; with none it waits.
+        approve#NotificationMessage and refuse#NotificationMessage call the topic's approve and refuse services as the user, which
+        decide it at the revision in the message (PayrollSetupServices decide#Publication over PeopleApprovalServices.record#Decision):
+        the last approval publishes the draft, a refusal (its reason required) leaves it a draft. The message holds peopleApprovalId,
+        sourceRevision, payrollComponentId and payrollComponentTermId or payrollStructureId, sourceText, subjectText,
+        organizationName and stepText: never an amount, a formula or a rate. The app that shows them sets the link (IronStone
+        People: BossSetupData.xml). -->
+    <moqui.basic.Enumeration enumId="PakPayrollConfig" description="Payroll configuration" sequenceNum="10" enumTypeId="PeopleApprovalKind"/>
+    <!-- impl-people P23 review (the user's call of Nov 12, 2026): a pay change (PeopleServices.apply#EmploymentChange, changeKind
+        pay), the first salary included, waits for a People approval of its own kind, on the PeopleEmploymentChangeApproval topic:
+        the employer's payroll approvers (PAYROLL_APPROVE with PAYROLL_VIEW) unless a rule of the kind routes it (to the manager, who
+        then reads the new salary of that change alone); never the payroll editor who asked, nor the person. Its notice names no one
+        and no amount. -->
+    <moqui.basic.Enumeration enumId="PakPayChange" description="Pay change" sequenceNum="11" enumTypeId="PeopleApprovalKind"/>
+    <moqui.security.user.NotificationTopic topic="PeoplePayrollConfigApproval" inboxEnumId="NinNotifications"
+            description="Payroll configuration to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.PayrollSetupServices.approve#Publication"
+            refuseServiceName="mantle.humanres.PayrollSetupServices.refuse#Publication" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
+
+    <!-- impl-people P26 (design-people §8 PayslipDetail StatementOutput, §15 the payslip, §1.4 notification topics): a final payslip
+        issued (PayrollResultServices issue#Payslip) tells its person, and them alone (directOnly: a subscription to every message of
+        the topic receives none), that it is available: the message holds payslipId, organizationName, periodText and payDateText,
+        never an amount; its link needs a sign-in and no attachment is mailed. The app that shows it sets the link (IronStone
+        People: BossSetupData.xml, the person's own payslip in their self-service). -->
+    <moqui.security.user.NotificationTopic topic="PayslipIssued" inboxEnumId="NinNotifications"
+            description="Your payslip is available" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Your payslip from ${organizationName} for ${periodText} is available"/>
+</entity-facade-xml>

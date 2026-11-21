@@ -4,7 +4,7 @@
 //
 // A claim is an employee-from Invoice (the claimant to the employer: create#ProjectExpenseInvoice's claim write, createClaim here)
 // whose lines are ItemExpense-family InvoiceItems with their receipts (InvoiceContent), and an ExpenseClaim keyed by the invoice
-// (PeopleExpenseEntities.xml):
+// (entity/humanres/ApprovalAndChecklistAndExpenseEntities.xml):
 // - a draft (or a claim returned for correction) is changed by the claimant or, for them, a holder of PEOPLE_EXPENSE_MANAGE;
 //   a line from mail or chat, or with values read from its receipt, waits for the claimant's review;
 // - submitted, the invoice is InvoiceReceived and the claim waits for a People approval of kind PakExpenseClaim (the claimant's

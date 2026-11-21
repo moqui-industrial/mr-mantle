@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!-- mantle.product.issuance -->
+    <!-- ========================================================= -->
+    <entity entity-name="AssetIssuance" package="mantle.product.issuance" cache="never">
+        <field name="assetIssuanceId" type="id" is-pk="true"/>
+        <field name="assetId" type="id"/>
+        <field name="assetReservationId" type="id"/>
+        <field name="orderId" type="id"/>
+        <field name="orderItemSeqId" type="id"/>
+        <field name="shipmentId" type="id"/>
+        <field name="shipmentItemSourceId" type="id"/>
+        <field name="productId" type="id"/>
+        <field name="invoiceId" type="id"/>
+        <field name="invoiceItemSeqId" type="id"/>
+        <field name="returnId" type="id"/>
+        <field name="returnItemSeqId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="facilityId" type="id"/>
+        <field name="assetMaintenanceId" type="id"/>
+        <field name="issuedByUserId" type="id"/>
+        <field name="issuedDate" type="date-time"/>
+        <field name="quantity" type="number-decimal" enable-audit-log="update"/>
+        <field name="quantityCancelled" type="number-decimal"/>
+        <field name="acctgTransResultEnumId" type="id"/>
+
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one-nofk" related="mantle.product.issuance.AssetReservation" short-alias="assetReservation"/><!-- nofk for when record is deleted -->
+        <relationship type="one" related="mantle.order.OrderItem" short-alias="orderItem"/>
+        <relationship type="one" related="mantle.shipment.Shipment" short-alias="shipment"/>
+        <relationship type="one-nofk" related="mantle.shipment.ShipmentItem" short-alias="shipmentItem"/><!-- nofk as may have a productId but not be issued to a Shipment -->
+        <relationship type="one" related="mantle.shipment.ShipmentItemSource" short-alias="shipmentItemSource"/>
+        <relationship type="one-nofk" related="mantle.account.invoice.Invoice" short-alias="invoice"/>
+        <relationship type="one" related="mantle.account.invoice.InvoiceItem" short-alias="invoiceItem"/>
+        <relationship type="one" related="mantle.order.return.ReturnItem" short-alias="returnItem">
+            <key-map field-name="returnId"/><key-map field-name="returnItemSeqId"/></relationship>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" related="mantle.facility.Facility" short-alias="facility"/>
+        <relationship type="one" related="mantle.product.maintenance.AssetMaintenance" short-alias="assetMaintenance"/>
+        <relationship type="many" related="mantle.work.effort.WorkEffortProduct" short-alias="workEffortProducts">
+            <key-map field-name="workEffortId"/><key-map field-name="productId"/></relationship>
+        <relationship type="one" title="IssuedBy" related="moqui.security.UserAccount" short-alias="issuedByUserAccount">
+            <key-map field-name="issuedByUserId"/></relationship>
+        <relationship type="one" title="AcctgTransResult" related="moqui.basic.Enumeration" short-alias="acctgTransResult">
+            <key-map field-name="acctgTransResultEnumId"/></relationship>
+
+        <index name="ASSET_ISS_SHPPRD"><index-field name="shipmentId"/><index-field name="productId"/></index>
+    </entity>
+
+    <entity entity-name="AssetIssuanceParty" package="mantle.product.issuance" cache="never">
+        <field name="assetIssuanceId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.product.issuance.AssetIssuance"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.RoleType"/>
+    </entity>
+
+    <entity entity-name="AssetReservation" package="mantle.product.issuance" cache="never">
+        <field name="assetReservationId" type="id" is-pk="true"/>
+        <field name="assetId" type="id"/>
+        <field name="productId" type="id"/>
+        <field name="orderId" type="id"/>
+        <field name="orderItemSeqId" type="id"/>
+        <field name="reservationOrderEnumId" type="id"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="quantityNotAvailable" type="number-decimal"><description>The quantity not available to promise for
+            this reservation (corresponds to negative Asset.availableToPromiseTotal).</description></field>
+        <field name="quantityNotIssued" type="number-decimal"><description>The quantity not yet issued.</description></field>
+        <field name="reservedDate" type="date-time"/>
+        <field name="originalPromisedDate" type="date-time"/>
+        <field name="currentPromisedDate" type="date-time"/>
+        <field name="priority" type="number-integer"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one-nofk" related="mantle.order.OrderHeader" short-alias="orderHeader"/>
+        <relationship type="one" related="mantle.order.OrderItem" short-alias="orderItem"/>
+        <relationship type="one" title="AssetReservationOrder" related="moqui.basic.Enumeration" short-alias="reservationOrderEnum">
+            <key-map field-name="reservationOrderEnumId"/></relationship>
+    </entity>
+</entities>

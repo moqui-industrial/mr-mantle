@@ -1,0 +1,517 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!-- mantle.sales.need -->
+    <!-- ========================================================= -->
+    <entity entity-name="PartyNeed" package="mantle.sales.need">
+        <field name="partyNeedId" type="id" is-pk="true"/>
+        <field name="needTypeEnumId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="roleTypeId" type="id"/>
+        <field name="communicationEventId" type="id"/>
+        <field name="productId" type="id"/>
+        <field name="productCategoryId" type="id"/>
+        <field name="visitId" type="id"/>
+        <field name="datetimeRecorded" type="date-time"/>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" title="NeedType" related="moqui.basic.Enumeration">
+            <key-map field-name="needTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.RoleType"/>
+        <relationship type="one" related="mantle.party.communication.CommunicationEvent"/>
+        <relationship type="one" related="mantle.product.Product"/>
+        <relationship type="one" related="mantle.product.category.ProductCategory"/>
+        <relationship type="one" related="moqui.server.Visit"/>
+    </entity>
+
+    <!-- ========================================================= -->
+    <!--  - mantle.sales.opportunity -->
+    <!--  - mantle.sales.forecast -->
+    <!--  - mantle.sales.need -->
+    <!-- ========================================================= -->
+    <!-- ========================================================= -->
+    <!-- mantle.sales.opportunity -->
+    <!-- ========================================================= -->
+    <entity entity-name="SalesOpportunity" package="mantle.sales.opportunity">
+        <field name="salesOpportunityId" type="id" is-pk="true"/>
+        <field name="typeEnumId" type="id" enable-audit-log="true"/>
+        <field name="accountPartyId" type="id" enable-audit-log="true"/>
+        <field name="opportunityName" type="text-medium"/>
+        <field name="description" type="text-very-long"/>
+        <field name="nextStep" type="text-long"/>
+        <field name="estimatedAmount" type="currency-amount" enable-audit-log="true"/>
+        <field name="estimatedProbability" type="number-decimal" enable-audit-log="true"/>
+        <field name="estimatedCloseDate" type="date-time" enable-audit-log="true"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="marketingCampaignId" type="id"/>
+        <field name="dataSourceId" type="id"/>
+        <field name="opportunityStageId" type="id" enable-audit-log="true"/>
+        <!-- the selling organization (impl-sales P1, X12): an audit-logged copy of the effective internal-organization
+            SalesOpportunityParty row, kept equal to it by the opportunity services (P4), so the organization filters
+            (MANTLE_USER_ORG_SOPP, MANTLE_ACTIVE_ORG_SOPP) can bound what an app root's user reads -->
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <!-- the outcome (impl-sales P2): SalesOppOpen, SalesOppWon or SalesOppLost (data/10-seed/Sales.xml); empty is open. A
+            retired stage's open deals are those not Won or Lost (OpportunityServices store#Stage); the lifecycle is P4's -->
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <!-- impl-sales P4 (design-sales §3 OpportunityDetail, SAL-CRM): the pipeline the deal moves through (its stage one of the
+            pipeline's), how its probability is set (SpmStage: copied from the stage on create and move; SpmManual: kept until Stage is
+            chosen again), when and by whom a lead was qualified (conversion) and the deal closed, the reason it was lost (a
+            SalesLostReason value), its recurring amount and plan (a SalesRecurringPlan value, enumCode its months), when it was created
+            and when it entered its stage (stage age). The key fields are audit-logged (typeEnumId, accountPartyId, estimatedCloseDate
+            above too); a reopen clears the outcome's fields and the audit log keeps the close history. Written only by
+            mantle.sales.OpportunityServices (SalesOpportunities.js). -->
+        <field name="salesPipelineId" type="id" enable-audit-log="true"/>
+        <field name="probabilityModeEnumId" type="id" enable-audit-log="true"/>
+        <field name="lostReasonEnumId" type="id" enable-audit-log="true"/>
+        <field name="recurringAmount" type="currency-amount" enable-audit-log="true"/>
+        <field name="recurringPlanEnumId" type="id" enable-audit-log="true"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="stageEnteredDate" type="date-time"/>
+        <field name="convertedDate" type="date-time" enable-audit-log="true"/>
+        <field name="convertedByUserId" type="id"/>
+        <field name="closedDate" type="date-time" enable-audit-log="true"/>
+        <field name="closedByUserId" type="id"/>
+        <!-- impl-sales P6 (design-sales §3 OpportunityImport, §16): the source system and row key an import made or matched the deal
+            by (OpportunityServices apply#OpportunityImportRow), one deal of the organization a key, so a file imported again changes
+            or skips the same deal and never makes a second one -->
+        <field name="importSourceKey" type="text-medium"/>
+        <relationship type="one" title="SalesOpportunityType" related="moqui.basic.Enumeration">
+            <key-map field-name="typeEnumId"/></relationship>
+        <relationship type="one" title="Account" related="mantle.party.Party">
+            <key-map field-name="accountPartyId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom">
+            <key-map field-name="currencyUomId"/></relationship>
+        <relationship type="one" related="mantle.sales.opportunity.SalesOpportunityStage" short-alias="stage">
+            <key-map field-name="opportunityStageId"/></relationship>
+        <relationship type="one" related="mantle.marketing.campaign.MarketingCampaign"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem"/>
+        <relationship type="one" related="mantle.sales.opportunity.SalesPipeline"/>
+        <relationship type="one" title="ProbabilityMode" related="moqui.basic.Enumeration">
+            <key-map field-name="probabilityModeEnumId"/></relationship>
+        <relationship type="one" title="LostReason" related="moqui.basic.Enumeration">
+            <key-map field-name="lostReasonEnumId"/></relationship>
+        <relationship type="one" title="RecurringPlan" related="moqui.basic.Enumeration">
+            <key-map field-name="recurringPlanEnumId"/></relationship>
+        <relationship type="one" related="moqui.basic.DataSource"/>
+        <!-- P6: the deal's dated parties (owner, team, contacts, organization), which the pipeline dataset's document reads -->
+        <relationship type="many" related="mantle.sales.opportunity.SalesOpportunityParty" short-alias="parties">
+            <key-map field-name="salesOpportunityId"/></relationship>
+        <index name="SALES_OPP_ORG_TYPE" unique="false"><index-field name="organizationPartyId"/><index-field name="typeEnumId"/></index>
+        <index name="SALES_OPP_IMPORT_KEY" unique="false"><index-field name="organizationPartyId"/><index-field name="importSourceKey"/></index>
+    </entity>
+
+    <!-- impl-sales P4 (design-sales §12.2 Chatter / RecordFiles, F69): a file of an opportunity, its content host on People's
+        pattern; get#RecordLinkInfo and RecordFiles admit it to a Sales reader of the opportunity
+        (mantle.sales.OpportunityServices check#OpportunityAccess), and it is written through create#OpportunityContent, which
+        needs its editor. -->
+    <entity entity-name="SalesOpportunityContent" package="mantle.sales.opportunity" cache="never">
+        <field name="salesOpportunityContentId" type="id" is-pk="true"/>
+        <field name="salesOpportunityId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.sales.opportunity.SalesOpportunity"/>
+        <relationship type="one" title="SalesOpportunityContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Sales Opportunity Content Type" enumTypeId="SalesOpportunityContentType"/>
+            <moqui.basic.Enumeration description="Document" enumId="SocDocument" enumTypeId="SalesOpportunityContentType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Proposal" enumId="SocProposal" enumTypeId="SalesOpportunityContentType" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Requirements" enumId="SocRequirements" enumTypeId="SalesOpportunityContentType" sequenceNum="3"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="SalesOpportunityParty" package="mantle.sales.opportunity">
+        <field name="salesOpportunityId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="mantle.sales.opportunity.SalesOpportunity">
+            <key-map field-name="salesOpportunityId"/></relationship>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.RoleType"/>
+    </entity>
+
+    <!-- impl-sales P2 (design-sales §9 Stages): a pipeline scopes its stages. organizationPartyId empty is the instance's
+        shared pipeline, offered to every organization (the seeded default, data/15-seed-initial/MarketingAndSales.xml), changed only by a reader of
+        every organization; defaultFlag Y is its organization's default (one in effect at a time). An optional team narrows it
+        to that team's opportunities. Dated: a pipeline is ended, never deleted (OpportunityServices store#Pipeline). -->
+    <entity entity-name="SalesPipeline" package="mantle.sales.opportunity">
+        <field name="salesPipelineId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="pipelineName" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="teamPartyId" type="id"/>
+        <field name="defaultFlag" type="text-indicator"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" title="Team" related="mantle.party.Party">
+            <key-map field-name="teamPartyId"/></relationship>
+    </entity>
+
+    <entity entity-name="SalesOpportunityStage" package="mantle.sales.opportunity">
+        <field name="opportunityStageId" type="id" is-pk="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="defaultProbability" type="number-decimal"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <!-- impl-sales P2: the pipeline the stage belongs to, whether the board folds its column, and its effective interval: a
+            stage in use is retired (thruDate) with its open deals moved to another stage, never deleted (store#Stage) -->
+        <field name="salesPipelineId" type="id"/>
+        <field name="foldFlag" type="text-indicator"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <relationship type="one" related="mantle.sales.opportunity.SalesPipeline"/>
+    </entity>
+
+    <!-- impl-sales P2 (design-sales §9 LeadSources): a lead source is a moqui.basic.DataSource of a LEAD_SOURCE type, shared by
+        the instance (Marketing mounts the same editor); this dated binding offers it to an organization, and ending it stops
+        the offer without touching the source or the records that name it. -->
+    <entity entity-name="SalesLeadSourceBinding" package="mantle.sales.opportunity">
+        <field name="dataSourceId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="moqui.basic.DataSource"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
+    </entity>
+
+    <entity entity-name="SalesOpportunityWorkEffort" package="mantle.sales.opportunity">
+        <field name="salesOpportunityId" type="id" is-pk="true"/>
+        <field name="workEffortId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.sales.opportunity.SalesOpportunity"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort"/>
+    </entity>
+
+    <entity entity-name="SalesOpportunityOrder" package="mantle.sales.opportunity">
+        <description>Associate orders (including proposed/quote orders) with an opportunity</description>
+        <field name="salesOpportunityId" type="id" is-pk="true"/>
+        <field name="orderId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.sales.opportunity.SalesOpportunity"/>
+        <relationship type="one" related="mantle.order.OrderHeader"/>
+    </entity>
+
+    <entity entity-name="SalesOpportunityCompetitor" package="mantle.sales.opportunity">
+        <field name="salesOpportunityId" type="id" is-pk="true"/>
+        <field name="competitorPartyId" type="id" is-pk="true"/>
+        <field name="positionEnumId" type="id"/>
+        <field name="strengths" type="text-long"/>
+        <field name="weaknesses" type="text-long"/>
+        <relationship type="one" related="mantle.sales.opportunity.SalesOpportunity"/>
+    </entity>
+
+    <entity entity-name="SalesOpportunityTracking" package="mantle.sales.opportunity">
+        <field name="salesOpportunityId" type="id" is-pk="true"/>
+        <field name="trackingCodeId" type="id" is-pk="true"/>
+        <field name="receivedDate" type="date-time"/>
+        <relationship type="one" related="mantle.sales.opportunity.SalesOpportunity"/>
+        <relationship type="one" related="mantle.marketing.tracking.TrackingCode"/>
+    </entity>
+
+    <!-- impl-sales P5 (design-sales §3 Leads, §11 LeadIntakeForms, §17 SAL-CRM; X15, X16): an inquiry that came in from a mail rule,
+        a Comms action, a staff entry or Marketing's lead rules (mantle.sales.OpportunityServices store#LeadIntake). It holds what
+        the inquirer submitted (name, organization, email, phone), never on the deal and never as a new party, until the lead is
+        qualified; purge#LeadIntakes blanks those of an unverified intake whose lead never qualified after the retention days. One
+        source identity (sourceKindEnumId and sourceId: a form response, a mail message by its Message-ID, a communication event,
+        a chat message, a voicemail) makes one intake; a repeated operationKey answers the first. outcomeEnumId says whether it
+        made its lead (SlioCreated) or joined an open lead of the same organization with the same submitted email (SlioDuplicate:
+        a review item, never a merge). Written only by OpportunityServices (SalesIntake.js). -->
+    <entity entity-name="SalesLeadIntake" package="mantle.sales.opportunity" cache="never">
+        <field name="salesLeadIntakeId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="salesOpportunityId" type="id"/>
+        <field name="sourceKindEnumId" type="id"/>
+        <field name="sourceId" type="text-medium"/>
+        <field name="outcomeEnumId" type="id"/>
+        <field name="operationKey" type="text-short"/>
+        <field name="requestHash" type="text-medium"/>
+        <field name="submittedName" type="text-medium"/>
+        <field name="submittedOrganization" type="text-medium"/>
+        <field name="submittedEmail" type="text-medium"/>
+        <field name="submittedPhone" type="text-short"/>
+        <field name="verifiedDate" type="date-time"/>
+        <field name="utmSource" type="text-short"/>
+        <field name="utmMedium" type="text-short"/>
+        <field name="marketingCampaignId" type="id"/>
+        <field name="trackingCodeId" type="id"/>
+        <field name="dataSourceId" type="id"/>
+        <field name="teamPartyId" type="id"/>
+        <field name="receivedDate" type="date-time"/>
+        <field name="receivedByUserId" type="id"/>
+        <field name="purgedDate" type="date-time"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" related="mantle.sales.opportunity.SalesOpportunity"/>
+        <relationship type="one" title="SalesLeadIntakeSource" related="moqui.basic.Enumeration">
+            <key-map field-name="sourceKindEnumId"/></relationship>
+        <relationship type="one" title="SalesLeadIntakeOutcome" related="moqui.basic.Enumeration">
+            <key-map field-name="outcomeEnumId"/></relationship>
+        <relationship type="one" related="mantle.marketing.campaign.MarketingCampaign"/>
+        <relationship type="one" related="mantle.marketing.tracking.TrackingCode"/>
+        <relationship type="one" related="moqui.basic.DataSource"/>
+        <relationship type="one" title="Team" related="mantle.party.Party">
+            <key-map field-name="teamPartyId"/></relationship>
+        <index name="SALES_LINT_SOURCE" unique="true"><index-field name="sourceKindEnumId"/><index-field name="sourceId"/></index>
+        <index name="SALES_LINT_OPKEY" unique="true"><index-field name="operationKey"/></index>
+        <index name="SALES_LINT_OPP"><index-field name="salesOpportunityId"/></index>
+        <index name="SALES_LINT_EMAIL"><index-field name="organizationPartyId"/><index-field name="submittedEmail"/></index>
+    </entity>
+
+    <!-- impl-sales P5 (design-sales §9 LeadSources UtmSourceMap, X10): an organization's dated map from a tracked link's UTM source,
+        and optionally its medium, to a lead source (moqui.basic.DataSource); store#LeadIntake prefers source and medium over the
+        source alone, and keeps the default source for a pair with no current row. Ended, never deleted
+        (OpportunityServices store#LeadSourceMapping). -->
+    <entity entity-name="SalesLeadSourceMap" package="mantle.sales.opportunity" cache="never">
+        <field name="salesLeadSourceMapId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="utmSource" type="text-short"/>
+        <field name="utmMedium" type="text-short"/>
+        <field name="dataSourceId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" related="moqui.basic.DataSource"/>
+        <index name="SALES_LSM_ORG"><index-field name="organizationPartyId"/><index-field name="utmSource"/></index>
+    </entity>
+
+<!-- Sales defaults, approval policies and approval decisions (IronStone Sales design §9 SalesDefaults and ApprovalPolicies, §5
+    the approval binding, §17 SAL-APPROVAL; impl-sales P9, §4 Nov 11 and Nov 13, F14). SalesPolicy holds an organization's dated
+    defaults, SalesApprovalPolicy its dated approval rules (bounded rule types, no scripts), and a Sales approval decision is the
+    native OrderDecision extended with the order revision it binds, its purpose, the rule and time it was evaluated against, its
+    result and operation key (the user's call of Nov 11: no decision record on Purchasing's pattern). Each published row is changed
+    by a dated successor, never edited in place; their key fields are audit-logged. mantle.order.SalesApprovalServices over
+    service/mantle/order/SalesApprovals.js reads and writes them. -->
+    <entity entity-name="SalesPolicy" package="mantle.sales.policy" cache="never">
+        <description>An organization's Sales defaults from a date (design §9 SalesDefaults): the default team of a new quote, the
+            quote validity in days, the templates of the quote, the storeless confirmation and the reminder, the customer's response
+            requirements, the approval setting (orderApprovalRequired: the seller's sales orders wait for a Sales approver, off by
+            default, impl-sales §4), whether an accepted net-terms order is approved as the system while that setting is off, the
+            unverified lead intake retention, the reminder interval and the default shipping facility of a Sales order part (impl-sales
+            follow-up 5); the high-value acceptance thresholds per currency are
+            SalesPolicyThreshold rows. One row is in effect at a time; a change publishes a successor from now or later and ends the
+            row it replaces there (store#SalesPolicy). With no row in effect every default is the built behaviour.</description>
+        <field name="salesPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="defaultTeamPartyId" type="id" enable-audit-log="true"><description>The team a new quote is assigned to when
+            its opportunity has none and its author is in no single team of the organization</description></field>
+        <field name="quoteValidityDays" type="number-integer" enable-audit-log="true"><description>Days a new quote is valid from
+            its start; empty leaves its end open</description></field>
+        <field name="quoteEmailTemplateId" type="id" enable-audit-log="true"/>
+        <field name="confirmationEmailTemplateId" type="id" enable-audit-log="true"/>
+        <field name="reminderEmailTemplateId" type="id" enable-audit-log="true"/>
+        <field name="responsePoRequired" type="text-indicator" enable-audit-log="true"><description>Y: an acceptance names the
+            customer's purchase order</description></field>
+        <field name="orderApprovalRequired" type="text-indicator" enable-audit-log="true"><description>The approval setting: Y, no
+            sales order of the seller is approved automatically and each waits for a holder of SALES_ORDER_APPROVE, whichever app
+            placed it (impl-sales P11 enforces it); N or empty, every caller approves as built</description></field>
+        <field name="approveNetTermsOrders" type="text-indicator" enable-audit-log="true"><description>Y: an accepted net-terms
+            order is approved as the system when credit and every Sales rule pass, while the approval setting is off</description>
+        </field>
+        <field name="intakeRetentionDays" type="number-integer" enable-audit-log="true"><description>Days an unverified lead intake
+            whose lead never qualified is kept before purge#LeadIntakes blanks it (30 when empty)</description></field>
+        <field name="reminderDays" type="number-integer" enable-audit-log="true"><description>Days after an issue a reminder is sent;
+            empty sends none</description></field>
+        <field name="defaultFacilityId" type="id" enable-audit-log="true"><description>The facility of the organization a Sales
+            order part ships from (a quote, a direct order, a copy, a recurring order) when it names none: reservation and the
+            shipment's origin read it (impl-sales follow-up 5); empty leaves the part without one</description></field>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="DefaultFacility" related="mantle.facility.Facility" short-alias="defaultFacility">
+            <key-map field-name="defaultFacilityId" related="facilityId"/></relationship>
+        <relationship type="one-nofk" title="DefaultTeam" related="mantle.party.Party" short-alias="defaultTeam">
+            <key-map field-name="defaultTeamPartyId" related="partyId"/></relationship>
+        <relationship type="many" related="mantle.sales.policy.SalesPolicyThreshold" short-alias="thresholds">
+            <key-map field-name="salesPolicyId"/></relationship>
+        <index name="SAL_POL_ORG"><index-field name="organizationPartyId"/><index-field name="fromDate"/></index>
+    </entity>
+
+    <entity entity-name="SalesPolicyThreshold" package="mantle.sales.policy" cache="never">
+        <description>A high-value acceptance threshold of a SalesPolicy in one currency (design §9, §10; the user's call of Nov 11):
+            above it a bearer link cannot accept on its own and acceptance needs PASS sign-in as an invited contact (impl-sales P13
+            reads it). Unset by default; a policy's successor copies its thresholds.</description>
+        <field name="salesPolicyId" type="id" is-pk="true"/>
+        <field name="currencyUomId" type="id" is-pk="true"/>
+        <field name="thresholdAmount" type="currency-amount" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.sales.policy.SalesPolicy" short-alias="policy"/>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+    </entity>
+
+    <entity entity-name="SalesApprovalPolicy" package="mantle.sales.policy" cache="never">
+        <description>One approval rule of an organization's quotes or sales orders from a date (design §9 ApprovalPolicies): its
+            purpose (a quote's discount or price exception, decided before the quote is proposed, or the final approval of a sales
+            order, decided when it is approved), its type (an amount at or above a threshold in a currency, a line discounted at or
+            beyond a percent of its calculated price, a line under its price floor of the product's cost and a margin, or a free or
+            zero-price line), the approvers (holders of SALES_APPROVE in the organization, narrowed to a user group when one is
+            named) and whether the author may approve. A change ends the row in effect and starts the next (store#SalesApprovalPolicy);
+            a decision keeps the row it was evaluated against. With no quote rule in effect, a manual price on a quote needs an
+            approver other than its author (design §9 "until configured").</description>
+        <field name="salesApprovalPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="purposeEnumId" type="id" enable-audit-log="true"><description>SalesApprovalPurpose: SapQuote,
+            SapOrder</description></field>
+        <field name="ruleTypeEnumId" type="id" enable-audit-log="true"><description>SalesApprovalRule: SarAmount, SarDiscount,
+            SarPriceFloor, SarFreeLine</description></field>
+        <field name="thresholdAmount" type="currency-amount" enable-audit-log="true"><description>SarAmount: the total at or above
+            which approval is needed</description></field>
+        <field name="currencyUomId" type="id" enable-audit-log="true"><description>SarAmount: the threshold's currency; a quote in
+            another currency does not meet the rule</description></field>
+        <field name="discountPercent" type="number-decimal" enable-audit-log="true"><description>SarDiscount: the discount from
+            the line's calculated price at or beyond which approval is needed</description></field>
+        <field name="floorMarginPercent" type="number-decimal" enable-audit-log="true"><description>SarPriceFloor: the margin over
+            the product's cost the price may not go under (0 when empty); a line whose cost is not known needs approval</description>
+        </field>
+        <field name="approverUserGroupId" type="id" enable-audit-log="true"><description>The approver role: only members of the
+            group, each holding SALES_APPROVE; empty for any holder of SALES_APPROVE in the organization</description></field>
+        <field name="selfApprovalAllowed" type="text-indicator" enable-audit-log="true"><description>Y: the quote's author may
+            approve it; N or empty: never</description></field>
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="SalesApprovalPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="SalesApprovalRule" related="moqui.basic.Enumeration" short-alias="ruleType">
+            <key-map field-name="ruleTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one-nofk" title="Approver" related="moqui.security.UserGroup" short-alias="approverUserGroup">
+            <key-map field-name="approverUserGroupId" related="userGroupId"/></relationship>
+        <index name="SAL_APR_POL_ORG"><index-field name="organizationPartyId"/><index-field name="purposeEnumId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Sales approval purpose" enumTypeId="SalesApprovalPurpose"/>
+            <moqui.basic.Enumeration enumId="SapQuote" description="Quote exception" sequenceNum="1" enumTypeId="SalesApprovalPurpose"/>
+            <moqui.basic.Enumeration enumId="SapOrder" description="Order approval" sequenceNum="2" enumTypeId="SalesApprovalPurpose"/>
+            <moqui.basic.EnumerationType description="Sales approval rule" enumTypeId="SalesApprovalRule"/>
+            <moqui.basic.Enumeration enumId="SarAmount" description="Amount at or above" sequenceNum="1" enumTypeId="SalesApprovalRule"/>
+            <moqui.basic.Enumeration enumId="SarDiscount" description="Discount at or beyond" sequenceNum="2" enumTypeId="SalesApprovalRule"/>
+            <moqui.basic.Enumeration enumId="SarPriceFloor" description="Price under its floor" sequenceNum="3" enumTypeId="SalesApprovalRule"/>
+            <moqui.basic.Enumeration enumId="SarFreeLine" description="Free or zero-price line" sequenceNum="4" enumTypeId="SalesApprovalRule"/>
+            <!-- the rule in effect while an organization has no quote rule: a manual price needs an approver other than its author -->
+            <moqui.basic.Enumeration enumId="SarOverride" description="Manual price" sequenceNum="5" enumTypeId="SalesApprovalRule"/>
+        </seed-data>
+    </entity>
+
+<!-- A quote's issue and the customer's response (IronStone Sales design §5 OrderDetail's quote context, §17 SAL-QUOTE; impl-sales
+    P10, F9, F10, F70): two facts with identities of their own beside the native order, never a copy of its lines. An issue is the
+    offer as it went out: the order's commercial revision it binds (the seller's salesCommercialRevisionOnly on, F9), the validity,
+    the issuer and the stored PDF (an OrderContent of type OctSalesQuoteIssued, kept when the issue ends). A later revision, a
+    revise, a withdrawal or a decline ends it. A response is the customer's acceptance or decline of one issue, with its evidence and
+    operation key; one issue has at most one response. Resending an issue is a delivery (the ledger's or the rep's own mail), not
+    another issue. mantle.order.SalesQuoteIssueServices over service/mantle/order/SalesQuoteIssues.js reads and writes them. -->
+    <entity entity-name="SalesQuoteIssue" package="mantle.sales.quote" cache="never">
+        <description>One issue of a quote (design §17 SAL-QUOTE): the order and the commercial revision it offers, the seller and
+            customer, when and by whom it was issued, the validity it carries, the PDF stored at that revision (orderContentId and
+            its location) and, once it no longer stands, when and why it ended (SalesQuoteIssueEnd: revised, withdrawn, declined,
+            superseded by a later revision). An issue stands while it is not ended, the order is Proposed at its revision and its
+            validity has not passed.</description>
+        <field name="issueId" type="id" is-pk="true"/>
+        <field name="orderId" type="id"/>
+        <field name="orderPartSeqId" type="id"/>
+        <field name="orderRevision" type="number-integer"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="customerPartyId" type="id"/>
+        <field name="issuedDate" type="date-time"/>
+        <field name="issuedByUserId" type="id"/>
+        <field name="validFromDate" type="date-time"/>
+        <field name="validThruDate" type="date-time"/>
+        <field name="orderContentId" type="id"/>
+        <field name="contentLocation" type="text-medium"><description>The stored PDF's location (read through ec.resource, never
+            its storage entities)</description></field>
+        <field name="endedDate" type="date-time"/>
+        <field name="endReasonEnumId" type="id"/>
+        <field name="endedByUserId" type="id"/>
+        <field name="endNote" type="text-medium"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one" related="mantle.order.OrderHeader"/>
+        <relationship type="one-nofk" related="mantle.order.OrderContent"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Customer" related="mantle.party.Party" short-alias="customer">
+            <key-map field-name="customerPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="SalesQuoteIssueEnd" related="moqui.basic.Enumeration" short-alias="endReason">
+            <key-map field-name="endReasonEnumId" related="enumId"/></relationship>
+        <index name="SAL_QISS_ORDER"><index-field name="orderId"/><index-field name="orderRevision"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Sales quote issue end" enumTypeId="SalesQuoteIssueEnd"/>
+            <moqui.basic.Enumeration enumId="SqeRevised" description="Revised" sequenceNum="1" enumTypeId="SalesQuoteIssueEnd"/>
+            <moqui.basic.Enumeration enumId="SqeWithdrawn" description="Withdrawn" sequenceNum="2" enumTypeId="SalesQuoteIssueEnd"/>
+            <moqui.basic.Enumeration enumId="SqeDeclined" description="Declined" sequenceNum="3" enumTypeId="SalesQuoteIssueEnd"/>
+            <moqui.basic.Enumeration enumId="SqeSuperseded" description="Superseded by a later revision" sequenceNum="4"
+                    enumTypeId="SalesQuoteIssueEnd"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="SalesQuoteResponse" package="mantle.sales.quote" cache="never">
+        <description>The customer's response to one issue (design §5 Record acceptance and Record decline, §17): accepted or
+            declined (SalesQuoteResponseType), when the customer responded and when and by whom it was recorded (staff, or later
+            the customer on PASS: SalesQuoteResponseSource), the contact who responded, the customer's purchase order, the
+            evidence (a mail of the quote's conversation, a file of the quote) and the reason, the order's status after the
+            response (placed, approved or held for an acceptance; cancelled for a decline) and the operation key a retry answers
+            by. At most one response for an issue.</description>
+        <field name="responseId" type="id" is-pk="true"/>
+        <field name="issueId" type="id"/>
+        <field name="orderId" type="id"/>
+        <field name="responseTypeEnumId" type="id"/>
+        <field name="responseSourceEnumId" type="id"/>
+        <field name="respondedDate" type="date-time"/>
+        <field name="recordedDate" type="date-time"/>
+        <field name="recordedByUserId" type="id"/>
+        <field name="contactPartyId" type="id"/>
+        <field name="otherPartyOrderId" type="text-short"><description>The customer's purchase order of an acceptance</description></field>
+        <field name="evidenceEmailMessageId" type="id"/>
+        <field name="evidenceOrderContentId" type="id"/>
+        <field name="reasonText" type="text-medium"/>
+        <field name="resultStatusId" type="id"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one" related="mantle.sales.quote.SalesQuoteIssue"/>
+        <relationship type="one" related="mantle.order.OrderHeader"/>
+        <relationship type="one-nofk" title="Contact" related="mantle.party.Party" short-alias="contact">
+            <key-map field-name="contactPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="SalesQuoteResponseType" related="moqui.basic.Enumeration" short-alias="responseType">
+            <key-map field-name="responseTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="SalesQuoteResponseSource" related="moqui.basic.Enumeration" short-alias="source">
+            <key-map field-name="responseSourceEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="ResultStatus" related="moqui.basic.StatusItem" short-alias="resultStatus">
+            <key-map field-name="resultStatusId" related="statusId"/></relationship>
+        <index name="SAL_QRSP_ISSUE"><index-field name="issueId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Sales quote response type" enumTypeId="SalesQuoteResponseType"/>
+            <moqui.basic.Enumeration enumId="SqrAccept" description="Accepted" sequenceNum="1" enumTypeId="SalesQuoteResponseType"/>
+            <moqui.basic.Enumeration enumId="SqrDecline" description="Declined" sequenceNum="2" enumTypeId="SalesQuoteResponseType"/>
+            <moqui.basic.EnumerationType description="Sales quote response source" enumTypeId="SalesQuoteResponseSource"/>
+            <moqui.basic.Enumeration enumId="SqsStaff" description="Recorded by staff" sequenceNum="1" enumTypeId="SalesQuoteResponseSource"/>
+            <moqui.basic.Enumeration enumId="SqsPortal" description="By the customer online" sequenceNum="2" enumTypeId="SalesQuoteResponseSource"/>
+        </seed-data>
+    </entity>
+</entities>

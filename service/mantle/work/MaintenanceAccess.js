@@ -4,7 +4,7 @@
 // every maintenance read and write is checked here and not by a filter.
 //
 // - Capabilities come from the maintenance, work process, resource booking and resource policy permissions (permissions,
-//   data/MaintenanceSetupData.xml) and FACILITY_EDIT, never a group name, a calling screen or a supplied app root. Broad work
+//   data/15-seed-initial/Operations.xml) and FACILITY_EDIT, never a group name, a calling screen or a supplied app root. Broad work
 //   view, assigned-work view and own-request view are separate; a write permission alone reads nothing (reads).
 // - The caller's organizations are their own (get#PartyOrganizationInfo over get#PartyInternalOrgIds, as FacilityScope.js reads
 //   them), narrowed to the active one when it is theirs; every organization (organizationPartyIds null) for a system

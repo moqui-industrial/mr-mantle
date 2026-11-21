@@ -1,0 +1,406 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+<!-- People's approvals (IronStone People design §12 ApprovalPolicies, §13 Approvals, PE-15; impl-people P5): an employer's dated
+    approval rules (PeopleApprovalPolicy, its key fields audit-logged), a request for approval of a source (PeopleApproval: a
+    position's activation now, leave, expenses, offers and employment changes with their phases) bound to the source's revision,
+    and each decision, a fact of its own (PeopleApprovalDecision: who decided which step, what, when and why, at which revision).
+    mantle.humanres.PeopleApprovalServices and Approvals.js read and write them; the domain decision services
+    (PositionServices.decide#PositionApproval) call record#Decision. An HR vocabulary value (an Enumeration of a family People
+    maintains, PeopleServices.store#Lookup) is ended, never deleted: Enumeration.thruDate. -->
+    <entity entity-name="PeopleApprovalPolicy" package="mantle.humanres.approval" cache="never">
+        <description>One approval step of an employer's kind of People approval, effective-dated. The rows in effect for a request
+            are chosen in order: those naming the request's employee (employeePartyId, an override), else those of the nearest
+            department at or above the source's department, else the employer's type rule (no department and no employee);
+            each chosen row is a step, decided in sequenceNum order, and every step is required. With no row the request goes
+            to the employee's manager (or, for a position, the head of its department). A step's approvers come from its role:
+            the department head (the lead of the department, P3), the manager (the reporting line at the employer), a named
+            person, or HR (the named person, else the employer's HR editors); when none may decide (absent, or the requester),
+            the alternate decides, else the employer's HR fallback (ParHrFallback rows), else the request waits. Nobody
+            approves their own request. A change ends the row in effect and starts the next (store#Policy).</description>
+        <field name="peopleApprovalPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"><description>The legal employer</description></field>
+        <field name="approvalKindEnumId" type="id" enable-audit-log="true"><description>PeopleApprovalKind</description></field>
+        <field name="departmentPartyId" type="id" enable-audit-log="true"><description>A department of the employer (an
+            OrgDepartment rolling up to it): the rule of the requests of that department and the departments under it without
+            rules of their own; empty for the employer's type rule</description></field>
+        <field name="employeePartyId" type="id" enable-audit-log="true"><description>An override for the requests about this
+            employee</description></field>
+        <field name="sequenceNum" type="number-integer" enable-audit-log="true"><description>The step's place, from 1</description></field>
+        <field name="approverRoleEnumId" type="id" enable-audit-log="true"><description>PeopleApproverRole: ParDepartmentHead,
+            ParManager, ParPerson, ParHr, or ParHrFallback (the employer's fallback for a step no one else may decide, not a step
+            of its own)</description></field>
+        <field name="approverPartyId" type="id" enable-audit-log="true"><description>The person of ParPerson and ParHrFallback,
+            and the designated HR officer of ParHr</description></field>
+        <field name="alternatePartyId" type="id" enable-audit-log="true"><description>Decides the step when no one of its role
+            may (absent or conflicted)</description></field>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="PeopleApprovalKind" related="moqui.basic.Enumeration" short-alias="approvalKind">
+            <key-map field-name="approvalKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="PeopleApproverRole" related="moqui.basic.Enumeration" short-alias="approverRole">
+            <key-map field-name="approverRoleEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Department" related="mantle.party.Party" short-alias="department">
+            <key-map field-name="departmentPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Employee" related="mantle.party.Party" short-alias="employee">
+            <key-map field-name="employeePartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Approver" related="mantle.party.Party" short-alias="approver">
+            <key-map field-name="approverPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Alternate" related="mantle.party.Party" short-alias="alternate">
+            <key-map field-name="alternatePartyId" related="partyId"/></relationship>
+        <index name="PPL_APR_POL_ORG"><index-field name="organizationPartyId"/><index-field name="approvalKindEnumId"/></index>
+        <seed-data>
+            <!-- each kind is seeded with the phase that builds its decision service (impl-people §4) -->
+            <moqui.basic.EnumerationType description="People Approval Kind" enumTypeId="PeopleApprovalKind"/>
+            <moqui.basic.Enumeration enumId="PakPosition" description="Position activation" sequenceNum="1"
+                    enumTypeId="PeopleApprovalKind"/>
+            <!-- P6: a transfer or a separation (PeopleServices.decide#EmploymentChange) -->
+            <moqui.basic.Enumeration enumId="PakEmploymentChange" description="Employment change" sequenceNum="2"
+                    enumTypeId="PeopleApprovalKind"/>
+            <!-- P12: a leave request, or the cancellation of approved leave (LeaveServices.decide#Request) -->
+            <moqui.basic.Enumeration enumId="PakLeave" description="Leave" sequenceNum="3" enumTypeId="PeopleApprovalKind"/>
+            <!-- P13: a correction of a day's attendance (AttendanceServices.request#Correction and decide#Correction) -->
+            <moqui.basic.Enumeration enumId="PakAttendance" description="Attendance correction" sequenceNum="4" enumTypeId="PeopleApprovalKind"/>
+            <moqui.basic.EnumerationType description="People Approver Role" enumTypeId="PeopleApproverRole"/>
+            <moqui.basic.Enumeration enumId="ParDepartmentHead" description="Department head" sequenceNum="1"
+                    enumTypeId="PeopleApproverRole"/>
+            <moqui.basic.Enumeration enumId="ParManager" description="Manager" sequenceNum="2" enumTypeId="PeopleApproverRole"/>
+            <moqui.basic.Enumeration enumId="ParPerson" description="Named person" sequenceNum="3"
+                    enumTypeId="PeopleApproverRole"/>
+            <moqui.basic.Enumeration enumId="ParHr" description="HR officer" sequenceNum="4" enumTypeId="PeopleApproverRole"/>
+            <moqui.basic.Enumeration enumId="ParHrFallback" description="HR fallback" sequenceNum="5"
+                    enumTypeId="PeopleApproverRole"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PeopleApproval" package="mantle.humanres.approval" cache="never">
+        <description>A request for a People approval of a source record (a position's activation now) at the source's revision:
+            the requester, the employer and department it routes by, the person it concerns (none for a position), the
+            effective date and justification, and its state. Waiting until every step of its route is approved, refused at a
+            refusal, superseded when the source's terms change before it is decided. A request whose route names no one who may
+            decide waits; nothing is approved by default. Written by the domain request services (request#PositionApproval)
+            and record#Decision.</description>
+        <field name="peopleApprovalId" type="id" is-pk="true"/>
+        <field name="approvalKindEnumId" type="id"/>
+        <field name="sourceEntityName" type="text-medium"/>
+        <field name="sourceId" type="id"/>
+        <field name="sourceRevision" type="text-short"><description>The source's revision the request is bound to</description></field>
+        <field name="organizationPartyId" type="id"/>
+        <field name="departmentPartyId" type="id"/>
+        <field name="subjectPartyId" type="id"><description>The person the request is about (never one of its approvers)</description></field>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedByPartyId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="effectiveDate" type="date-time"/>
+        <field name="justification" type="text-long"/>
+        <field name="statusId" type="id"/>
+        <field name="closedDate" type="date-time"/>
+        <field name="operationKey" type="text-short"><description>The requester's key: a retry with it answers the first request</description></field>
+        <relationship type="one" title="PeopleApprovalKind" related="moqui.basic.Enumeration" short-alias="approvalKind">
+            <key-map field-name="approvalKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="PeopleApproval" related="moqui.basic.StatusItem" short-alias="status">
+            <key-map field-name="statusId"/></relationship>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="RequestedBy" related="moqui.security.UserAccount" short-alias="requestedBy">
+            <key-map field-name="requestedByUserId" related="userId"/></relationship>
+        <index name="PPL_APR_SOURCE"><index-field name="sourceEntityName"/><index-field name="sourceId"/></index>
+        <index name="PPL_APR_ORG_STATUS"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="People Approval" statusTypeId="PeopleApproval"/>
+            <moqui.basic.StatusItem statusId="PapPending" description="Waiting" sequenceNum="1" statusTypeId="PeopleApproval"/>
+            <moqui.basic.StatusItem statusId="PapApproved" description="Approved" sequenceNum="2" statusTypeId="PeopleApproval"/>
+            <moqui.basic.StatusItem statusId="PapRefused" description="Refused" sequenceNum="3" statusTypeId="PeopleApproval"/>
+            <moqui.basic.StatusItem statusId="PapSuperseded" description="Superseded by a change" sequenceNum="4"
+                    statusTypeId="PeopleApproval"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PapPending" toStatusId="PapApproved" transitionName="Approve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PapPending" toStatusId="PapRefused" transitionName="Refuse"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PapPending" toStatusId="PapSuperseded" transitionName="Supersede"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PeopleApprovalDecision" package="mantle.humanres.approval" cache="never">
+        <description>One decision of a step of a People approval: who decided, what, when and why, at which revision of the
+            source, against which rule row and role. Written only by PeopleApprovalServices.record#Decision; never changed.</description>
+        <field name="peopleApprovalDecisionId" type="id" is-pk="true"/>
+        <field name="peopleApprovalId" type="id"/>
+        <field name="sequenceNum" type="number-integer"><description>The step decided</description></field>
+        <field name="peopleApprovalPolicyId" type="id"><description>The rule row of the step; empty for the default route</description></field>
+        <field name="approverRoleEnumId" type="id"/>
+        <field name="decisionEnumId" type="id"/>
+        <field name="decisionDate" type="date-time"/>
+        <field name="decidedByUserId" type="id"/>
+        <field name="decidedByPartyId" type="id"/>
+        <field name="sourceRevision" type="text-short"/>
+        <field name="reason" type="text-long"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one" related="mantle.humanres.approval.PeopleApproval" short-alias="approval"/>
+        <relationship type="one" title="PeopleApprovalDecision" related="moqui.basic.Enumeration" short-alias="decision">
+            <key-map field-name="decisionEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.humanres.approval.PeopleApprovalPolicy" short-alias="policy"/>
+        <relationship type="one-nofk" title="DecidedBy" related="moqui.security.UserAccount" short-alias="decidedBy">
+            <key-map field-name="decidedByUserId" related="userId"/></relationship>
+        <index name="PPL_APR_DEC_APPROVAL"><index-field name="peopleApprovalId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="People Approval Decision" enumTypeId="PeopleApprovalDecision"/>
+            <moqui.basic.Enumeration enumId="PpdApproved" description="Approved" sequenceNum="1" enumTypeId="PeopleApprovalDecision"/>
+            <moqui.basic.Enumeration enumId="PpdRefused" description="Refused" sequenceNum="2" enumTypeId="PeopleApprovalDecision"/>
+        </seed-data>
+    </entity>
+
+<!-- People's lifecycle checklists (IronStone People design §4, §12 ChecklistTemplates, PE-02; impl-people P7): a checklist template
+    is a WorkEffort process (entity/work/EffortEntities.xml, MT-03) whose policy is People's (WppPeopleChecklist, guarding nothing), with
+    People's facts beside it: the template's employer, lifecycle kind and dates (ChecklistTemplate), each step's source link,
+    visibility, protected flag and named assignee (ChecklistStep, copied to each task made from it), and each execution's
+    employment and change (EmploymentChecklist). A separation's equipment return tasks are People's too (ChecklistStep with the
+    equipment return link). mantle.humanres.PeopleServices (Checklists.js) reads and writes them. -->
+    <entity entity-name="ChecklistTemplate" package="mantle.humanres.checklist" cache="never">
+        <description>A lifecycle checklist template: the template root WorkEffort (isTemplate Y, purpose WepPrOrgMgmt), the employer
+            whose hires, transfers or separations start it, its lifecycle kind and its dates (in use from fromDate, ended at
+            thruDate, never deleted).</description>
+        <field name="workEffortId" type="id" is-pk="true"><description>The template root</description></field>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="lifecycleKindEnumId" type="id"><description>ChecklistLifecycleKind: onboarding (a hire), a transfer or
+            offboarding (a separation)</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="ChecklistLifecycleKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="lifecycleKindEnumId" related="enumId"/></relationship>
+        <index name="CHKL_TMPL_ORG"><index-field name="organizationPartyId"/><index-field name="lifecycleKindEnumId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Checklist Lifecycle Kind" enumTypeId="ChecklistLifecycleKind"/>
+            <moqui.basic.Enumeration enumId="ClkOnboarding" description="Onboarding" sequenceNum="1" enumTypeId="ChecklistLifecycleKind"/>
+            <moqui.basic.Enumeration enumId="ClkTransfer" description="Transfer" sequenceNum="2" enumTypeId="ChecklistLifecycleKind"/>
+            <moqui.basic.Enumeration enumId="ClkOffboarding" description="Offboarding" sequenceNum="3" enumTypeId="ChecklistLifecycleKind"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ChecklistStep" package="mantle.humanres.checklist" cache="never">
+        <description>People's facts of a checklist step: of a template step, and of each task made from it (copied when the
+            checklist starts) or raised by a separation (an equipment return): what the task links to (an equipment return, the
+            IT access request, an exit interview), who sees it (the employee, or staff only), whether it is protected (left out of
+            the CalDAV Tasks collection on a phone: offboarding, separation and grievance-linked tasks, design §12) and, for a
+            template step, the person assigned when its role is not one People names (the employee, their manager, the HR
+            officer). A task carries the Admin lifecycle operation of its IT access request.</description>
+        <field name="workEffortId" type="id" is-pk="true"/>
+        <field name="sourceLinkEnumId" type="id"><description>ChecklistSourceLink</description></field>
+        <field name="visibilityEnumId" type="id"><description>ChecklistVisibility: the employee sees it, or staff only</description></field>
+        <field name="isProtected" type="text-indicator" default="'N'"/>
+        <field name="assigneePartyId" type="id"><description>A template step's: the person a role People does not name is
+            assigned to</description></field>
+        <field name="operationId" type="id"><description>A task's: the Admin lifecycle operation (UserLifecycleOperation) of
+            its IT access request</description></field>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="ChecklistSourceLink" related="moqui.basic.Enumeration" short-alias="sourceLink">
+            <key-map field-name="sourceLinkEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="ChecklistVisibility" related="moqui.basic.Enumeration" short-alias="visibility">
+            <key-map field-name="visibilityEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Assignee" related="mantle.party.Party" short-alias="assignee">
+            <key-map field-name="assigneePartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.UserLifecycleOperation" short-alias="operation"/>
+        <index name="CHKL_STEP_OP"><index-field name="operationId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Checklist Source Link" enumTypeId="ChecklistSourceLink"/>
+            <moqui.basic.Enumeration enumId="ClsItAccess" description="IT access" sequenceNum="1" enumTypeId="ChecklistSourceLink"/>
+            <moqui.basic.Enumeration enumId="ClsEquipmentReturn" description="Equipment return" sequenceNum="2" enumTypeId="ChecklistSourceLink"/>
+            <moqui.basic.Enumeration enumId="ClsExitInterview" description="Exit interview" sequenceNum="3" enumTypeId="ChecklistSourceLink"/>
+            <moqui.basic.EnumerationType description="Checklist Visibility" enumTypeId="ChecklistVisibility"/>
+            <moqui.basic.Enumeration enumId="ChvEmployee" description="The employee sees it" sequenceNum="1" enumTypeId="ChecklistVisibility"/>
+            <moqui.basic.Enumeration enumId="ChvStaff" description="Staff only" sequenceNum="2" enumTypeId="ChecklistVisibility"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="EmploymentChecklist" package="mantle.humanres.checklist" cache="never">
+        <description>A checklist started for an employment: the execution root WorkEffort made from a template (or holding a
+            separation's equipment return tasks, with no template), the employment, the hire or change that started it and its
+            lifecycle kind. One per template and change: a retry answers it.</description>
+        <field name="workEffortId" type="id" is-pk="true"><description>The execution root</description></field>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="employmentChangeId" type="id"/>
+        <field name="templateWorkEffortId" type="id"/>
+        <field name="lifecycleKindEnumId" type="id"/>
+        <field name="startedDate" type="date-time"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one-nofk" related="mantle.humanres.employment.EmploymentChange" short-alias="change"/>
+        <relationship type="one-nofk" title="Template" related="mantle.work.effort.WorkEffort" short-alias="template">
+            <key-map field-name="templateWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" title="ChecklistLifecycleKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="lifecycleKindEnumId" related="enumId"/></relationship>
+        <index name="EMPL_CHKL_CHANGE"><index-field name="employmentChangeId"/></index>
+        <index name="EMPL_CHKL_EMPL"><index-field name="partyRelationshipId"/></index>
+    </entity>
+
+<!-- People's expense claims and advances (IronStone People design §9 ExpenseClaims, ExpenseClaimDetail and EmployeeAdvances,
+    PE-13, PE-24; impl-people P15). An expense claim stays an employee-from Invoice (the employee to the employer, its lines
+    ItemExpense-family InvoiceItems, its receipts InvoiceContent), not a ledger of its own: ExpenseClaim, keyed by the invoice,
+    adds the employment, the business state (a People approval of kind PakExpenseClaim, apart from the invoice's finance state),
+    the settlement route and its reservation; ExpenseClaimItem adds a line's merchant, tax, receipt and source (a line from mail or
+    chat stays to review). Business approval leaves the invoice InvoiceReceived; finance's approve#Payable alone reaches
+    InvoiceApproved, and only for a claim whose business state is approved and whose route is not reserved for payroll. An
+    employee advance (EmployeeAdvance) is an approved request for cash: its approval makes it a bill from the employee to the
+    employer (ItemAdvancePay, the employee advances account) that finance approves for payment and a payment run pays as any
+    other bill, and finance applies it to the employee's claims through a credit on that account (EmployeeAdvanceApplication); what
+    is outstanding is derived from what delivered payments paid of the bill less what its credits applied, never kept as a balance. Written only by mantle.humanres.ExpenseServices (Expense.js), which
+    checks the People scope first, and by mantle.account.InvoiceServices.create#ProjectExpenseInvoice's claim write. -->
+    <entity entity-name="ExpenseClaim" package="mantle.humanres.expense" cache="never">
+        <description>An employee's expense claim: its invoice (from the employee to the employer), the employment it is made under,
+            the department on the day it was made (which approval routing reads), an optional project for rebilling, the purpose,
+            the business state (ExpenseClaimStatus: draft, waiting for approval, returned for correction, approved, refused,
+            cancelled), the settlement route (ExpenseClaimRoute: accounts payable, or a payroll run) and the route that reserved it
+            (finance approval reserves accounts payable; a payroll run reserves payroll), so a claim reserved for one is refused by
+            the other. Who made it (the claimant, or an HR editor for them) and the decider's reason when it was returned or
+            refused.</description>
+        <field name="invoiceId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment (PrtEmployee) it is made under</description></field>
+        <field name="partyId" type="id"><description>The claimant</description></field>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="departmentPartyId" type="id"/>
+        <field name="workEffortId" type="id"><description>A project the expenses were for, kept for rebilling</description></field>
+        <field name="purpose" type="text-medium"/>
+        <field name="statusEnumId" type="id" enable-audit-log="true"><description>ExpenseClaimStatus</description></field>
+        <field name="routeEnumId" type="id" enable-audit-log="true"><description>ExpenseClaimRoute: how it is to be settled</description></field>
+        <field name="reservedRouteEnumId" type="id" enable-audit-log="true"><description>The route that took it: once set the other is refused</description></field>
+        <field name="reservedReference" type="text-medium"><description>What reserved it (a payroll run's id)</description></field>
+        <field name="reservedDate" type="date-time"/>
+        <field name="reservedByUserId" type="id"/>
+        <field name="submittedDate" type="date-time"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="decisionReason" type="text-medium"><description>Why it was returned or refused (the decider's, the claimant reads it)</description></field>
+        <field name="changedDate" type="date-time"><description>The last change of the claim or its lines, so a request names the
+            revision it was made at</description></field>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="operationKey" type="text-medium"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice" short-alias="invoice"/>
+        <relationship type="one" title="ExpenseClaimStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="ExpenseClaimRoute" related="moqui.basic.Enumeration" short-alias="route">
+            <key-map field-name="routeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="ExpenseClaimReservedRoute" related="moqui.basic.Enumeration" short-alias="reservedRoute">
+            <key-map field-name="reservedRouteEnumId" related="enumId"/></relationship>
+        <index name="EXP_CLAIM_PARTY"><index-field name="partyId"/><index-field name="statusEnumId"/></index>
+        <index name="EXP_CLAIM_ORG"><index-field name="organizationPartyId"/><index-field name="statusEnumId"/></index>
+        <index name="EXP_CLAIM_OPER"><index-field name="operationKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Expense Claim Status" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.Enumeration enumId="EcsDraft" description="Draft" sequenceNum="1" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.Enumeration enumId="EcsSubmitted" description="Waiting for approval" sequenceNum="2" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.Enumeration enumId="EcsReturned" description="Returned for correction" sequenceNum="3" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.Enumeration enumId="EcsApproved" description="Approved" sequenceNum="4" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.Enumeration enumId="EcsRefused" description="Refused" sequenceNum="5" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.Enumeration enumId="EcsCancelled" description="Cancelled" sequenceNum="6" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.EnumerationType description="Expense Claim Route" enumTypeId="ExpenseClaimRoute"/>
+            <moqui.basic.Enumeration enumId="EcrPayable" description="Accounts payable" sequenceNum="1" enumTypeId="ExpenseClaimRoute"/>
+            <moqui.basic.Enumeration enumId="EcrPayroll" description="Payroll" sequenceNum="2" enumTypeId="ExpenseClaimRoute"/>
+            <!-- P15: an expense claim (ExpenseServices.decide#Claim) and an employee advance (ExpenseServices.decide#Advance),
+                the kinds of People approval, each seeded with the phase that builds it -->
+            <moqui.basic.Enumeration enumId="PakExpenseClaim" description="Expense claim" sequenceNum="5" enumTypeId="PeopleApprovalKind"/>
+            <moqui.basic.Enumeration enumId="PakAdvance" description="Employee advance" sequenceNum="6" enumTypeId="PeopleApprovalKind"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ExpenseClaimItem" package="mantle.humanres.expense" cache="never">
+        <description>What a claim's line (an InvoiceItem of the claim's invoice) keeps beside the invoice's own fields: the merchant,
+            the tax the amount includes, the receipt (an InvoiceContent of the invoice), where the line came from
+            (ExpenseLineSource: entered, by mail, from chat) with its unique source key (a message makes one line once), and whether
+            the claimant has still to review it (a line from mail or chat, or with values proposed from its receipt, waits for
+            the claimant; a claim with one is not submitted).</description>
+        <field name="invoiceId" type="id" is-pk="true"/>
+        <field name="invoiceItemSeqId" type="id" is-pk="true"/>
+        <field name="merchantName" type="text-medium"/>
+        <field name="taxAmount" type="currency-amount"><description>The tax the line's amount includes, as the receipt shows it</description></field>
+        <field name="receiptContentId" type="id"><description>The receipt: an InvoiceContent of the claim's invoice</description></field>
+        <field name="sourceEnumId" type="id"><description>ExpenseLineSource</description></field>
+        <field name="sourceKey" type="text-medium"><description>Unique: the mail message or chat event it was made from</description></field>
+        <field name="reviewNeeded" type="text-indicator"><description>Y until the claimant reviews the line</description></field>
+        <relationship type="one-nofk" related="mantle.account.invoice.InvoiceItem" short-alias="item"/>
+        <relationship type="one-nofk" title="Receipt" related="mantle.account.invoice.InvoiceContent" short-alias="receipt">
+            <key-map field-name="receiptContentId" related="invoiceContentId"/></relationship>
+        <relationship type="one" title="ExpenseLineSource" related="moqui.basic.Enumeration" short-alias="source">
+            <key-map field-name="sourceEnumId" related="enumId"/></relationship>
+        <index name="EXP_ITEM_SOURCE" unique="true"><index-field name="sourceKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Expense Line Source" enumTypeId="ExpenseLineSource"/>
+            <moqui.basic.Enumeration enumId="ElsEntered" description="Entered" sequenceNum="1" enumTypeId="ExpenseLineSource"/>
+            <moqui.basic.Enumeration enumId="ElsMail" description="By mail" sequenceNum="2" enumTypeId="ExpenseLineSource"/>
+            <moqui.basic.Enumeration enumId="ElsChat" description="From chat" sequenceNum="3" enumTypeId="ExpenseLineSource"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="EmployeeAdvance" package="mantle.humanres.expense" cache="never">
+        <description>An employee's request for cash ahead of their expenses: the employment, the purpose, the amount and currency
+            asked, when it is needed and when it should be settled, and its state (EmployeeAdvanceStatus: waiting for approval,
+            approved, refused, withdrawn), a People approval of kind PakAdvance. Approval to advance is not payment: the last approval
+            makes it a payable (invoiceId: a bill from the employee to the employer of one ItemAdvancePay line, received), which
+            finance approves for payment and a payment run pays as any other bill (the user's call, impl-people §4, Nov 12, 2026);
+            finance applies it to the employee's claims (EmployeeAdvanceApplication). Delivered is what delivered payments paid of
+            the bill (an undelivered or returned payment delivers nothing), applied what its credits settled of claims.</description>
+        <field name="employeeAdvanceId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment</description></field>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="departmentPartyId" type="id"/>
+        <field name="purpose" type="text-medium"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="amount" type="currency-amount" enable-audit-log="update"/>
+        <field name="requiredDate" type="date"/>
+        <field name="expectedSettlementDate" type="date"/>
+        <field name="statusEnumId" type="id" enable-audit-log="true"><description>EmployeeAdvanceStatus</description></field>
+        <field name="invoiceId" type="id"><description>Its bill: from the employee to the employer, made when it is approved</description></field>
+        <field name="decisionReason" type="text-medium"/>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="operationKey" type="text-medium"/>
+        <relationship type="one-nofk" related="mantle.account.invoice.Invoice" short-alias="invoice"/>
+        <relationship type="one" title="EmployeeAdvanceStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <index name="EMP_ADV_PARTY"><index-field name="partyId"/><index-field name="statusEnumId"/></index>
+        <index name="EMP_ADV_ORG"><index-field name="organizationPartyId"/><index-field name="statusEnumId"/></index>
+        <index name="EMP_ADV_INVOICE"><index-field name="invoiceId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Employee Advance Status" enumTypeId="EmployeeAdvanceStatus"/>
+            <moqui.basic.Enumeration enumId="EasRequested" description="Waiting for approval" sequenceNum="1" enumTypeId="EmployeeAdvanceStatus"/>
+            <moqui.basic.Enumeration enumId="EasApproved" description="Approved" sequenceNum="2" enumTypeId="EmployeeAdvanceStatus"/>
+            <moqui.basic.Enumeration enumId="EasRefused" description="Refused" sequenceNum="3" enumTypeId="EmployeeAdvanceStatus"/>
+            <moqui.basic.Enumeration enumId="EasWithdrawn" description="Withdrawn" sequenceNum="4" enumTypeId="EmployeeAdvanceStatus"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="EmployeeAdvanceApplication" package="mantle.humanres.expense" cache="never">
+        <description>An advance applied to one of the employee's claims: the credit the employer issued against the claim on the
+            employee advances account (creditInvoiceId, applied to the claim's invoice), by apply#Advance. What it applied is the
+            credit's PaymentApplication, never kept here.</description>
+        <field name="employeeAdvanceId" type="id" is-pk="true"/>
+        <field name="creditInvoiceId" type="id" is-pk="true"><description>The credit applied to the claim</description></field>
+        <field name="invoiceId" type="id"><description>The claim's invoice</description></field>
+        <field name="appliedDate" type="date-time"/>
+        <field name="appliedByUserId" type="id"/>
+        <relationship type="one" related="mantle.humanres.expense.EmployeeAdvance" short-alias="advance"/>
+        <relationship type="one-nofk" title="Credit" related="mantle.account.invoice.Invoice" short-alias="credit">
+            <key-map field-name="creditInvoiceId" related="invoiceId"/></relationship>
+        <index name="EMP_ADV_APP_CREDIT"><index-field name="creditInvoiceId"/></index>
+    </entity>
+</entities>

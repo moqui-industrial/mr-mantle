@@ -3,7 +3,7 @@
 Mantle's X12 business services for a supplier receiving retail purchase orders: `service/mantle/edi/EdiServices.xml`
 with `X12.js` (envelopes, validation, 997s, the lifecycle of documents sent), the mapping services the profile names
 (`order/X12OrderServices.xml`, `shipment/X12ShipmentServices.xml`, `account/X12InvoiceServices.xml`, on
-`X12Documents.js`), the grammars in `service/mantle/edi/x12/`, and the records in `entity/EdiEntities.xml`. They run on
+`X12Documents.js`), the grammars in `service/mantle/edi/x12/`, and the records in `entity/edi/EdiEntities.xml`. They run on
 the framework's `EdiHandler` and System Messages. They were ported from the Java Moqui
 [mantle-edi](https://github.com/moqui/mantle-edi/tree/134acb6) component (1.1.5, `134acb6`). The plan and its
 implementation record are [plan/payments-shipping-edi.md](../plan/payments-shipping-edi.md) (E1).
@@ -30,7 +30,7 @@ This is the common port, not any retailer's certification: a partner's guide is 
 | `EdiLocation` | The partner's location codes (N103/N104, such as `92` store numbers or `UL` GLNs) for a party and its postal address: the 850's ship-to, and the code sent back in the 856 and 810 |
 | `ShipmentPackage.sscc` | A package's 18-digit SSCC for MAN*GM (allocating SSCCs and GS1-128 labels is not in Mantle yet) |
 
-`data/EdiSetupData.xml` has the `EdiX12` message type and the `EDI_ADMIN` permission; `data/EdiSampleProfileData.xml`
+`data/10-seed/Integrations.xml` has the `EdiX12` message type and the `EDI_ADMIN` permission; `data/15-seed-initial/Purchasing.xml`
 (seed-initial) the generic sample profile `X12_4010_SAMPLE` and the job `send_EdiPendingDocuments` (on, every 15
 minutes; two indexed queries when there is nothing to send). Copy the
 sample for a partner (a new ID or revision), never edit a profile a connection is using. Credentials go in the System

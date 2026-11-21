@@ -1,11 +1,11 @@
 // Sales' scope (IronStone Sales design §1.1; impl-sales P1, §2): the one module the sales services call to learn what the
 // caller may do and in which organizations, before they read or write an opportunity, an account, a quote, an order, an
 // agreement or a forecast, and before a sales report answers. The organization filter (X12: SalesOpportunity, SalesForecast
-// and Agreement by organizationPartyId in MANTLE_USER_ORG and MANTLE_ACTIVE_ORG, data/MantleSetupData.xml) bounds what an app
+// and Agreement by organizationPartyId in MANTLE_USER_ORG and MANTLE_ACTIVE_ORG, data/15-seed-initial/OrganizationFilters.xml) bounds what an app
 // root's user reads; the services check the organization here again, as the filter does not reach a service that reads with
 // authorization disabled.
 //
-// - Capabilities come from the SALES_* permissions (permissions, data/MantleSetupData.xml), never a group name, a calling
+// - Capabilities come from the SALES_* permissions (permissions, data/15-seed-initial/Access.xml), never a group name, a calling
 //   screen or a supplied app root. A write permission alone reads nothing (reads): a Sales read is SALES_VIEW,
 //   SALES_TEAM_VIEW or SALES_REPORT_VIEW.
 // - The caller's organizations are their own (get#PartyOrganizationInfo over get#PartyInternalOrgIds), narrowed to the active
@@ -195,7 +195,7 @@ function mergesFor(userScope, organizationPartyId) {
 // ===== P2: sales teams (impl-sales P2; design-sales §9 Teams) =====
 // A sales team is an Organization party with the SalesTeam role, owned by its organization; its dated PrtSalesTeamOf row to the
 // organization is its effective interval, and its members are dated PrtSalesTeamMember rows from the person (a
-// SalesRepresentative or a Manager) to the team (data/SalesCrmSeedData.xml; OpportunityServices store#SalesTeam and
+// SalesRepresentative or a Manager) to the team (data/10-seed/Sales.xml; OpportunityServices store#SalesTeam and
 // store#SalesTeamMember). Reads only, no check: the organization of a team and the teams of a person, which P4's assignment
 // scope ("their dated team") reads here. Membership grants no permission.
 const teamRelationships = {of: "PrtSalesTeamOf", member: "PrtSalesTeamMember"}

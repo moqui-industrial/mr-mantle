@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!--  - mantle.request -->
+    <!--  - mantle.request.requirement -->
+    <!-- ========================================================= -->
+    <!-- ========================================================= -->
+    <!-- mantle.request -->
+    <!-- ========================================================= -->
+    <view-entity entity-name="RequestAndFacilityAndStatus" package="mantle.request">
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request"/>
+        <member-entity entity-alias="FAC" entity-name="mantle.facility.Facility" join-from-alias="REQ">
+            <key-map field-name="facilityId"/></member-entity>
+        <member-entity entity-alias="STTS" entity-name="moqui.basic.StatusItem" join-from-alias="REQ">
+            <key-map field-name="statusId"/></member-entity>
+        <alias-all entity-alias="REQ"/>
+        <alias entity-alias="FAC" name="facilityName"/>
+        <alias entity-alias="STTS" name="statusDescription" field="description"/>
+    </view-entity>
+
+    <view-entity entity-name="RequestItemAndProduct" package="mantle.request">
+        <member-entity entity-alias="RQIT" entity-name="mantle.request.RequestItem"/>
+        <member-entity entity-alias="PROD" entity-name="mantle.product.Product" join-from-alias="RQIT">
+            <key-map field-name="productId"/></member-entity>
+        <alias-all entity-alias="RQIT"/>
+        <alias entity-alias="PROD" name="productName"/>
+    </view-entity>
+
+    <view-entity entity-name="RequestAndParty" package="mantle.request">
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request"/>
+        <member-entity entity-alias="RQP" entity-name="mantle.request.RequestParty" join-from-alias="REQ" join-optional="true">
+            <key-map field-name="requestId"/></member-entity>
+        <alias-all entity-alias="REQ"/>
+        <alias-all entity-alias="RQP"/>
+    </view-entity>
+
+    <view-entity entity-name="RequestPartyAndPerson" package="mantle.request">
+        <member-entity entity-alias="RQP" entity-name="mantle.request.RequestParty"/>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="RQP">
+            <key-map field-name="partyId"/></member-entity>
+        <alias-all entity-alias="RQP"/>
+        <alias-all entity-alias="PER"><exclude field="partyId"/></alias-all>
+    </view-entity>
+
+    <view-entity entity-name="RequestAndPartyDetail" package="mantle.request">
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request"/>
+        <member-entity entity-alias="RQP" entity-name="mantle.request.RequestParty" join-from-alias="REQ">
+            <key-map field-name="requestId"/></member-entity>
+        <member-entity entity-alias="PTY" entity-name="mantle.party.Party" join-from-alias="RQP">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="ORG" entity-name="mantle.party.Organization" join-from-alias="RQP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="RQP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="USRACT" entity-name="moqui.security.UserAccount" join-from-alias="RQP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <alias-all entity-alias="RQP"/>
+        <alias-all entity-alias="REQ"/>
+        <alias-all entity-alias="PTY"/>
+        <alias-all entity-alias="PER"><exclude field="partyId"/></alias-all>
+        <alias-all entity-alias="ORG"><exclude field="partyId"/></alias-all>
+        <alias name="username" entity-alias="USRACT"/>
+    </view-entity>
+
+    <view-entity entity-name="RequestCommEventDetail" package="mantle.request">
+        <member-entity entity-alias="RCE" entity-name="mantle.request.RequestCommEvent"/>
+        <member-entity entity-alias="CEV" entity-name="mantle.party.communication.CommunicationEvent" join-from-alias="RCE">
+            <key-map field-name="communicationEventId"/></member-entity>
+        <alias-all entity-alias="RCE"/>
+        <alias-all entity-alias="CEV"/>
+    </view-entity>
+
+    <view-entity entity-name="RequestWorkEffortDetail" package="mantle.request">
+        <member-entity entity-alias="RWE" entity-name="mantle.request.RequestWorkEffort"/>
+        <member-entity entity-alias="WEF" entity-name="mantle.work.effort.WorkEffort" join-from-alias="RWE">
+            <key-map field-name="workEffortId"/></member-entity>
+        <alias-all entity-alias="RWE"/>
+        <alias-all entity-alias="WEF"><exclude field="workEffortId"/></alias-all>
+    </view-entity>
+
+    <view-entity entity-name="WorkEffortRequestDetail" package="mantle.request">
+        <member-entity entity-alias="RWE" entity-name="mantle.request.RequestWorkEffort"/>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="RWE">
+            <key-map field-name="requestId"/></member-entity>
+        <alias-all entity-alias="RWE"/>
+        <alias-all entity-alias="REQ"><exclude field="requestId"/></alias-all>
+    </view-entity>
+
+    <view-entity entity-name="WikiPageAndRequest" package="mantle.request">
+        <member-entity entity-alias="WPR" entity-name="mantle.request.WikiPageRequest"/>
+        <member-entity entity-alias="WKP" entity-name="moqui.resource.wiki.WikiPage" join-from-alias="WPR">
+            <key-map field-name="wikiPageId"/></member-entity>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="WPR">
+            <key-map field-name="requestId"/></member-entity>
+        <alias-all entity-alias="WPR"/>
+        <alias-all entity-alias="WKP"/>
+        <alias-all entity-alias="REQ"/>
+    </view-entity>
+
+    <!-- ========================================================= -->
+    <!-- mantle.request.requirement -->
+    <!-- ========================================================= -->
+    <view-entity entity-name="StoreRequestOrderView" package="mantle.request">
+        <description>A request linked to a sales order (RequestRecord) with the order's store.</description>
+        <member-entity entity-alias="RQRC" entity-name="mantle.request.RequestRecord"/>
+        <member-entity entity-alias="OHDR" entity-name="mantle.order.OrderHeader" join-from-alias="RQRC">
+            <key-map field-name="recordId" related="orderId"/></member-entity>
+        <alias name="requestId" entity-alias="RQRC"/>
+        <alias name="recordEntityName" entity-alias="RQRC"/>
+        <alias name="orderId" entity-alias="OHDR"/>
+        <alias name="productStoreId" entity-alias="OHDR"/>
+    </view-entity>
+
+    <view-entity entity-name="StoreOrderChangeView" package="mantle.request">
+        <description>An order change request (Customer Service's, F37) with its order's store (Commerce P11, F114), so a
+            store's open cancel requests are found in the query rather than among every store's.</description>
+        <member-entity entity-alias="RQST" entity-name="mantle.request.Request"/>
+        <member-entity entity-alias="OHDR" entity-name="mantle.order.OrderHeader" join-from-alias="RQST">
+            <key-map field-name="orderId"/></member-entity>
+        <alias name="requestId" entity-alias="RQST"/>
+        <alias name="requestTypeEnumId" entity-alias="RQST"/>
+        <alias name="orderChangeKindEnumId" entity-alias="RQST"/>
+        <alias name="statusId" entity-alias="RQST"/>
+        <alias name="changeAppliedDate" entity-alias="RQST"/>
+        <alias name="orderId" entity-alias="OHDR"/>
+        <alias name="productStoreId" entity-alias="OHDR"/>
+    </view-entity>
+
+    <!-- the reads of a case list (Customer Service's find#Cases, Today, counts): a case with its request, and with each of its
+        parties -->
+    <view-entity entity-name="CaseRequest" package="mantle.request.support">
+        <member-entity entity-alias="CP" entity-name="mantle.request.support.CaseProfile"/>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="CP">
+            <key-map field-name="requestId"/></member-entity>
+        <alias-all entity-alias="REQ"/>
+        <alias-all entity-alias="CP"><exclude field="requestId"/></alias-all>
+        <alias entity-alias="REQ" name="lastUpdatedStamp"/>
+    </view-entity>
+
+    <view-entity entity-name="CaseRequestParty" package="mantle.request.support">
+        <member-entity entity-alias="CP" entity-name="mantle.request.support.CaseProfile"/>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="CP">
+            <key-map field-name="requestId"/></member-entity>
+        <member-entity entity-alias="RQP" entity-name="mantle.request.RequestParty" join-from-alias="CP">
+            <key-map field-name="requestId"/></member-entity>
+        <alias entity-alias="CP" name="requestId"/>
+        <alias entity-alias="REQ" name="requestCategoryId"/>
+        <alias entity-alias="REQ" name="statusId"/>
+        <alias entity-alias="RQP" name="partyId"/>
+        <alias entity-alias="RQP" name="roleTypeId"/>
+        <alias entity-alias="RQP" name="fromDate"/>
+        <alias entity-alias="RQP" name="thruDate"/>
+    </view-entity>
+
+    <!-- the cases of an organization by status and close date (close#ResolvedCases' batch) -->
+    <view-entity entity-name="CaseRequestOrganization" package="mantle.request.support">
+        <member-entity entity-alias="CP" entity-name="mantle.request.support.CaseProfile"/>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="CP">
+            <key-map field-name="requestId"/></member-entity>
+        <member-entity entity-alias="RQP" entity-name="mantle.request.RequestParty" join-from-alias="CP">
+            <key-map field-name="requestId"/></member-entity>
+        <alias entity-alias="CP" name="requestId"/>
+        <alias entity-alias="CP" name="closedDate"/>
+        <alias entity-alias="REQ" name="statusId"/>
+        <alias entity-alias="REQ" name="lastUpdatedStamp"/>
+        <alias entity-alias="RQP" name="partyId"/>
+        <alias entity-alias="RQP" name="roleTypeId"/>
+        <alias entity-alias="RQP" name="thruDate"/>
+    </view-entity>
+
+<!-- Views for reading support cases with their service level clocks in one query (design-customer-service §7;
+    impl-customer-service P14, CS-REPORTING): no records of their own. CaseClockRequest is a clock with its case's queue,
+    type, channel, priority and status, for the reports' cohorts by the case's queue; CaseRequestClock is a case with each of
+    its clocks (none: one row with no clock), for a case list by its clocks (Needs response, SLA risk) and Home's counts, in
+    place of a list of request ids read first (F112). P14 review: CaseStatusChange, a request's status changes with its queue,
+    for the case volumes; and CaseSlaEpisode's indexes by start, end and breach, which the reports and Home read by period. -->
+    <view-entity entity-name="CaseClockRequest" package="mantle.request.support">
+        <member-entity entity-alias="EP" entity-name="mantle.request.support.CaseSlaEpisode"/>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="EP">
+            <key-map field-name="requestId"/></member-entity>
+        <alias-all entity-alias="EP"/>
+        <alias entity-alias="REQ" name="requestCategoryId"/>
+        <alias entity-alias="REQ" name="requestTypeEnumId"/>
+        <alias entity-alias="REQ" name="salesChannelEnumId"/>
+        <alias entity-alias="REQ" name="priority"/>
+        <alias entity-alias="REQ" name="requestStatusId" field="statusId"/>
+        <alias entity-alias="REQ" name="requestDate"/>
+    </view-entity>
+
+    <view-entity entity-name="CaseRequestClock" package="mantle.request.support">
+        <member-entity entity-alias="CP" entity-name="mantle.request.support.CaseProfile"/>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="CP">
+            <key-map field-name="requestId"/></member-entity>
+        <member-entity entity-alias="EP" entity-name="mantle.request.support.CaseSlaEpisode" join-from-alias="CP"
+                join-optional="true">
+            <key-map field-name="requestId"/></member-entity>
+        <alias-all entity-alias="REQ"/>
+        <alias-all entity-alias="CP"><exclude field="requestId"/></alias-all>
+        <alias entity-alias="REQ" name="lastUpdatedStamp"/>
+        <alias entity-alias="EP" name="caseSlaEpisodeId"/>
+        <alias entity-alias="EP" name="clockEnumId"/>
+        <alias entity-alias="EP" name="clockStateEnumId" field="stateEnumId"/>
+        <alias entity-alias="EP" name="clockDueDate" field="dueDate"/>
+        <alias entity-alias="EP" name="clockWarningDate" field="warningDate"/>
+        <alias entity-alias="EP" name="clockBreachedDate" field="breachedDate"/>
+    </view-entity>
+
+    <!-- A request's status changes (the audit log of Request.statusId) with its queue, type and channel, so the case volumes
+        read the changes of their queues in the query (by the queue's requests, then the audit log's entity, field and key
+        index) rather than every request's changes in the period -->
+    <view-entity entity-name="CaseStatusChange" package="mantle.request.support">
+        <member-entity entity-alias="AUD" entity-name="moqui.entity.EntityAuditLog"/>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="AUD">
+            <key-map field-name="pkPrimaryValue" related="requestId"/></member-entity>
+        <alias-all entity-alias="AUD"/>
+        <alias entity-alias="REQ" name="requestId"/>
+        <alias entity-alias="REQ" name="requestCategoryId"/>
+        <alias entity-alias="REQ" name="requestTypeEnumId"/>
+        <alias entity-alias="REQ" name="salesChannelEnumId"/>
+    </view-entity>
+
+    <!-- mantle.request.requirement -->
+    <view-entity entity-name="RequirementAndParty" package="mantle.request.requirement">
+        <member-entity entity-alias="REQ" entity-name="mantle.request.requirement.Requirement"/>
+        <member-entity entity-alias="RQP" entity-name="mantle.request.requirement.RequirementParty" join-from-alias="REQ" join-optional="true">
+            <key-map field-name="requirementId"/></member-entity>
+        <alias-all entity-alias="REQ"/>
+        <alias-all entity-alias="RQP"/>
+    </view-entity>
+    <view-entity entity-name="RequirementPartyAndPerson" package="mantle.request.requirement">
+        <member-entity entity-alias="RQP" entity-name="mantle.request.requirement.RequirementParty"/>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="RQP">
+            <key-map field-name="partyId"/></member-entity>
+        <alias-all entity-alias="RQP"/>
+        <alias-all entity-alias="PER"><exclude field="partyId"/></alias-all>
+    </view-entity>
+    <view-entity entity-name="RequirementAndPartyDetail" package="mantle.request.requirement">
+        <member-entity entity-alias="REQ" entity-name="mantle.request.requirement.Requirement"/>
+        <member-entity entity-alias="RQP" entity-name="mantle.request.requirement.RequirementParty" join-from-alias="REQ">
+            <key-map field-name="requirementId"/></member-entity>
+        <member-entity entity-alias="PTY" entity-name="mantle.party.Party" join-from-alias="RQP">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="ORG" entity-name="mantle.party.Organization" join-from-alias="RQP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="RQP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="USRACT" entity-name="moqui.security.UserAccount" join-from-alias="RQP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <alias-all entity-alias="RQP"/>
+        <alias-all entity-alias="REQ"/>
+        <alias-all entity-alias="PTY"/>
+        <alias-all entity-alias="PER"><exclude field="partyId"/></alias-all>
+        <alias-all entity-alias="ORG"><exclude field="partyId"/></alias-all>
+        <alias name="username" entity-alias="USRACT"/>
+    </view-entity>
+    <view-entity entity-name="WorkRequirementFulfillmentDetail" package="mantle.request.requirement">
+        <member-entity entity-alias="RWE" entity-name="mantle.request.requirement.WorkRequirementFulfillment"/>
+        <member-entity entity-alias="WEF" entity-name="mantle.work.effort.WorkEffort" join-from-alias="RWE">
+            <key-map field-name="workEffortId"/></member-entity>
+        <alias-all entity-alias="RWE"/>
+        <alias-all entity-alias="WEF"><exclude field="workEffortId"/></alias-all>
+    </view-entity>
+</entities>

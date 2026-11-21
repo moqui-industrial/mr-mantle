@@ -1,5 +1,5 @@
 // Support channels (design-customer-service §3 ChannelSessions, §9 ChannelRouting, CaseDetail's Reply publicly in forum;
-// impl-customer-service P6, CS-CHANNELS, F10, F11, F12, F61, F62, F79, F84; SupportChannelEntities.xml). How mail, a queue's
+// impl-customer-service P6, CS-CHANNELS, F10, F11, F12, F61, F62, F79, F84; entity/request/SupportEntities.xml). How mail, a queue's
 // public form, the forum and chat reach a service queue, each on the case rule of SupportCases.js (a request from a customer
 // the organization serves, or its contact, in one of its queues is a case; F62, F79), with the queue's ServiceRoute saying
 // what arrives (type, priority, the unknown-sender and automatic-mail policies, the acknowledgement and its text).

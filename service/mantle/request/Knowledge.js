@@ -1,5 +1,5 @@
 // Service knowledge (design-customer-service §3 CaseDetail Knowledge, §6 Knowledge, ArticleFeedback, CaseToArticle, §9
-// KnowledgeSources; impl-customer-service P12, CS-KNOWLEDGE, F15, F59; SupportKnowledgeEntities.xml). Articles are Commons
+// KnowledgeSources; impl-customer-service P12, CS-KNOWLEDGE, F15, F59; entity/request/SupportEntities.xml). Articles are Commons
 // wiki pages with their own view and update rules; an organization's ServiceKnowledgeSource rows say which spaces (or parts
 // of one, by page path) its service desk suggests and sends, for which audience and in which language. A source never widens
 // access: on an agent's surface a page is offered only when the wiki lets the user view it (get#WikiViewScope), and on a

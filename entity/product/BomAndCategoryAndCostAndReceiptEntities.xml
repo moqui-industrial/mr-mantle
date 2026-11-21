@@ -1,0 +1,403 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <entity entity-name="ProductBom" package="mantle.product.bom">
+        <description>A product/org/method record and Files host. Approved header values are read through the release decision’s audit references.</description>
+        <field name="productBomId" type="id" is-pk="true"/>
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="legacyImportComplete" type="text-indicator" enable-audit-log="true"/>
+        <field name="legacyImportIssuesJson" type="text-long" enable-audit-log="true"/>
+        <field name="methodCode" type="text-short" enable-audit-log="true"/>
+        <field name="bomName" type="text-medium" enable-audit-log="true"/>
+        <field name="baseQuantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"/>
+        <field name="isPhantom" type="text-indicator" enable-audit-log="true"/>
+        <field name="routingWorkEffortId" type="id" enable-audit-log="true"/>
+        <field name="leadTimeDays" type="number-decimal" enable-audit-log="true"/>
+        <field name="prepareDays" type="number-decimal" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.Product"/>
+        <relationship type="one" related="mantle.party.Party"><key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom"><key-map field-name="quantityUomId" related="uomId"/></relationship>
+        <relationship type="one" title="Routing" related="mantle.work.effort.WorkEffort"><key-map field-name="routingWorkEffortId" related="workEffortId"/></relationship>
+        <index name="PRDBOM_ORG_METHOD" unique="true"><index-field name="productId"/><index-field name="organizationPartyId"/><index-field name="methodCode"/></index>
+    </entity>
+
+    <entity entity-name="ProductBomItem" package="mantle.product.bom">
+        <description>A material/output requirement has its own stable ID, including while draft and when referenced by an issuance. A correction stages a new dated replacement linked to its predecessor; released values are immutable.</description>
+        <field name="bomItemId" type="id" is-pk="true"/>
+        <field name="productBomId" type="id" enable-audit-log="true"/>
+        <field name="replacesBomItemId" type="id" enable-audit-log="true"/>
+        <field name="componentProductBomId" type="id" enable-audit-log="true"/>
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="roleEnumId" type="id" enable-audit-log="true"/>
+        <field name="quantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"/>
+        <field name="scrapFactor" type="number-decimal" enable-audit-log="true"/>
+        <field name="operationWorkEffortId" type="id" enable-audit-log="true"/>
+        <field name="sequenceNum" type="number-integer" enable-audit-log="true"/>
+        <field name="applicabilityFeatureIds" type="text-long" enable-audit-log="true"/>
+        <field name="instruction" type="text-long" enable-audit-log="true"/>
+        <field name="substitutionRuleEnumId" type="id" enable-audit-log="true"/>
+        <field name="allocationShare" type="number-decimal" enable-audit-log="true"/>
+        <field name="state" type="text-short" enable-audit-log="true"/>
+        <field name="removeOnRelease" type="text-indicator" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="legacyAssocKey" type="text-long" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.bom.ProductBom"/>
+        <relationship type="one" related="mantle.product.Product"/>
+        <relationship type="one-nofk" title="Replaces" related="mantle.product.bom.ProductBomItem"><key-map field-name="replacesBomItemId" related="bomItemId"/></relationship>
+        <relationship type="one-nofk" title="Component" related="mantle.product.bom.ProductBom"><key-map field-name="componentProductBomId" related="productBomId"/></relationship>
+        <relationship type="one-nofk" title="Operation" related="mantle.work.effort.WorkEffort"><key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom"><key-map field-name="quantityUomId" related="uomId"/></relationship>
+    </entity>
+
+    <entity entity-name="ProductBomContent" package="mantle.product.bom">
+        <field name="productBomContentId" type="id" is-pk="true"/>
+        <field name="productBomId" type="id" enable-audit-log="true"/>
+        <field name="productBomContentTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+        <field name="contentLocation" type="text-long" enable-audit-log="true"/>
+        <field name="locale" type="text-short" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="userId" type="id" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.bom.ProductBom"/>
+    </entity>
+
+    <!-- ========================================================= -->
+    <!-- mantle.product.category -->
+    <!-- ========================================================= -->
+    <entity entity-name="ProductCategory" package="mantle.product.category" short-alias="categories">
+        <field name="productCategoryId" type="id" is-pk="true"/>
+        <field name="pseudoId" type="text-short" default="productCategoryId"/>
+        <field name="productCategoryTypeEnumId" type="id"/>
+        <field name="categoryName" type="text-medium"/>
+        <field name="description" type="text-very-long"/>
+        <field name="ownerPartyId" type="id" enable-audit-log="update" default="'_NA_'"/>
+
+        <relationship type="one" title="ProductCategoryType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="productCategoryTypeEnumId"/></relationship>
+        <relationship type="one" title="Owner" related="mantle.party.Party" short-alias="owner">
+            <key-map field-name="ownerPartyId"/></relationship>
+
+        <relationship type="many" related="mantle.product.category.ProductCategoryContent" short-alias="contents">
+            <key-map field-name="productCategoryId"/></relationship>
+        <relationship type="many" related="mantle.product.category.ProductCategoryParty" short-alias="parties">
+            <key-map field-name="productCategoryId"/></relationship>
+        <relationship type="many" related="mantle.product.category.ProductCategoryIdent" short-alias="identifications">
+            <key-map field-name="productCategoryId"/></relationship>
+        <relationship type="many" related="mantle.product.category.ProductCategoryMember" short-alias="products">
+            <key-map field-name="productCategoryId"/></relationship>
+        <relationship type="many" related="mantle.product.category.ProductCategoryRollup" short-alias="parents">
+            <key-map field-name="productCategoryId"/></relationship>
+        <relationship type="many" related="mantle.product.category.ProductCategoryRollup" short-alias="children">
+            <key-map field-name="productCategoryId" related="parentProductCategoryId"/></relationship>
+        <relationship type="many" related="mantle.product.feature.ProductCategoryFeatGrpAppl" short-alias="featureGroups">
+            <key-map field-name="productCategoryId"/></relationship>
+        <relationship type="many" related="mantle.product.store.ProductStoreCategory" short-alias="storeCategories">
+            <key-map field-name="productCategoryId"/></relationship>
+
+        <index name="CATEGORY_ID_PSEUDO" unique="true"><index-field name="pseudoId"/><index-field name="ownerPartyId"/></index>
+
+        <seed-data>
+            <!-- Product Category Type -->
+            <moqui.basic.EnumerationType description="Product Category Type" enumTypeId="ProductCategoryType"/>
+            <moqui.basic.Enumeration enumId="PctTag" enumTypeId="ProductCategoryType" description="Tag"/>
+            <moqui.basic.Enumeration description="Catalog" enumId="PctCatalog" enumTypeId="ProductCategoryType"/>
+            <moqui.basic.Enumeration description="Industry" enumId="PctIndustry" enumTypeId="ProductCategoryType"/>
+            <moqui.basic.Enumeration description="Internal" enumId="PctInternal" enumTypeId="ProductCategoryType"/>
+            <moqui.basic.Enumeration description="Materials" enumId="PctMaterials" enumTypeId="ProductCategoryType"/>
+            <moqui.basic.Enumeration description="Quick Add" enumId="PctQuickAdd" enumTypeId="ProductCategoryType"/>
+            <moqui.basic.Enumeration description="Search" enumId="PctSearch" enumTypeId="ProductCategoryType"/>
+            <moqui.basic.Enumeration description="Usage" enumId="PctUsage" enumTypeId="ProductCategoryType"/>
+            <moqui.basic.Enumeration description="Mix and Match" enumId="PctMixMatch" enumTypeId="ProductCategoryType"/>
+            <moqui.basic.Enumeration description="Cross Sell" enumId="PctCrossSell" enumTypeId="ProductCategoryType"/>
+            <moqui.basic.Enumeration description="Tax" enumId="PctTax" enumTypeId="ProductCategoryType"/>
+            <moqui.basic.Enumeration description="Gift Card" enumId="PctGiftCard" enumTypeId="ProductCategoryType"/>
+            <moqui.basic.Enumeration description="Best Selling" enumId="PctBestSelling" enumTypeId="ProductCategoryType"/>
+            <moqui.basic.Enumeration description="Inventory Group" enumId="PctInventoryGroup" enumTypeId="ProductCategoryType"/>
+        </seed-data>
+        <master>
+            <detail relationship="type"/>
+            <detail relationship="contents"/>
+            <detail relationship="parties"><detail relationship="party" use-master="basic"/><detail relationship="role"/></detail>
+            <detail relationship="products"><detail relationship="product"/></detail>
+            <detail relationship="parents"><detail relationship="parent"/></detail>
+            <detail relationship="children"><detail relationship="category"/></detail>
+            <detail relationship="featureGroups"><detail relationship="group"/></detail>
+        </master>
+    </entity>
+
+    <entity entity-name="ProductCategoryContent" package="mantle.product.category">
+        <field name="productCategoryContentId" type="id" is-pk="true"/>
+        <field name="productCategoryId" type="id"/>
+        <field name="contentLocation" enable-audit-log="update" type="text-medium"/>
+        <field name="categoryContentTypeEnumId" enable-audit-log="update" type="id"/>
+        <field name="productStoreId" enable-audit-log="update" type="id"><description>For content limited to a specific store</description></field>
+        <field name="fromDate" enable-audit-log="update" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="thruDate" enable-audit-log="update" type="date-time"/>
+        <field name="locale" enable-audit-log="update" type="text-short"/>
+        <field name="description" enable-audit-log="update" type="text-long"/>
+        <field name="sequenceNum" enable-audit-log="update" type="number-integer"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.product.category.ProductCategory"/>
+        <relationship type="one" title="ProductCategoryContentType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="categoryContentTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <index name="PRDCAT_CNT_CTTP"><index-field name="productCategoryId"/><index-field name="categoryContentTypeEnumId"/></index>
+        <seed-data>
+            <!-- Product Category Content Type -->
+            <moqui.basic.EnumerationType description="Product Category Content Type" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Category Name" enumId="PcctCategoryName" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Description" enumId="PcctDescription" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Description - Long" enumId="PcctDescriptionLong" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Category Image Alt Text" enumId="PcctImageAltText" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Footer" enumId="PcctFooter" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Meta-Keywords" enumId="PcctMetaKeywords" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Meta-Description" enumId="PcctMetaDescription" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Image - Small" enumId="PcctImageSmall" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Image - Medium" enumId="PcctImageMedium" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Image - Large" enumId="PcctImageLarge" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Image - Detail" enumId="PcctImageDetail" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Image - Original" enumId="PcctImageOriginal" enumTypeId="ProductCategoryContentType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductCategoryParty" package="mantle.product.category">
+        <field name="productCategoryId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="comments" type="text-medium"/>
+        <relationship type="one" related="mantle.product.category.ProductCategory" short-alias="category"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="mantle.party.RoleType" short-alias="role"/>
+    </entity>
+
+    <entity entity-name="ProductCategoryIdent" package="mantle.product.category">
+        <description>Based on mantle.product.ProductOtherIdentification to be a one ProductCategory to many ProductCategoryIdent.</description>
+        <field name="productCategoryIdentId" type="id" is-pk="true"/>
+        <field name="productCategoryId" type="id"/>
+        <field name="identTypeEnumId" type="id"/>
+        <field name="productStoreId" type="id"/>
+        <field name="marketSegmentId" type="id"/>
+        <field name="idValue" type="text-medium"/>
+        <relationship type="one" title="ProductCategoryIdentType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="identTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.category.ProductCategory" short-alias="productCategory"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="productStore"/>
+        <relationship type="one" related="mantle.marketing.segment.MarketSegment" short-alias="marketSegment"/>
+        <index name="PRODUCT_CAT_STR_ID_VAL" unique="false"><index-field name="idValue"/></index>
+        <seed-data>
+            <!-- Product Category Ident Type -->
+            <moqui.basic.EnumerationType description="Product Category Ident Type" enumTypeId="ProductCategoryIdentType"/>
+            <!-- see https://en.wikipedia.org/wiki/Clean_URL#Slug -->
+            <moqui.basic.Enumeration description="URL Slug" enumId="PcitUrlSlug" enumTypeId="ProductCategoryIdentType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductCategoryMember" package="mantle.product.category">
+        <field name="productCategoryId" type="id" is-pk="true"/>
+        <field name="productId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="comments" type="text-medium"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="quantity" type="number-decimal"/>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" related="mantle.product.category.ProductCategory" short-alias="category"/>
+        <relationship type="many" related="mantle.product.store.ProductStoreCategory" short-alias="stores">
+            <key-map field-name="productCategoryId"/></relationship>
+        <index name="PRD_CMBR_PCT"><index-field name="productCategoryId"/></index>
+    </entity>
+
+    <entity entity-name="ProductCategoryRollup" package="mantle.product.category">
+        <field name="productCategoryId" type="id" is-pk="true"/>
+        <field name="parentProductCategoryId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <relationship type="one" related="mantle.product.category.ProductCategory" short-alias="category"/>
+        <relationship type="one" title="Parent" related="mantle.product.category.ProductCategory" short-alias="parent">
+            <key-map field-name="parentProductCategoryId"/></relationship>
+        <index name="PRDCR_PARPC"><index-field name="parentProductCategoryId"/></index>
+    </entity>
+
+    <entity entity-name="ProductStandardCost" package="mantle.product.cost" cache="never">
+        <description>An estimate is a dated business record. Approval starts this row, ends its predecessor and freezes its components and PDF. It never posts stock or ledger changes; there is no version sequence.</description>
+        <field name="productStandardCostId" type="id" is-pk="true"/>
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="facilityId" type="id" enable-audit-log="true"/>
+        <field name="state" type="text-short" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="quantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"/>
+        <field name="priceUomId" type="id" enable-audit-log="true"/>
+        <field name="totalCost" type="currency-precise" enable-audit-log="true"/>
+        <field name="unitCost" type="currency-precise" enable-audit-log="true"/>
+        <field name="materialCost" type="currency-precise" enable-audit-log="true"/>
+        <field name="laborCost" type="currency-precise" enable-audit-log="true"/>
+        <field name="machineCost" type="currency-precise" enable-audit-log="true"/>
+        <field name="overheadCost" type="currency-precise" enable-audit-log="true"/>
+        <field name="outsideCost" type="currency-precise" enable-audit-log="true"/>
+        <field name="productBomId" type="id" enable-audit-log="true"/>
+        <field name="methodAsOfDate" type="date-time" enable-audit-log="true"/>
+        <field name="materialBasis" type="text-short" enable-audit-log="true"/>
+        <field name="overheadBasis" type="text-short" enable-audit-log="true"/>
+        <field name="overheadPercent" type="number-decimal" enable-audit-log="true"/>
+        <field name="complete" type="text-indicator" enable-audit-log="true"/>
+        <field name="findingsJson" type="text-very-long" enable-audit-log="true"/>
+        <field name="calculationId" type="id" enable-audit-log="true"/>
+        <field name="inputFingerprint" type="text-long" enable-audit-log="true"/>
+        <field name="draftedByUserId" type="id" enable-audit-log="true"/>
+        <field name="lastEditedByUserId" type="id" enable-audit-log="true"/>
+        <field name="approvedByUserId" type="id" enable-audit-log="true"/>
+        <field name="approvedDate" type="date-time" enable-audit-log="true"/>
+        <field name="approvedPdfLocation" type="text-long" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.Product">
+            <key-map field-name="productId" related="productId"/>
+        </relationship>
+        <relationship type="one" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/>
+        </relationship>
+        <relationship type="one" related="mantle.facility.Facility">
+            <key-map field-name="facilityId" related="facilityId"/>
+        </relationship>
+        <relationship type="one" related="mantle.product.bom.ProductBom">
+            <key-map field-name="productBomId" related="productBomId"/>
+        </relationship>
+        <relationship type="one" related="moqui.basic.Uom" title="Quantity">
+            <key-map field-name="quantityUomId" related="uomId"/>
+        </relationship>
+        <relationship type="one" related="moqui.basic.Uom" title="Currency">
+            <key-map field-name="priceUomId" related="uomId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="ProductStandardCostComponent" package="mantle.product.cost" cache="never">
+        <description>The quantities, rates, amounts and provenance of an estimate. Draft components are audited; the approved parent makes them immutable.</description>
+        <field name="productStandardCostComponentId" type="id" is-pk="true"/>
+        <field name="productStandardCostId" type="id" enable-audit-log="true"/>
+        <field name="sequenceNum" type="number-integer" enable-audit-log="true"/>
+        <field name="componentTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+        <field name="path" type="text-long" enable-audit-log="true"/>
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="quantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"/>
+        <field name="rateAmount" type="currency-precise" enable-audit-log="true"/>
+        <field name="amount" type="currency-precise" enable-audit-log="true"/>
+        <field name="priceUomId" type="id" enable-audit-log="true"/>
+        <field name="sourceEntityName" type="text-medium" enable-audit-log="true"/>
+        <field name="sourceId" type="text-long" enable-audit-log="true"/>
+        <field name="sourceFromDate" type="date-time" enable-audit-log="true"/>
+        <field name="sourceFingerprint" type="text-long" enable-audit-log="true"/>
+        <field name="costAllocationFactor" type="number-decimal" enable-audit-log="true"/>
+        <field name="sourceRequiredCapability" type="text-short" enable-audit-log="true"/>
+        <field name="createdByUserId" type="id" enable-audit-log="true"/>
+        <field name="lastEditedByUserId" type="id" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.cost.ProductStandardCost">
+            <key-map field-name="productStandardCostId" related="productStandardCostId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="ProductCostCalculation" package="mantle.product.cost" cache="never">
+        <description>A short-lived reviewed calculation request and fingerprint. Save recalculates the same request, refuses changed inputs and reuses the same saved draft on retry. It is not a policy version or a second calculator.</description>
+        <field name="calculationId" type="id" is-pk="true"/>
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="userId" type="id" enable-audit-log="true"/>
+        <field name="createdDate" type="date-time" enable-audit-log="true"/>
+        <field name="expiresDate" type="date-time" enable-audit-log="true"/>
+        <field name="requestJson" type="text-very-long" enable-audit-log="true"/>
+        <field name="inputFingerprint" type="text-long" enable-audit-log="true"/>
+        <field name="complete" type="text-indicator" enable-audit-log="true"/>
+        <field name="savedProductStandardCostId" type="id" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.Product">
+            <key-map field-name="productId" related="productId"/>
+        </relationship>
+        <relationship type="one" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/>
+        </relationship>
+    </entity>
+
+    <!-- ========================================================= -->
+    <!-- mantle.product.receipt -->
+    <!-- ========================================================= -->
+    <entity entity-name="AssetReceipt" package="mantle.product.receipt" cache="never">
+        <field name="assetReceiptId" type="id" is-pk="true"/>
+        <field name="assetId" type="id"/>
+        <field name="productId" type="id"/>
+        <field name="orderId" type="id"/>
+        <field name="orderItemSeqId" type="id"/>
+        <field name="shipmentId" type="id"/>
+        <field name="shipmentItemSourceId" type="id"/>
+        <field name="shipmentPackageSeqId" type="id"/>
+        <field name="invoiceId" type="id"/>
+        <field name="invoiceItemSeqId" type="id"/>
+        <field name="returnId" type="id"/>
+        <field name="returnItemSeqId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="receivedByUserId" type="id"/>
+        <field name="receivedDate" type="date-time"/>
+        <field name="itemDescription" type="text-medium"/>
+        <field name="quantityAccepted" type="number-decimal"/>
+        <field name="quantityRejected" type="number-decimal"/>
+        <field name="rejectionReasonEnumId" type="id"/>
+        <field name="acctgTransResultEnumId" type="id"/>
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" related="mantle.order.OrderItem" short-alias="orderItem"/>
+        <relationship type="one" related="mantle.shipment.Shipment" short-alias="shipment"/>
+        <relationship type="one" related="mantle.shipment.ShipmentItemSource" short-alias="shipmentItemSource"/>
+        <relationship type="one-nofk" related="mantle.shipment.ShipmentItem" short-alias="shipmentItem"/>
+        <relationship type="one-nofk" related="mantle.shipment.ShipmentPackage" short-alias="shipmentPackage">
+            <key-map field-name="shipmentId"/><key-map field-name="shipmentPackageSeqId"/></relationship>
+        <relationship type="one" related="mantle.account.invoice.InvoiceItem" short-alias="invoiceItem"/>
+        <relationship type="one" related="mantle.order.return.ReturnItem" short-alias="returnItem">
+            <key-map field-name="returnId"/><key-map field-name="returnItemSeqId"/></relationship>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="many" related="mantle.work.effort.WorkEffortProduct" short-alias="workEffortProducts">
+            <key-map field-name="workEffortId"/><key-map field-name="productId"/></relationship>
+        <relationship type="one" title="ReceivedBy" related="moqui.security.UserAccount" short-alias="receivedByUserAccount">
+            <key-map field-name="receivedByUserId"/></relationship>
+        <relationship type="one" title="RejectionReason" related="moqui.basic.Enumeration" short-alias="rejectionReason">
+            <key-map field-name="rejectionReasonEnumId"/></relationship>
+        <relationship type="one" title="AcctgTransResult" related="moqui.basic.Enumeration" short-alias="acctgTransResult">
+            <key-map field-name="acctgTransResultEnumId"/></relationship>
+
+        <index name="ASSET_REC_ORDID"><index-field name="orderId"/></index>
+        <index name="ASSET_REC_SHPPRD"><index-field name="shipmentId"/><index-field name="productId"/></index>
+
+        <seed-data>
+            <moqui.basic.EnumerationType description="Rejection Reason" enumTypeId="RejectionReason"/>
+            <moqui.basic.Enumeration enumId="ArjDamaged" description="Damaged" enumTypeId="RejectionReason"/>
+            <moqui.basic.Enumeration enumId="ArjLost" description="Lost in Transit" enumTypeId="RejectionReason"/>
+            <moqui.basic.Enumeration enumId="ArjNotOrdered" description="Not Ordered" enumTypeId="RejectionReason"/>
+            <moqui.basic.Enumeration enumId="ArjOverShipped" description="Over Shipped" enumTypeId="RejectionReason"/>
+            <moqui.basic.Enumeration enumId="ArjNotToSpec" description="Not to Specification" enumTypeId="RejectionReason"/>
+        </seed-data>
+    </entity>
+</entities>

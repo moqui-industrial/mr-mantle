@@ -27,7 +27,7 @@ const families = {
         ]
     },
     SkillLevel: {title: "Skill levels", uses: []},
-    // P11: the leave types a leave policy is for (design §7; PeopleLeaveEntities.xml)
+    // P11: the leave types a leave policy is for (design §7; entity/humanres/LeaveEntities.xml)
     PeopleLeaveType: {
         title: "Leave types",
         uses: [

@@ -13,7 +13,7 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <!-- Warranty claims (CS-WARRANTY; design-customer-service §5 WarrantyClaims and WarrantyAssessment, crosscut §3.2
-    DeliveredItems; impl-customer-service §4, P11; Warranty.js, SupportWarrantyEntities.xml, SupportWarranty.eecas.xml). A claim is
+    DeliveredItems; impl-customer-service §4, P11; Warranty.js, entity/request/SupportEntities.xml, SupportWarranty.eecas.xml). A claim is
     its RqtWarranty case: the product a RequestItem, the asset, order, invoice and agreement RequestRecord links, and its
     evidence's revision Request.claimRevision; no WarrantyClaim record. Its coverage is read by the hierarchy of §4: the
     customer's service agreement first, then the product's warranty at sale (a serial or lot traced through AssetIssuance to its

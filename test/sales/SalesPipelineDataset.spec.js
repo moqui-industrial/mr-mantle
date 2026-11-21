@@ -1,5 +1,5 @@
 // The pipeline dataset (impl-sales P6, F66; design-sales §1.4 CX-OPS-REPORTS, §8; report/mantle-sales-pipeline.json,
-// data/SalesPipelineReportData.xml, SalesWorkspaceServices get#PipelineRowFilter): its row filter is Sales' scope, so a
+// data/15-seed-initial/SalesDocumentsAndReports.xml, SalesWorkspaceServices get#PipelineRowFilter): its row filter is Sales' scope, so a
 // representative's rows are their organization's deals assigned to them or their team, a manager's (SALES_TEAM_VIEW) the
 // organization's, never another organization's, and a user who reads nothing of Sales gets none; another user's filter is refused.
 // The document carries the deal's organization, stage (with a label that sorts by the pipeline's order) and current owner and team,

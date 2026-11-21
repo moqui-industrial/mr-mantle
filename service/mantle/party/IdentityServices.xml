@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     path). Reads need ADMIN_IDENTITY_VIEW, changes ADMIN_IDENTITY_MANAGE, and an account-wide change of an identity shared with an
     organization the caller does not administer ADMIN_IDENTITY_GLOBAL. A refusal of a change is answered (applied false,
     reasonCode, reason); a missing permission or an identity out of scope (RECORD_UNAVAILABLE) is an error. Names no app group:
-    grants come as a proposal of registered bundles the app supplies. ALL_USERS may call them (data/PartyAccessData.xml): each
+    grants come as a proposal of registered bundles the app supplies. ALL_USERS may call them (data/10-seed/PartyAndIdentity.xml): each
     refuses without its permission. The bodies are Identity.js. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
@@ -716,7 +716,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <!-- The import of staff invitations (Invitations.js; mr-boss impl-admin P15, design-admin §4 Invitations' bulk invite,
-        §11.1): the row services of the framework's import target staffInvitations (data/PartyInvitationData.xml), called by
+        §11.1): the row services of the framework's import target staffInvitations (data/10-seed/PartyAndIdentity.xml), called by
         org.moqui.admin.DataTransferServices for each row of a staged file, as the importer. -->
     <service verb="validate" noun="InvitationImportRow" allow-remote="false">
         <implements service="org.moqui.admin.DataTransferServices.validate#TargetRow"/>
@@ -753,7 +753,7 @@ along with this software (see the LICENSE.md file). If not, see
             subscription's rows by the organizations the account's party works for now; an organization membership's, an
             invitation's and a lifecycle operation's by their organization; an organization's own by itself. Which
             organizations is the organization entity filters of the authorization the call runs under, on the audit-log
-            views (entity/IdentityEntities.xml), as every find of this package: with none named nothing is in scope, but
+            views (entity/party/PartyAndAgreementAndCommunicationViews.xml), as every find of this package: with none named nothing is in scope, but
             for an instance administrator. A projection of an entity this source does not know is answered nothing. It
             answers no value of any row. Needs ADMIN_AUDIT_VIEW.</description>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/IdentityAudit.js').execute('findIdentityChanges', context))</script></actions>

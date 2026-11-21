@@ -78,7 +78,7 @@
     <description>For the framework's mail queue (moqui.server.MailOutcomeOwner forumDeliveries; mr-boss impl-admin P12 R1):
       which of the given EmailMessages are forum notices (a stored message of a site's ForumMailSettings template). The
       delivery worker tries a failed notice again itself, so it offers no retry and no reconciliation here. No address or
-      content is returned. Every user may call it (MantleOperationOwners, mr-mantle data/PartyAccessData.xml), as the mail
+      content is returned. Every user may call it (MantleOperationOwners, mr-mantle data/10-seed/PartyAndIdentity.xml), as the mail
       queue's services call it as the caller; refused (PERMISSION_DENIED) to a caller who does not read the mail queue:
       ADMIN_OPERATION_VIEW or _MANAGE, ADMIN_CONNECTION_VIEW or _MANAGE.</description>
     <implements service="org.moqui.admin.OperationServices.find#MailOutcomeOwners"/>

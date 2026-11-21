@@ -6,7 +6,7 @@
 //
 // - An account is a party with the Account role and a Customer or Prospect role, owned by the organization it is created for
 //   (Party.ownerPartyId); a person may be an account (an individual customer). Its account manager is a dated PrtAccountManager
-//   relationship from the representative to the account (data/SalesData.xml), ended, never deleted.
+//   relationship from the representative to the account (data/15-seed-initial/MarketingAndSales.xml), ended, never deleted.
 // - A contact is a person with a current PrtContact relationship to an account, owned by the account's organization; ending the
 //   relationship keeps the person (delete#Contact). A contact may belong to several accounts; reading one account gives nothing
 //   of another.

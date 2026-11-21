@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <extend-entity entity-name="ShipmentPackage" package="mantle.shipment">
+        <field name="sscc" type="text-short">
+            <description>The package's GS1 Serial Shipping Container Code (18 digits with
+            its check digit), as its carton label carries it; an 856 sends it in MAN*GM. Allocating SSCCs and printing
+            GS1-128 labels is not part of Mantle yet.</description>
+        </field>
+    </extend-entity>
+
+    <extend-entity entity-name="ShipmentBoxType" package="mantle.shipment">
+        <field name="maxWeight" type="number-decimal"><description>The most a package of this type carries, in its
+            weightUomId; packing above it warns.</description></field>
+        <field name="thruDate" type="date-time" enable-audit-log="update"><description>When the type was retired: no new
+            package takes it, and the packages that have it keep it.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="ShipmentItemSource" package="mantle.shipment">
+        <field name="putBackQuantity" type="number-decimal"><description>Picked quantity above the line's quantity after its
+            balance was cancelled (cancel#OrderItem): the stock to put back, until reverse#Pick does.</description></field>
+        <field name="putBackDate" type="date-time"/>
+    </extend-entity>
+
+    <extend-entity entity-name="ShipmentPackageRouteSeg" package="mantle.shipment">
+        <field name="deliveryRecipientName" type="text-medium"><description>Who received the package, when its delivery
+            was recorded by hand (record#PackageDelivery).</description></field>
+        <field name="deliveryNote" type="text-medium"><description>The evidence or reason of a delivery recorded by
+            hand.</description></field>
+        <field name="deliveryRecordedByUserId" type="id"/>
+        <field name="deliveryRecordedDate" type="date-time"/>
+        <field name="gatewayShipmentId" type="text-short"><description>The gateway's shipment of the label (Shippo's
+            shipment object_id, whose rates gatewayRateId is one of).</description></field>
+        <field name="gatewayAmountUomId" type="id"><description>The currency of the label's charge (estimatedAmount,
+            baseAmount, actualAmount) as the gateway gave it.</description></field>
+        <field name="labelFileType" type="text-short"><description>The label's file format as the gateway gave it
+            (Shippo's label_file_type: PDF_4x6, ZPLII, ...).</description></field>
+        <field name="returnGatewayShipmentId" type="text-short"/>
+        <field name="returnGatewayAmountUomId" type="id"/>
+        <field name="returnLabelFileType" type="text-short"/>
+    </extend-entity>
+
+    <extend-entity entity-name="ShipmentItemSource" package="mantle.shipment">
+        <field name="enteredQuantity" type="number-decimal"/>
+        <field name="enteredQuantityUomId" type="id"/>
+        <field name="appliedConversionFactor" type="number-decimal"/>
+        <relationship type="one" title="EnteredQuantity" related="moqui.basic.Uom" short-alias="enteredQuantityUom">
+            <key-map field-name="enteredQuantityUomId"/></relationship>
+    </extend-entity>
+
+<!-- Transfers, stock requests and the subcontract dispatch (design-warehouse §8, §17 WH-REQUEST and WH-SUBCONTRACT;
+    impl-warehouse P15). A transfer is a ShpTpTransfer shipment between two facilities of one owner (its route segment's
+    origin and destination, F55), issued at the origin and received at the destination by the guarded entry points of
+    mantle.shipment.WarehouseTaskServices. A subcontract dispatch is a transfer to or from an organization-owned
+    vendor-custody facility (a FacilityParty in the Custodian role) that names the production work it is for and the
+    service purchase order item (OrderItemWorkEffort links the two). An internal stock request (RqtInventory) is approved
+    into Requirements (RequirementRequestItem) and allocated by transfers or moves, each allocation one row here. -->
+    <extend-entity entity-name="Shipment" package="mantle.shipment">
+        <!-- WH-SUBCONTRACT: the production work (a run's operation, or the run) and the service PO item a dispatch of
+            components, or the return of what was not used, is for; set by create#Transfer and never changed -->
+        <field name="subcontractWorkEffortId" type="id"/>
+        <field name="subcontractOrderId" type="id"/>
+        <field name="subcontractOrderItemSeqId" type="id"/>
+        <relationship type="one" title="Subcontract" related="mantle.work.effort.WorkEffort" short-alias="subcontractWorkEffort">
+            <key-map field-name="subcontractWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" title="Subcontract" related="mantle.order.OrderItem" short-alias="subcontractOrderItem">
+            <key-map field-name="subcontractOrderId" related="orderId"/>
+            <key-map field-name="subcontractOrderItemSeqId" related="orderItemSeqId"/></relationship>
+    </extend-entity>
+
+<!-- Shipping, labels and printers (design-warehouse §10 Ship and PackageTracking, §12 Carriers and Printers, §17 WH-LABEL;
+    impl-warehouse P13): the durable record of each request to a shipping gateway (a label, a return label, a refund, a
+    tracking refresh), written and committed before the gateway is called, so after a timeout the gateway is asked what it did
+    before any retry; the gateway's lookup service and its test or live mode; a package's manual delivery proof; and a
+    facility printer binding's copies and dates. The Mantle test carrier's own record of the labels it issued is
+    entity/shipment/CarrierEntities.xml. -->
+    <extend-entity entity-name="ShippingGatewayConfig" package="mantle.shipment.carrier">
+        <field name="findLabelServiceName" type="text-medium"><description>Service implementing
+            mantle.shipment.CarrierServices.find#ShippingLabels: asked, after a request got no answer, whether the gateway
+            issued (or refunded) the label of a request reference, before any retry.</description></field>
+        <field name="testMode" type="text-indicator"><description>Y: a test or sandbox gateway; its labels are not
+            bought.</description></field>
+        <field name="systemMessageRemoteId" type="id"><description>The provider connection, as
+            PaymentGatewayConfig.systemMessageRemoteId: its sendUrl the API base of this environment (test or
+            production), its usageCode T or P, and its credentials in the remote's encrypted fields (password for an API
+            token, sharedSecret for the webhook signature). Never an unencrypted ShippingGatewayOption or seed
+            data.</description></field>
+        <relationship type="one" title="SystemMessageRemote" related="moqui.service.message.SystemMessageRemote"
+                short-alias="remote">
+            <key-map field-name="systemMessageRemoteId"/></relationship>
+        <seed-data>
+            <!-- the Shippo gateway (ShippoServices.xml, plan S1) and its lookup grace option -->
+            <moqui.basic.Enumeration description="Shippo REST API" enumId="ShGtwyShippo" enumTypeId="ShippingGatewayType"/>
+            <moqui.basic.Enumeration description="Lookup Grace Seconds" enumId="SgoLookupGraceSeconds"
+                    enumTypeId="ShippingGatewayOption"/>
+        </seed-data>
+    </extend-entity>
+</entities>

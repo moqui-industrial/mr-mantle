@@ -19,7 +19,7 @@ const choiceLimit = 30
 // ===== tables =====
 // The roles a store's staff row may have (never a customer's CustomerBillTo or another party role).
 const staffRoles = {StoreStaff: "Store staff"}
-// ProductStore's policy fields, each audit-logged (entity/ProductStoreEntities.xml), with their History labels; the other
+// ProductStore's policy fields, each audit-logged (entity/product/StoreEntities.xml), with their History labels; the other
 // fields store#Store writes. The reservation fields are Warehouse's (update#StoreReservation) and never written here.
 const policyFields = {
     organizationPartyId: "Organization",

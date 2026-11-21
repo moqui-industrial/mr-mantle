@@ -13,7 +13,7 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <!-- The equipment import target's row services (IronStone Maintenance design §6 EquipmentImport, §12; impl-maintenance P18, F36,
-    F51; data/MaintenanceSettingsData.xml): called by the framework's org.moqui.admin.DataTransferServices for each row of a staged
+    F51; data/10-seed/Maintenance.xml): called by the framework's org.moqui.admin.DataTransferServices for each row of a staged
     file, as the importer, in MaintenanceImport.js. Each checks MAINTENANCE_IMPORT with MAINTENANCE_RESOURCE_EDIT and the
     organization itself, and writes through Maintenance's own guarded equipment services. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">

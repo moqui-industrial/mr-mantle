@@ -1,0 +1,418 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed-initial">
+    <!-- Artifact group for all of the Mantle REST API via the mantle resource (the root resource) -->
+    <artifactGroups artifactGroupId="MANTLE_API" description="Mantle REST API (via root resource)">
+        <artifacts artifactTypeEnumId="AT_REST_PATH" artifactName="/mantle" inheritAuthz="Y"/>
+        <authz artifactAuthzId="MANTLE_API_ADMIN" userGroupId="ADMIN" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    </artifactGroups>
+    <!-- Not enabled by default, risky having read/write access to all mantle data, here as an example for testing:
+    <moqui.security.ArtifactGroupMember artifactGroupId="MANTLE_API" artifactName="mantle\..*"
+            nameIsPattern="Y" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    -->
+    <!-- The members of a project (active WorkEffortParty, through their UserAccount's party) may clone, fetch and push
+        to the git repositories linked to it; force pushes and ref deletes take a grant of their own -->
+    <moqui.security.ArtifactAuthz artifactAuthzId="GitRepositoriesProjectMember" userGroupId="ALL_USERS"
+            artifactGroupId="GitRepositories" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"
+            authzServiceName="mantle.work.GitServices.check#GitRepositoryAuthz"/>
+    <!-- Artifact group for all of the Mantle REST API via the mantle resource (the root resource) -->
+    <artifactGroups artifactGroupId="MANTLE_MY_API" description="Mantle My Info REST API">
+        <artifacts artifactTypeEnumId="AT_REST_PATH" artifactName="/mantle/my" inheritAuthz="Y"/>
+        <authz artifactAuthzId="MANTLE_MY_API_ALL" userGroupId="ALL_USERS" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    </artifactGroups>
+
+    <!-- Special Permissions - NOTE: other such permissions that the data model seed data relies on are in 15-seed-initial/Defaults.xml in mr-mantle -->
+    <userPermissions userPermissionId="ORDER_APPROVE" description="Order Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_APPROVE" fromDate="0"/>
+    <!-- Purchasing's approvals and policies (impl-purchasing P1, §4, X4): PURCHASE_APPROVE decides a purchase request, award or
+        supplier approval, PURCHASE_ORDER_APPROVE approves a purchase order part (approve#Order's purchase direction, P3),
+        PURCHASE_HOLD_RELEASE places and releases a Purchase hold reason (OrderHoldType OhtPurchase's enumCode), and
+        PURCHASE_POLICY_EDIT keeps the buying and approval policies; SUPPLIER_SCORECARD_EDIT keeps a supplier's scorecard
+        evaluations (mantle.party.SupplierServices). Granted to the Purchasing groups by the app's setup data. -->
+    <userPermissions userPermissionId="PURCHASE_APPROVE" description="Purchase Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="PURCHASE_ORDER_APPROVE" description="Purchase Order Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_ORDER_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="PURCHASE_HOLD_RELEASE" description="Purchase Hold Release"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_HOLD_RELEASE" fromDate="0"/>
+    <userPermissions userPermissionId="PURCHASE_POLICY_EDIT" description="Purchase Policy Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_POLICY_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPLIER_SCORECARD_EDIT" description="Supplier Scorecard Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPLIER_SCORECARD_EDIT" fromDate="0"/>
+    <!-- Customer Service's cases, order changes, returns and warranty (impl-customer-service P1, §2, §4; crosscut X4):
+        SUPPORT_CASE_EDIT works a support case (mantle.request.SupportCaseServices), SUPPORT_CASE_MANAGE manages queues,
+        teams, merges and assignment, SUPPORT_POLICY_EDIT keeps the service policies, levels and routes, SUPPORT_KNOWLEDGE_EDIT
+        publishes service knowledge (KnowledgeServices), SUPPORT_CONTACT_INVITE invites a customer contact to the Support app;
+        ORDER_CHANGE_REQUEST proposes a change of a placed sales order, ORDER_CHANGE_APPROVE decides it, ORDER_CHANGE_APPLY
+        applies it (and places a Change hold on a sales order, hold#Order), ORDER_CHANGE_HOLD_RELEASE releases a Change hold
+        (OrderHoldType OhtChange's enumCode, X4); RETURN_EXCEPTION_APPROVE decides a return outside its policy,
+        RETURN_POLICY_EDIT keeps the return policies (ReturnPolicyServices), WARRANTY_APPROVE decides a warranty claim
+        (WarrantyServices). RETURN_AUTHORIZE is below and CUSTOMER_CREDIT_VIEW in 10-seed/Accounting.xml. Granted to the
+        Customer Service groups by the app's setup data. -->
+    <userPermissions userPermissionId="SUPPORT_CASE_EDIT" description="Support Case Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_CASE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPORT_CASE_MANAGE" description="Support Case Manage"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_CASE_MANAGE" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPORT_POLICY_EDIT" description="Support Policy Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_POLICY_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPORT_KNOWLEDGE_EDIT" description="Support Knowledge Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_KNOWLEDGE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPORT_CONTACT_INVITE" description="Support Contact Invite"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_CONTACT_INVITE" fromDate="0"/>
+    <userPermissions userPermissionId="ORDER_CHANGE_REQUEST" description="Order Change Request"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_CHANGE_REQUEST" fromDate="0"/>
+    <userPermissions userPermissionId="ORDER_CHANGE_APPROVE" description="Order Change Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_CHANGE_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="ORDER_CHANGE_APPLY" description="Order Change Apply"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_CHANGE_APPLY" fromDate="0"/>
+    <userPermissions userPermissionId="ORDER_CHANGE_HOLD_RELEASE" description="Order Change Hold Release"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_CHANGE_HOLD_RELEASE" fromDate="0"/>
+    <userPermissions userPermissionId="RETURN_EXCEPTION_APPROVE" description="Return Exception Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="RETURN_EXCEPTION_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="RETURN_POLICY_EDIT" description="Return Policy Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="RETURN_POLICY_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="WARRANTY_APPROVE" description="Warranty Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="WARRANTY_APPROVE" fromDate="0"/>
+    <!-- Sales (IronStone Sales design §1.1; impl-sales P1, §4): SALES_VIEW reads the Sales records of the user's organizations
+        assigned to them or their dated team, SALES_TEAM_VIEW the organization's whole pipeline; SALES_TEAM_MANAGE keeps teams and
+        their members; SALES_OPPORTUNITY_EDIT, SALES_ACCOUNT_EDIT, SALES_QUOTE_EDIT and SALES_ORDER_EDIT write leads and
+        opportunities, accounts and contacts, quote drafts and sales order entry; SALES_QUOTE_SEND issues a reviewed quote and its
+        link; SALES_ORDER_APPROVE approves a sales part where the seller's approval setting is on (approve#Order's sales
+        direction); SALES_ORDER_CHANGE and SALES_APPROVE propose and decide a commercial order change (OrderChangeServices checks
+        both already, impl-sales F13); SALES_AGREEMENT_EDIT and SALES_RECURRENCE_MANAGE keep customer agreements and recurring
+        orders; SALES_FORECAST_EDIT forecasts and targets; SALES_REPORT_VIEW reads the sales reports of the user's organizations
+        (SalesReportServices); SALES_CUSTOMER_INVITE invites a customer contact to PASS Sales; SALES_IMPORT runs the opportunity
+        import (with the permissions its target names); SALES_CONFIGURE keeps the Sales settings; SALES_OWNER_CHANGE moves a
+        departing user's opportunities, accounts and open quotes (Sales' lifecycle participant, an identity operator's, F54). An
+        edit permission alone reads nothing (mantle/sales/SalesAccess.js). Granted to the Sales groups by the app's setup data. -->
+    <userPermissions userPermissionId="SALES_VIEW" description="Sales View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_TEAM_VIEW" description="Sales Team View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_TEAM_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_TEAM_MANAGE" description="Sales Team Manage"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_TEAM_MANAGE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_OPPORTUNITY_EDIT" description="Sales Opportunity Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_OPPORTUNITY_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_ACCOUNT_EDIT" description="Sales Account Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_ACCOUNT_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_QUOTE_EDIT" description="Sales Quote Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_QUOTE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_QUOTE_SEND" description="Sales Quote Send"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_QUOTE_SEND" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_ORDER_EDIT" description="Sales Order Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_ORDER_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_ORDER_APPROVE" description="Sales Order Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_ORDER_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_ORDER_CHANGE" description="Sales Order Change"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_ORDER_CHANGE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_APPROVE" description="Sales Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_AGREEMENT_EDIT" description="Sales Agreement Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_AGREEMENT_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_RECURRENCE_MANAGE" description="Sales Recurrence Manage"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_RECURRENCE_MANAGE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_FORECAST_EDIT" description="Sales Forecast Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_FORECAST_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_REPORT_VIEW" description="Sales Report View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_REPORT_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_CUSTOMER_INVITE" description="Sales Customer Invite"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_CUSTOMER_INVITE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_IMPORT" description="Sales Import"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_IMPORT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_CONFIGURE" description="Sales Configure"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_CONFIGURE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_OWNER_CHANGE" description="Sales Owner Change (another user's opportunities, accounts and open quotes)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_OWNER_CHANGE" fromDate="0"/>
+    <!-- the scope of a Sales read in every internal organization, which reads nothing by itself (the user's call, impl-sales P1
+        review; as PEOPLE_ALL_ORGANIZATIONS and MAINTENANCE_ALL_ORGANIZATIONS): the Sales administrator's, whose root filter is
+        MANTLE_ACTIVE_ORG -->
+    <userPermissions userPermissionId="SALES_ALL_ORGANIZATIONS" description="Sales in every organization"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_ALL_ORGANIZATIONS" fromDate="0"/>
+    <!-- the working hours of another party (a service team's, mantle.work.CalendarServices.store#WorkingHours) for a party of the
+        user's organizations, beside an editor of its calendar and the party's manager (impl-customer-service P4) -->
+    <userPermissions userPermissionId="WORKING_HOURS_EDIT" description="Working Hours Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="WORKING_HOURS_EDIT" fromDate="0"/>
+
+    <!-- ===== Marketing P1 (impl-marketing P1, §4; IronStone Marketing design §1.1) ===== -->
+    <!-- Marketing: MARKETING_VIEW reads the campaigns and summaries of the user's organizations; MARKETING_CAMPAIGN_EDIT,
+        MARKETING_SEND_EDIT and MARKETING_CONTENT_EDIT write draft campaigns, sends and content (preview and test to approved test
+        recipients); MARKETING_AUDIENCE_VIEW reads person-level lists, segments and members, MARKETING_AUDIENCE_EDIT changes them,
+        MARKETING_AUDIENCE_IMPORT runs the audience import (the app's own import permission, which the target names, §4),
+        MARKETING_AUDIENCE_EXPORT exports membership and MARKETING_CONSENT_EDIT records evidenced consent changes;
+        MARKETING_APPROVE approves campaigns, sends and sequences, MARKETING_DISPATCH releases what is approved (neither implies
+        the other); MARKETING_EVENT_MANAGE keeps registration setup, capacity and attendees; MARKETING_REPORT_VIEW reads aggregate
+        measures; MARKETING_CONFIGURE keeps the Marketing settings and adopts unowned records. MARKETING_ALL_ORGANIZATIONS is the
+        scope of a Marketing read in every internal organization, which reads nothing by itself (as SALES_ALL_ORGANIZATIONS: the
+        Marketing administrator's). The MESSAGE_* permissions are Comms' (design §1.1): templates read and edited, sending
+        profiles configured, suppressions reviewed, each an explicit grant. An edit permission alone reads nothing
+        (mantle/marketing/MarketingAccess.js). Granted to the Marketing groups by the app's setup data. -->
+    <userPermissions userPermissionId="MARKETING_VIEW" description="Marketing View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_CAMPAIGN_EDIT" description="Marketing Campaign Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_CAMPAIGN_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_SEND_EDIT" description="Marketing Send Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_SEND_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_CONTENT_EDIT" description="Marketing Content Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_CONTENT_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_AUDIENCE_VIEW" description="Marketing Audience View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_AUDIENCE_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_AUDIENCE_EDIT" description="Marketing Audience Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_AUDIENCE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_AUDIENCE_IMPORT" description="Marketing Audience Import"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_AUDIENCE_IMPORT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_AUDIENCE_EXPORT" description="Marketing Audience Export"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_AUDIENCE_EXPORT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_CONSENT_EDIT" description="Marketing Consent Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_CONSENT_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_APPROVE" description="Marketing Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_DISPATCH" description="Marketing Dispatch"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_DISPATCH" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_EVENT_MANAGE" description="Marketing Event Manage"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_EVENT_MANAGE" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_REPORT_VIEW" description="Marketing Report View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_REPORT_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_CONFIGURE" description="Marketing Configure"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_CONFIGURE" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_ALL_ORGANIZATIONS" description="Marketing in every organization"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_ALL_ORGANIZATIONS" fromDate="0"/>
+    <userPermissions userPermissionId="MESSAGE_TEMPLATE_VIEW" description="Message Template View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MESSAGE_TEMPLATE_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="MESSAGE_TEMPLATE_EDIT" description="Message Template Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MESSAGE_TEMPLATE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="MESSAGE_SENDING_CONFIGURE" description="Message Sending Configure"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MESSAGE_SENDING_CONFIGURE" fromDate="0"/>
+    <userPermissions userPermissionId="MESSAGE_SUPPRESSION_REVIEW" description="Message Suppression Review"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MESSAGE_SUPPRESSION_REVIEW" fromDate="0"/>
+    <!-- ===== end of Marketing P1 ===== -->
+
+    <!-- The stock, shipment, facility and quality permissions the warehouse services check (mantle.shipment
+        WarehouseTaskServices and the other warehouse entry points). STOCK_RECEIVE is in 10-seed/Accounting.xml, with
+        receive#ReturnItems; STOCK_POLICY_PLAN and STOCK_POLICY_MANAGE are in 10-seed/InventoryAndQuality.xml. -->
+    <userPermissions userPermissionId="STOCK_ISSUE" description="Stock Issue"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="STOCK_ISSUE" fromDate="0"/>
+    <userPermissions userPermissionId="STOCK_MOVE" description="Stock Move"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="STOCK_MOVE" fromDate="0"/>
+    <userPermissions userPermissionId="STOCK_ADJUST" description="Stock Adjust"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="STOCK_ADJUST" fromDate="0"/>
+    <userPermissions userPermissionId="STOCK_COUNT" description="Stock Count"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="STOCK_COUNT" fromDate="0"/>
+    <userPermissions userPermissionId="STOCK_COUNT_REVIEW" description="Stock Count Review"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="STOCK_COUNT_REVIEW" fromDate="0"/>
+    <userPermissions userPermissionId="LOT_EXPIRY_EXTEND" description="Lot Expiry Extend"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="LOT_EXPIRY_EXTEND" fromDate="0"/>
+    <userPermissions userPermissionId="SHIPMENT_PICK" description="Shipment Pick"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SHIPMENT_PICK" fromDate="0"/>
+    <userPermissions userPermissionId="SHIPMENT_LOAD_EDIT" description="Shipment Load Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SHIPMENT_LOAD_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SHIPMENT_PACK" description="Shipment Pack"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SHIPMENT_PACK" fromDate="0"/>
+    <userPermissions userPermissionId="SHIPMENT_SHIP" description="Shipment Ship"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SHIPMENT_SHIP" fromDate="0"/>
+    <userPermissions userPermissionId="FACILITY_EDIT" description="Facility Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="FACILITY_EDIT" fromDate="0"/>
+    <!-- facility and stock work in every organization's facilities, not only the user's own (FacilityScope.js) -->
+    <userPermissions userPermissionId="FACILITY_ALL_ORGANIZATIONS" description="Facility and stock work in every organization"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="FACILITY_ALL_ORGANIZATIONS" fromDate="0"/>
+    <userPermissions userPermissionId="QUALITY_INSPECT" description="Quality Inspect"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="QUALITY_INSPECT" fromDate="0"/>
+    <userPermissions userPermissionId="QUALITY_VERIFY" description="Quality Verify"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="QUALITY_VERIFY" fromDate="0"/>
+    <userPermissions userPermissionId="QUALITY_DISPOSE" description="Quality Dispose"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="QUALITY_DISPOSE" fromDate="0"/>
+    <userPermissions userPermissionId="QUALITY_TEMPLATE_EDIT" description="Quality Template Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="QUALITY_TEMPLATE_EDIT" fromDate="0"/>
+    <!-- Purchasing's order changes (mantle.order.OrderServices.close#PurchaseRemainders; ensure#PurchaseReceipt admits it for
+        the expected receipt of a purchase order part) -->
+    <userPermissions userPermissionId="PURCHASE_ORDER_EDIT" description="Purchase Order Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_ORDER_EDIT" fromDate="0"/>
+    <!-- Purchasing's buyer fields of a supplier profile (mantle.party.SupplierServices; seeded by impl-manufacturing P14 with
+        the buyer group's grants, checked once Purchasing adds those fields) -->
+    <userPermissions userPermissionId="SUPPLIER_PROFILE_EDIT" description="Supplier Profile Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPLIER_PROFILE_EDIT" fromDate="0"/>
+    <!-- Manufacturing's production runs (mantle.work.ProductionServices, impl-warehouse P16a; impl-manufacturing P1 seeds the
+        rest of the production permissions and grants them to its groups): PRODUCTION_PLAN creates and releases a run,
+        PRODUCTION_VIEW reads one (as STOCK_ISSUE does, for the warehouse that issues to it) -->
+    <userPermissions userPermissionId="PRODUCTION_VIEW" description="Production View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PRODUCTION_PLAN" description="Production Plan"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_PLAN" fromDate="0"/>
+    <!-- the rest of Manufacturing's production permissions (impl-manufacturing P1; design-manufacturing §1.1):
+        PRODUCTION_SCHEDULE moves operations and commits a schedule, PRODUCTION_OPERATE records an operation's work,
+        PRODUCTION_SUPERVISE starts, holds, completes and cancels a run and approves its exceptions, PRODUCTION_COST_REVIEW
+        reads cost evidence and asks for its review, PRODUCTION_POLICY_EDIT keeps the production policy, reason codes and
+        work centers; SUPPLY_PLAN_RUN starts a planning run and converts its suggestions (crosscut CX-PLANNING) -->
+    <userPermissions userPermissionId="PRODUCTION_SCHEDULE" description="Production Schedule"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_SCHEDULE" fromDate="0"/>
+    <userPermissions userPermissionId="PRODUCTION_OPERATE" description="Production Operate"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_OPERATE" fromDate="0"/>
+    <userPermissions userPermissionId="PRODUCTION_SUPERVISE" description="Production Supervise"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_SUPERVISE" fromDate="0"/>
+    <userPermissions userPermissionId="PRODUCTION_COST_REVIEW" description="Production Cost Review"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_COST_REVIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PRODUCTION_POLICY_EDIT" description="Production Policy Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_POLICY_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPLY_PLAN_RUN" description="Supply Plan Run"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPLY_PLAN_RUN" fromDate="0"/>
+    <!-- SUPPLY_PLAN_VIEW reads a supply plan without running or converting it (get#SupplyPlan; impl-purchasing P14a, the
+        Purchasing reader's Replenishment) -->
+    <userPermissions userPermissionId="SUPPLY_PLAN_VIEW" description="Supply Plan View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPLY_PLAN_VIEW" fromDate="0"/>
+    <!-- A return's authorization, Customer Service's right (crosscut §3.18 Authorize; no Warehouse group holds it):
+        WarehouseTaskServices.request#ReturnLabel admits it beside SHIPMENT_SHIP -->
+    <userPermissions userPermissionId="RETURN_AUTHORIZE" description="Return Authorize"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="RETURN_AUTHORIZE" fromDate="0"/>
+    <userPermissions userPermissionId="CARD_NUMBER_EDIT" description="Credit Card Number Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="CARD_NUMBER_EDIT" fromDate="0"/>
+
+    <userPermissions userPermissionId="FISCAL_REOPEN" description="Fiscal Period Reopen"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="FISCAL_REOPEN" fromDate="0"/>
+    <userPermissions userPermissionId="GL_POST_CLOSED" description="GL Post to Closed Period"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="GL_POST_CLOSED" fromDate="0"/>
+
+    <userPermissions userPermissionId="TIME_ENTRY_RATE" description="Time Entry Rate Override"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="TIME_ENTRY_RATE" fromDate="0"/>
+    <!-- an employee's pay rate (the worker rate of the time of a person with a current PrtEmployee relationship, a person's worker
+        pay rate) is read with PAYROLL_VIEW and set with PAYROLL_EDIT (mantle.humanres.EmploymentServices.get#PayRateAccess);
+        TIME_ENTRY_RATE alone keeps client rates and the rates of workers who are not employees -->
+    <userPermissions userPermissionId="PAYROLL_VIEW" description="Payroll View (an employee's pay rate)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PAYROLL_EDIT" description="Payroll Edit (an employee's pay rate)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_EDIT" fromDate="0"/>
+    <!-- People (IronStone People; checked by mantle.humanres.PeopleServices and the People service families that follow it): the
+        directory, self-service, team, HR, recruiting, development, case and configuration permissions, People's own import
+        permission, and the approval of a payroll run, each a view or an edit apart (an edit permission alone reads nothing).
+        Each is granted to ADMIN here; an application grants them to its own groups. -->
+    <userPermissions userPermissionId="PEOPLE_DIRECTORY_VIEW" description="People Directory View (the public work identity of employees)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_DIRECTORY_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_SELF_SERVICE" description="People Self Service (own employment, requests and corrections)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_SELF_SERVICE" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_TEAM_VIEW" description="People Team View (a manager's live reports)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_TEAM_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_REQUEST_APPROVE" description="People Request Approve (approval steps assigned to the user)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_REQUEST_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_HR_VIEW" description="People HR View (employment and private person data of an employer)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_HR_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_HR_EDIT" description="People HR Edit (employment and private person data of an employer)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_HR_EDIT" fromDate="0"/>
+    <!-- the shift roster (impl-people P14; the user's call, impl-people §4, Nov 12, 2026): saving and publishing shifts, which a
+        manager (on their live reporting lines) and an HR editor (of the employer) need beside their own scope -->
+    <userPermissions userPermissionId="PEOPLE_ROSTER_EDIT" description="People Roster Edit (save and publish shifts in the user's scope)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_ROSTER_EDIT" fromDate="0"/>
+    <!-- expense claims and advances (impl-people P15; the user's call, impl-people §4, Nov 12, 2026): reading every claim and advance
+        of the user's employers and acting for an employee (a claim made, changed, submitted or cancelled, an advance asked for them);
+        the claimant's own and the approvers' route need no more than their own scope -->
+    <userPermissions userPermissionId="PEOPLE_EXPENSE_MANAGE" description="People Expense Manage (every claim and advance of the user's employers)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_EXPENSE_MANAGE" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_RECRUIT_VIEW" description="People Recruit View (openings, applications and offers)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_RECRUIT_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_RECRUIT_EDIT" description="People Recruit Edit (openings, applications and offers)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_RECRUIT_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_DEVELOP_VIEW" description="People Develop View (skills, training and reviews)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_DEVELOP_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_DEVELOP_EDIT" description="People Develop Edit (skills, training and reviews)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_DEVELOP_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_CASE_HANDLE" description="People Case Handle (confidential cases the user is assigned)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_CASE_HANDLE" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_IMPORT" description="People Import (People's own employee and time imports)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_IMPORT" fromDate="0"/>
+    <!-- the clocking kiosk (impl-people P30; design-people §6 ClockingKiosk): a punch recorded at a registered shared device for the
+        worker its badge and PIN name (AttendanceServices record#KioskPunch, only in a device's request), held by the device's display
+        account, never by a person who clocks for themselves -->
+    <userPermissions userPermissionId="PEOPLE_KIOSK_PUNCH" description="People Kiosk Punch (a clocking device records the punches of workers by badge and PIN)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_KIOSK_PUNCH" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_CONFIGURE" description="People Configure (People policy, setup and readiness)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_CONFIGURE" fromDate="0"/>
+    <!-- a People reader's scope in every internal organization (the active one when there is one), as COMMERCE_ALL_ORGANIZATIONS
+        and FACILITY_ALL_ORGANIZATIONS widen theirs; it reads nothing by itself (the user's call, impl-people §4, Nov 11, 2026) -->
+    <userPermissions userPermissionId="PEOPLE_ALL_ORGANIZATIONS" description="People work in every organization"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_ALL_ORGANIZATIONS" fromDate="0"/>
+    <!-- offboarding: another user's People approval rules handed to a new approver (PeopleApprovalServices find#OwnedApprovals and
+        transfer#ApprovalOwner, the owned-resource contract), as the other owners' *_OWNER_CHANGE -->
+    <userPermissions userPermissionId="PEOPLE_APPROVAL_OWNER_CHANGE" description="People Approval Owner Change (another user's approval rules)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_APPROVAL_OWNER_CHANGE" fromDate="0"/>
+    <userPermissions userPermissionId="PAYROLL_APPROVE" description="Payroll Approve (a payroll run another prepared)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_APPROVE" fromDate="0"/>
+    <!-- payroll configuration (impl-people P22 review; the user's call of Nov 12, 2026): pay components, structures, groups and
+        localizations, changed with PAYROLL_VIEW, PAYROLL_EDIT and this (mantle.humanres.PayrollSetupServices), in place of
+        PEOPLE_CONFIGURE, so payroll configures pay and People's administrator its policies -->
+    <userPermissions userPermissionId="PAYROLL_CONFIGURE" description="Payroll Configure (pay components, structures, groups and localizations)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_CONFIGURE" fromDate="0"/>
+    <!-- a salary set outside the pay change, for data repair (impl-people P23 review; the user's call of Nov 12, 2026): only an
+        employment's first salary is set by create#EmploymentSalary, and a salary in place changes through an approved pay change;
+        a holder of this sets one anyway, with a reason the audit log keeps. ADMIN's alone: no BOSS group holds it -->
+    <userPermissions userPermissionId="PAYROLL_REPAIR" description="Payroll Repair (a salary set outside an approved pay change, audited)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_REPAIR" fromDate="0"/>
+    <!-- approving anyone's timesheet when the organization's timesheet policy says any (mantle.work.TimesheetServices) -->
+    <userPermissions userPermissionId="TIMESHEET_APPROVE" description="Timesheet Approve (any person, by policy)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="TIMESHEET_APPROVE" fromDate="0"/>
+    <!-- approving, rejecting and changing allocations of people to projects, and staffing placeholders (mantle.work.ResourceServices) -->
+    <userPermissions userPermissionId="ALLOCATION_APPROVE" description="Allocation Approve (people's time on projects)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ALLOCATION_APPROVE" fromDate="0"/>
+    <!-- a milestone's gate decided for its approver (a client contact) by one who manages projects (mantle.work.ProjectServices
+        approve#MilestoneApproval), the gates set and the estimate sent on the projects they see -->
+    <userPermissions userPermissionId="MILESTONE_APPROVE" description="Milestone Approve (record a gate's decision for its approver)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MILESTONE_APPROVE" fromDate="0"/>
+    <!-- a client contact who signs in (granted by the owning application): the project services see
+        for such a user only the shared part of the client projects of its organizations (mantle.work.ProjectServices
+        get#ClientProjectInfo, get#VisibleProjectInfo; mantle.party.CommunicationServices get#RecordLinkInfo, get#RecordTimeline),
+        whatever other group it is in. Not granted to ADMIN, nor to any group by default. The group that holds it should hold
+        the framework's EXTERNAL_USER too (no record rooms, records drive, others' presence or agents), as IronStone's does. -->
+    <userPermissions userPermissionId="PROJECT_CLIENT" description="Project Client (sees only the shared part of its organizations' projects)"/>
+    <!-- the time logged on a work effort in its record timeline (Chatter; mantle.party.CommunicationServices.get#RecordTimeline) -->
+    <moqui.service.ServiceRegister serviceRegisterId="TimeEntryTimeline" serviceTypeEnumId="RecordTimelineSource"
+            description="Time logged on a work effort" serviceName="mantle.work.TimeServices.get#TimeEntryTimeline"/>
+
+    <!-- deleting a directory party (mantle.party.ContactBookServices.delete#Contact); a personal contact's owner needs none -->
+    <userPermissions userPermissionId="CONTACT_ADMIN" description="Contact Admin (delete directory contacts)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="CONTACT_ADMIN" fromDate="0"/>
+
+    <!-- The CalDAV and CardDAV adapters (MoquiConf.xml dav-server), called as a user who logged in with an app password;
+        each checks the calendar's or the contact book's access itself, as the screens do. -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantleDavServices" description="CalDAV and CardDAV adapters"/>
+
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleDavServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y" nameIsPattern="Y"
+            artifactName="mantle\.(work\.CalendarDavServices|party\.ContactDavServices)\.(get#DavCollections|get#DavObjects|put#DavObject|delete#DavObject)"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleDavServicesALL" userGroupId="ALL_USERS" artifactGroupId="MantleDavServices"
+            authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+
+    <!-- Commerce's stores, merchandising, website, orders, promotions, channels and subscriptions (impl-commerce P1, F2;
+        design-commerce §1.1), each checked by the store services with the store's organization: COMMERCE_VIEW reads stores and
+        their records, COMMERCE_STORE_EDIT keeps a store's configuration and checkout settings, COMMERCE_MERCHANDISE its
+        assortment, categories, navigation and review moderation, COMMERCE_PUBLISH publishes assortment and content,
+        COMMERCE_THEME_EDIT edits themes and pages, COMMERCE_THEME_CODE a theme's template source, COMMERCE_THEME_PUBLISH
+        publishes or restores a theme release, COMMERCE_ORDER_VIEW reads store orders and carts, COMMERCE_RECOVERY works cart
+        recovery, COMMERCE_PROMOTION_EDIT keeps promotions and codes, COMMERCE_CHANNEL_OPERATE operates integrations, imports and
+        feeds, COMMERCE_SUBSCRIPTION_MANAGE manages recurring contracts. No permission implies another, and a store assignment
+        (a StoreStaff ProductStoreParty) grants none. Granted to the Commerce groups by the app's setup data. -->
+    <userPermissions userPermissionId="COMMERCE_VIEW" description="Commerce View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_STORE_EDIT" description="Commerce Store Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_STORE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_MERCHANDISE" description="Commerce Merchandise"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_MERCHANDISE" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_PUBLISH" description="Commerce Publish"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_PUBLISH" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_THEME_EDIT" description="Commerce Theme Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_THEME_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_THEME_CODE" description="Commerce Theme Code"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_THEME_CODE" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_THEME_PUBLISH" description="Commerce Theme Publish"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_THEME_PUBLISH" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_ORDER_VIEW" description="Commerce Order View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_ORDER_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_RECOVERY" description="Commerce Recovery"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_RECOVERY" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_PROMOTION_EDIT" description="Commerce Promotion Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_PROMOTION_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_CHANNEL_OPERATE" description="Commerce Channel Operate"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_CHANNEL_OPERATE" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_SUBSCRIPTION_MANAGE" description="Commerce Subscription Manage"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_SUBSCRIPTION_MANAGE" fromDate="0"/>
+
+    <!-- Commerce P6 review (impl-commerce F-P6-3): store work in every organization, or the active one, not only the user's
+        own (StoreAdmin.js scope), as a Commerce administrator's active organization filter reaches; ADMIN is a system
+        administrator already. Granted to the Commerce administrator group by the app's setup data. -->
+    <userPermissions userPermissionId="COMMERCE_ALL_ORGANIZATIONS" description="Commerce store work in every organization"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_ALL_ORGANIZATIONS" fromDate="0"/>
+</entity-facade-xml>

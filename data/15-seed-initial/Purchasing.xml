@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed-initial">
+    <!-- The generic sample X12 4010 profile (plan/payments-shipping-edi.md E1, docs/EdiX12.md): the supplier side of a retail
+        order cycle (850 in; 855, 856, 810 out; 997 both ways) with the code subset the mappings support. It is not any
+        retailer's guide: a partner's profile is a copy with its own ID, revision and codes. -->
+    <mantle.edi.EdiProfile ediProfileId="X12_4010_SAMPLE" profileRevision="1" x12Version="004010" description="Sample X12 4010 supplier profile (generic, not a retailer's guide)" generateFunctionalAck="Y" expectFunctionalAck="Y" ackOverdueMinutes="1440" requireSscc="N" asnPackagingCode="CTN" invoiceStatusId="InvoiceFinalized"/>
+    <mantle.edi.EdiProfileDocument ediProfileId="X12_4010_SAMPLE" transactionSetId="850" directionEnumId="EdiDirIn" functionalIdCode="PO" grammarLocation="component://mr-mantle/service/mantle/edi/x12/X12V4010TS850.js" mappingServiceName="mantle.edi.order.X12OrderServices.apply#PurchaseOrder"/>
+    <mantle.edi.EdiProfileDocument ediProfileId="X12_4010_SAMPLE" transactionSetId="997" directionEnumId="EdiDirIn" functionalIdCode="FA" grammarLocation="component://mr-mantle/service/mantle/edi/x12/X12V4010TS997.js" mappingServiceName="mantle.edi.EdiServices.apply#FunctionalAck"/>
+    <mantle.edi.EdiProfileDocument ediProfileId="X12_4010_SAMPLE" transactionSetId="855" directionEnumId="EdiDirOut" functionalIdCode="PR" grammarLocation="component://mr-mantle/service/mantle/edi/x12/X12V4010TS855.js" mappingServiceName="mantle.edi.order.X12OrderServices.produce#PurchaseOrderAck"/>
+    <mantle.edi.EdiProfileDocument ediProfileId="X12_4010_SAMPLE" transactionSetId="856" directionEnumId="EdiDirOut" functionalIdCode="SH" grammarLocation="component://mr-mantle/service/mantle/edi/x12/X12V4010TS856.js" mappingServiceName="mantle.edi.shipment.X12ShipmentServices.produce#ShipNotice"/>
+    <mantle.edi.EdiProfileDocument ediProfileId="X12_4010_SAMPLE" transactionSetId="810" directionEnumId="EdiDirOut" functionalIdCode="IN" grammarLocation="component://mr-mantle/service/mantle/edi/x12/X12V4010TS810.js" mappingServiceName="mantle.edi.account.X12InvoiceServices.produce#Invoice"/>
+    <mantle.edi.EdiProfileDocument ediProfileId="X12_4010_SAMPLE" transactionSetId="997" directionEnumId="EdiDirOut" functionalIdCode="FA" grammarLocation="component://mr-mantle/service/mantle/edi/x12/X12V4010TS997.js" mappingServiceName="mantle.edi.EdiServices.produce#FunctionalAck"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctUom" ediCode="EA" internalValue="OTH_ea" description="Each"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctWeightUom" ediCode="LB" internalValue="WT_lb" description="Pound"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctWeightUom" ediCode="KG" internalValue="WT_kg" description="Kilogram"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctProductId" ediCode="VN" internalValue="productId" description="Vendor's item number: the product ID"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctProductId" ediCode="UP" internalValue="PidtUpca" description="UPC consumer package code"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctProductId" ediCode="EN" internalValue="PidtEan" description="EAN"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctProductId" ediCode="BP" internalValue="buyer" description="Buyer's part number, kept on the line"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctProductId" ediCode="IN" internalValue="buyer" description="Buyer's item number, kept on the line"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctCharge" ediCode="D240" ediQualifier="C" internalValue="ItemShipping" description="Freight"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctCharge" ediCode="C310" ediQualifier="A" internalValue="ItemDiscount" description="Discount"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctTax" ediCode="ST" internalValue="ItemSalesTax" description="Sales tax"/>
+    <!-- Produces and sends the documents recorded and not sent yet (a connection that batches, or a send interrupted after
+        its business transaction committed): on by default, every 15 minutes, two indexed queries when there is nothing
+        to send. A document whose message is in error is not sent again by it; find#OverdueAcknowledgments lists it. -->
+    <moqui.service.job.ServiceJob jobName="send_EdiPendingDocuments" description="Send pending EDI documents" serviceName="mantle.edi.EdiServices.send#PendingDocuments" cronExpression="0 */15 * * * ?" paused="N" transactionTimeout="1800"/>
+
+    <!-- Purchase agreements past their thru date (impl-purchasing P13): once a day an active purchase agreement whose thru
+        date has passed is set Expired (mantle.party.AgreementServices.expire#PurchaseAgreements). A release checks the
+        dates itself, so an agreement the job has not reached yet takes no release either; its POs stay. An agreement's
+        activation is approved on PurchaseOrderApproval with the agreement as source (15-seed-initial/Purchasing.xml). -->
+    <moqui.service.job.ServiceJob jobName="expire_PurchaseAgreements" description="Expire purchase agreements past their dates"
+            serviceName="mantle.party.AgreementServices.expire#PurchaseAgreements" cronExpression="0 5 0 * * ?" paused="N"
+            transactionTimeout="1800"/>
+
+    <!-- The purchase approvals waiting for a decision (impl-purchasing P4, F23; design-purchasing §6 Approvals): one message
+        per approver of the step waiting (decide#PurchaseApproval and submit#SupplierApproval send them, and mark them read
+        once the step is decided). The framework's approve#NotificationMessage and refuse#NotificationMessage call
+        mantle.order.PurchaseServices approve#PurchaseSource and refuse#PurchaseSource as the user, which decide the source at
+        the revision in the message (sourceRevision) and refuse a stale one naming the current revision; a refusal needs a
+        reason. The message holds sourceEntityName, sourceId, sourceRevision, organizationPartyId, organizationName,
+        supplierName, amountText, stepText and, for an order, orderId; for a supplier, supplierPartyId. The app that shows
+        them sets the links (IronStone Purchasing: BossSetupData.xml). P10 seeds PurchaseRequestApproval and P12
+        PurchaseAwardApproval the same way; an agreement's activation comes on PurchaseOrderApproval (P13). -->
+    <moqui.security.user.NotificationTopic topic="PurchaseOrderApproval" inboxEnumId="NinNotifications"
+            description="Purchase order to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.PurchaseServices.approve#PurchaseSource"
+            refuseServiceName="mantle.order.PurchaseServices.refuse#PurchaseSource" refuseReasonRequired="Y"
+            titleTemplate="Approve purchase order ${orderId} revision ${sourceRevision} from ${supplierName}, ${amountText} (${stepText})"/>
+    <moqui.security.user.NotificationTopic topic="PurchaseSupplierApproval" inboxEnumId="NinNotifications"
+            description="Supplier to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.PurchaseServices.approve#PurchaseSource"
+            refuseServiceName="mantle.order.PurchaseServices.refuse#PurchaseSource" refuseReasonRequired="Y"
+            titleTemplate="Approve supplier ${supplierName} for ${organizationName} (${stepText})"/>
+
+    <!-- A supplier bill whose match holds it, for the buyers of its organization (notify#MatchException, impl-purchasing
+        P6). The buyer resolves the source or asks for the hold's release on the bill; the notice has no approve service. -->
+    <moqui.security.user.NotificationTopic topic="PurchaseMatchException" inboxEnumId="NinNotifications"
+            description="Supplier bill held on its match" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" titleTemplate="Bill ${invoiceId} is held on its match"/>
+
+    <!-- A purchase order sent to its supplier (mantle.order.OrderServices.send#PurchaseOrder, impl-purchasing P3): from the
+        buying organization's order or primary address, with the PDF attached; the service passes subject, fromAddress and
+        fromName in bodyParameters, and the body -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_PURCHASE_ORDER_EMAIL" description="Purchase Order"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses=""
+            subject="${subject}"/>
+
+    <!-- A late purchase receipt (mantle.order.PurchaseReceiptServices.notify#LateReceipts, impl-purchasing P5): once a day,
+        each order part past its due date with something still to come is told once per due date to its organization's
+        buyers (PURCHASE_ORDER_EDIT). No link template: the order's screen belongs to the app. -->
+    <moqui.security.user.NotificationTopic topic="PurchaseLateReceipt" inboxEnumId="NinNotifications"
+            description="Late purchase receipt" typeString="warning" showAlert="N" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Order ${orderId} from ${supplierName} is late: due ${dueDay}"/>
+    <moqui.service.job.ServiceJob jobName="notify_LateReceipts" description="Tell buyers of late purchase receipts"
+            serviceName="mantle.order.PurchaseReceiptServices.notify#LateReceipts" cronExpression="0 15 6 * * ?" paused="N"
+            transactionTimeout="1800"/>
+
+    <!-- A purchase request waiting for a decision (impl-purchasing P10; design-purchasing §4 RequestDetail, crosscut §3.11
+        PurchaseRequestApproval), seeded as P4's topics are (15-seed-initial/Purchasing.xml): one message per approver of the
+        step waiting (submit#PurchaseRequest and decide#PurchaseRequestApproval send them, and mark them read once the step is
+        decided); approve#NotificationMessage and refuse#NotificationMessage call mantle.order.PurchaseServices
+        approve#PurchaseSource and refuse#PurchaseSource as the user, which decide the request at the revision in the message
+        (sourceRevision, the time of its last line change) and refuse a changed one; a refusal needs a reason. The message
+        holds requestId, requestName, revisionText, organizationPartyId, organizationName, amountText (the lines' maximum
+        amounts) and stepText. The app that shows them sets the link (IronStone Purchasing: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PurchaseRequestApproval" inboxEnumId="NinNotifications"
+            description="Purchase request to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.PurchaseServices.approve#PurchaseSource"
+            refuseServiceName="mantle.order.PurchaseServices.refuse#PurchaseSource" refuseReasonRequired="Y"
+            titleTemplate="Approve purchase request ${requestId} ${requestName} of ${organizationName}, ${amountText} (${stepText})"/>
+
+    <!-- Purchase order revisions and acknowledgements (impl-purchasing P9; entity/order/OrderAndPurchaseAndReturnExtensions.xml) -->
+    <!-- the supplier's response to a revision (OrderPart.acknowledgementEnumId) -->
+    <moqui.basic.EnumerationType description="Purchase Acknowledgement" enumTypeId="PurchaseAcknowledgement"/>
+    <moqui.basic.Enumeration enumId="PakAccepted" description="Accepted" sequenceNum="1" enumTypeId="PurchaseAcknowledgement"/>
+    <moqui.basic.Enumeration enumId="PakChanged" description="Accepted with changes" sequenceNum="2"
+            enumTypeId="PurchaseAcknowledgement"/>
+    <moqui.basic.Enumeration enumId="PakRejected" description="Rejected" sequenceNum="3" enumTypeId="PurchaseAcknowledgement"/>
+    <!-- the supplier's evidence of an acknowledgement, kept on the order in the supplier's role -->
+    <moqui.basic.Enumeration enumId="OctSupplierAcknowledgement" description="Supplier acknowledgement"
+            enumTypeId="OrderContentType"/>
+    <!-- the buying policy's substitution rule (PurchasePolicy.substitutionEnumId, F49): empty is not allowed -->
+    <moqui.basic.EnumerationType description="Purchase Substitution" enumTypeId="PurchaseSubstitution"/>
+    <moqui.basic.Enumeration enumId="PsbNotAllowed" description="Not allowed" sequenceNum="1" enumTypeId="PurchaseSubstitution"/>
+    <moqui.basic.Enumeration enumId="PsbAllowed" description="Allowed on a line nothing was received or billed on"
+            sequenceNum="2" enumTypeId="PurchaseSubstitution"/>
+
+    <!-- A reminder to acknowledge a purchase order's revision (mantle.order.OrderServices.send#PurchaseReminder): from the
+        buying organization's order or primary address; the service passes subject, fromAddress and fromName in
+        bodyParameters, and the body -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_PURCHASE_REMINDER" description="Purchase Order Reminder"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses=""
+            subject="${subject}"/>
+
+    <!-- An award of an RFQ's quotes waiting for a decision (impl-purchasing P12; design-purchasing §5 Award, D8), seeded as P4's
+        and P10's topics are: sent by commit#Award when the buying organization has award (PasAward) approval policy rows in
+        effect, one message per approver of the step waiting; approve#NotificationMessage and refuse#NotificationMessage call
+        mantle.order.PurchaseServices approve#PurchaseSource and refuse#PurchaseSource as the user, which decide the award at
+        the revision in the message (sourceRevision, the time it was submitted) through decide#AwardApproval; the last step's
+        approval places the award's quotes, a refusal leaves them unplaced and needs a reason. The message holds requestId,
+        requestName, awardKey (the award's operation key), revisionText, organizationName, supplierText, amountText and
+        stepText. The app that shows them sets the link (IronStone Purchasing: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PurchaseAwardApproval" inboxEnumId="NinNotifications"
+            description="Award of supplier quotes to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.PurchaseServices.approve#PurchaseSource"
+            refuseServiceName="mantle.order.PurchaseServices.refuse#PurchaseSource" refuseReasonRequired="Y"
+            titleTemplate="Approve the award of RFQ ${requestId} ${requestName} of ${organizationName} to ${supplierText}, ${amountText} (${stepText})"/>
+    <!-- A regret notice to a supplier whose quote was not awarded (close#QuoteRequest, R-PUR-35): from the buying organization's
+        order or primary address; the service passes subject, fromAddress and fromName in bodyParameters, and the body -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_RFQ_REGRET_EMAIL" description="Quote not awarded"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses=""
+            subject="${subject}"/>
+
+    <!-- A request for quotation sent to an invited supplier (mantle.order.SourcingServices.send#QuoteRequest, impl-purchasing
+        P11): from the buying organization's order or primary address, with the published RFQ's PDF attached; the service
+        passes subject, fromAddress and fromName in bodyParameters, and the body -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_RFQ_EMAIL" description="Request for Quotation"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses=""
+            subject="${subject}"/>
+
+    <!-- A supplier's response from the PASS Supplier app (mantle.order.SupplierPortalServices, impl-purchasing P16): a quote
+        submitted, a purchase order acknowledged or a drop-ship delivery reported, each a claim for the buyers of the
+        organization (PURCHASE_ORDER_EDIT) to review. The message holds orderId, responseKind, kindText, supplierName,
+        and detailText (the revision, and late when it is). The app that shows them sets the link (IronStone Purchasing: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PurchaseSupplierResponse" inboxEnumId="NinNotifications"
+            description="Supplier response to review" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="${supplierName}: ${kindText} for ${orderId}${detailText}"/>
+
+    <!-- The plan schedule (crosscut CX-PLANNING, D20; impl-manufacturing P13): every 15 minutes, the active PlanSchedule rows
+        whose next run is due, each its own planning run (SupplyPlanningServices.run#ScheduledSupplyPlans); with no schedule
+        it does nothing -->
+    <moqui.service.job.ServiceJob jobName="run_ScheduledSupplyPlans" description="Run the due supply plan schedules"
+            serviceName="mantle.product.SupplyPlanningServices.run#ScheduledSupplyPlans" cronExpression="0 */15 * * * ?"
+            paused="N" transactionTimeout="1800" errorHistoryOnly="Y"/>
+</entity-facade-xml>

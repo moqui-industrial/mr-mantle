@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="migrate" noun="PayrollOrigin" allow-remote="false">
         <description>What a database made before People P27 needs for payroll to post and stay confidential, run on every seed load
-            (data/ZaaGlAccountsUpdateData.xml) and with nothing to do once done or on a new database (its install data has the
+            (data/10-seed/UpgradePayrollPosting.xml) and with nothing to do once done or on a new database (its install data has the
             mappings): for DefaultSettings and each organization with its own payment mappings, PtPayrollPayment's payable mappings
             (applied: the organization's InvoicePayroll payable account; unapplied: its PtInvoicePayment unapplied account), and for
             each with its own InvoicePayroll payable type, the receivable side (InvoicePayroll from the organization, a receivable

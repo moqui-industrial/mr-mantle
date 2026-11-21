@@ -161,7 +161,7 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========== P5: My accounts, the projected address book (design §4 Contacts, CX-SYNC, SAL-SYNC) ========== -->
     <service verb="get" noun="AccountContactProjection" allow-remote="false" read-only="true">
         <implements service="mantle.party.ContactDavServices.define#ProjectionOwner"/>
-        <description>My accounts, a projected CardDAV address book (SalesIntakeData.xml's ContactProjection SalesMyAccounts;
+        <description>My accounts, a projected CardDAV address book (10-seed/Sales.xml's ContactProjection SalesMyAccounts;
             mantle.party.ContactDavServices): admitted is whether the user reads Sales (SALES_VIEW, SALES_TEAM_VIEW or
             SALES_REPORT_VIEW); without checkOnly, the current contacts of the accounts the user may see that they manage or that
             are the account of a deal assigned now to them or a team of theirs, each a person they may see, computed per request (at
@@ -199,7 +199,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="get" noun="PipelineRowFilter" allow-remote="false" read-only="true">
         <description>The report engine's row filter of the pipeline dataset (report/mantle-sales-pipeline.json; the ReportScopePolicy
-            MantleSalesScope, data/SalesWorkspaceData.xml): Sales' scope, not the organization alone (impl-sales F66): the deals of
+            MantleSalesScope, data/10-seed/Sales.xml): Sales' scope, not the organization alone (impl-sales F66): the deals of
             the organizations of the signed-in viewer's sales scope and, without SALES_TEAM_VIEW, of those only the deals assigned
             now to the viewer or a team of theirs. Nothing for a viewer who reads nothing of Sales; a userId of another user is
             refused.</description>
@@ -215,7 +215,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="get" noun="QuoteRowFilter" allow-remote="false" read-only="true">
         <description>The report engine's row filter of the quote dataset (report/mantle-sales-quotes.json; the ReportScopePolicy
-            MantleSalesQuoteScope, data/SalesWorkspaceData.xml; impl-sales P20): Sales' quote scope, as the quote lists read it: Sales
+            MantleSalesQuoteScope, data/10-seed/Sales.xml; impl-sales P20): Sales' quote scope, as the quote lists read it: Sales
             quotes (never a template) not placed, of the organizations of the signed-in viewer's sales scope and, without
             SALES_TEAM_VIEW, of those only the quotes assigned to the viewer or a team of theirs. Nothing for a viewer who reads
             nothing of Sales; a userId of another user is refused.</description>

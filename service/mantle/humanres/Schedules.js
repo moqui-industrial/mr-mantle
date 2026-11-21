@@ -5,7 +5,7 @@
 // it. And the planned hours of people with a schedule, which mantle.work.ResourceServices.get#PartyCapacity reads before their own
 // working hours and the timesheet policy (scheduledDays, F23).
 //
-// The records (PeopleScheduleEntities.xml):
+// The records (entity/humanres/RecruitmentAndScheduleEntities.xml):
 // - a schedule (WorkingSchedule) is an employer's dated working week in a time zone, with a holiday calendar; its lines
 //   (WorkingScheduleLine) are dated weekly intervals: a day of the week, a local start and end (an end at or before the start ends
 //   the next day) and an unpaid break. A schedule's lines in effect at the same time never overlap. A change of a line from a date
@@ -14,7 +14,7 @@
 // - an employment follows a schedule from a date through its assignment (EmploymentAssignment.workingScheduleId, with
 //   holidayCategoryId in place of the schedule's calendar), so the history of what a person was planned to work stays readable;
 // - a holiday calendar is a WorkEffortCategory of type WcatHoliday, an employer's (ownerPartyId) or shared by every employer (no
-//   owner, as the US calendars of HolidayUsaData; none is assigned to anyone by default, F31); a holiday is an all-day WepHoliday
+//   owner, as the US calendars in 20-install/GeographyNorthAmerica.xml; none is assigned to anyone by default, F31); a holiday is an all-day WepHoliday
 //   WorkEffort on its day (allDayStart) in the calendar (WorkEffortCategoryAppl), with no owner, so the employer-owned holiday
 //   convention (a WepHoliday owned by the organization, which Projects' capacity and BusinessTime read for everyone of it) does
 //   not read it: a calendar's holidays take the days of the schedules that name it.

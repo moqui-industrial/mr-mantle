@@ -1,5 +1,5 @@
 // Support cases (design-customer-service §3 Cases, NewCase, CaseDetail, §9 Settings; impl-customer-service P2, CS-QUEUE,
-// CS-SETTINGS, CX-REQUEST, D23, F5, F6, F41, F62, F64, F74; SupportCaseEntities.xml). A case is a Request in a service queue:
+// CS-SETTINGS, CX-REQUEST, D23, F5, F6, F41, F62, F64, F74; entity/request/SupportEntities.xml). A case is a Request in a service queue:
 // a RequestCategory owned by an internal organization with a current ServiceQueue row. A request becomes a case when it is
 // submitted (not a draft, not closed), has a current Customer RequestParty that is a Customer-role party of the service
 // organization (owned by it, or shared: _NA_, F74; never an internal party), and either is in one of the organization's

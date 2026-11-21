@@ -1,6 +1,6 @@
 // Marketing's organization scope (impl-marketing P1, §2; design-marketing §1.1, §15.4, X12): the organization filters of
 // MarketingCampaign, MarketSegment and ContactList (MANTLE_USER_ORG_MCMP, _MSEG, _CLST and their MANTLE_ACTIVE_ORG twins,
-// data/MantleSetupData.xml) leave another organization's and an unowned campaign, segment and list out of a find under an app's
+// data/15-seed-initial/OrganizationFilters.xml) leave another organization's and an unowned campaign, segment and list out of a find under an app's
 // ordinary grant (MANTLE_USER_ORG), a mailbox of any owner left to its own rules, and an administrator's grant
 // (MANTLE_ACTIVE_ORG) finds every one until an organization is active; the list services reach a list that is not a mailbox
 // only for its organization's users and a contact administrator (F77), so another organization's and an unowned list answer as

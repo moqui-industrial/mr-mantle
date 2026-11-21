@@ -1,5 +1,5 @@
 // Case templates (design-customer-service §3 NewCase CaseDescription, §9 CaseTemplates; impl-customer-service P7,
-// CS-TEMPLATES, CS-FORM-ELEMENTS, F69-F71; SupportTemplateEntities.xml). A template is a dated DbForm (isDated, purpose
+// CS-TEMPLATES, CS-FORM-ELEMENTS, F69-F71; entity/moqui/FrameworkExtensions.xml). A template is a dated DbForm (isDated, purpose
 // DbfpCaseTemplate) owned by an organization (DbForm.ownerPartyId); its fields, options and conditions
 // (DbFormFieldDependency: show or require a field by another's value) are effective-dated rows of the framework
 // (docs/ui/Db-Forms.md, org.moqui.impl.ScreenServices), each field with its audience (DbFormField.audienceEnumId:

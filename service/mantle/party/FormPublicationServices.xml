@@ -12,7 +12,7 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<!-- Commons form publication and invitations (design-drawers-commons §19, crosscut X16; FormPublicationEntities.xml,
+<!-- Commons form publication and invitations (design-drawers-commons §19, crosscut X16; entity/party/PartyEntities.xml,
     FormPublication.js). An app makes and sends its invitations with its own services (Customer Service:
     mantle.request.CaseFeedbackServices); these are the parts every app shares. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"

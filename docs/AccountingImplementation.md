@@ -566,7 +566,7 @@ retry answers the first.
   that transaction (F38, F260). `preview#Depreciation` (a class or assets), `get#DepreciationPreview` (each asset's
   cost, residual, depreciation before, the month and the net book after) and `post#Depreciation` are the screen's calls
   over `PeriodRunServices`.
-- **Seed.** `FixedAssetData.xml`: the event types (`AbeCapitalize`, `AbeAdjust`, `AbeDispose`, `AbeReversal`,
+- **Seed.** `10-seed/Accounting.xml`: the event types (`AbeCapitalize`, `AbeAdjust`, `AbeDispose`, `AbeReversal`,
   `AbeCostRepair`), the disposal types, the two transaction types and the run kind. DefaultSettings assigns the fixed
   asset accounts its type mappings name (F250).
 
@@ -674,7 +674,7 @@ landed costs and repairs cost data. Every read checks Accounting's report read i
 
 `mantle.other.BudgetServices` and `BudgetReportServices`, with `other/Budgets.js`; the records are Mantle's `Budget`,
 `BudgetItem`, `BudgetRevision`, `BudgetRevisionImpact`, `BudgetReview` and `BudgetParty`, with `BudgetControlPolicy`,
-`BudgetCommitment` and `BudgetContent` (`entity/BudgetControlEntities.xml`). A budget's organization is its period's
+`BudgetCommitment` and `BudgetContent` (`entity/other/BudgetAndTaxEntities.xml`). A budget's organization is its period's
 party (`TimePeriod.partyId`); its other parties are `BudgetParty` rows (`store#BudgetParty`, `BUDGET_EDIT`).
 
 - **States.** Draft, Approved, Closed and Cancelled (`StatusFlowTransition`). `create#Budget` makes a draft and records
@@ -767,7 +767,7 @@ caller are scoped (F6), and answers `asOf` with `complete` and the reasons a fig
 
 ## Returns and order changes (P17)
 
-**Flags.** Two audit-logged `PartyAcctgPreference` fields (`entity/ReturnSettlementEntities.xml`), off by default and set
+**Flags.** Two audit-logged `PartyAcctgPreference` fields (`entity/ledger/AccountAndConfigAndTransactionExtensions.xml`), off by default and set
 through `store#Preferences`, since Mantle's ReturnToResponse and OrderToCash flows assert the old behavior:
 - `returnSettlementRequired` (D11): `ReturnApprovedProcess` only creates the return shipment, `ShipmentDeliveredReturnReceive`
   and `ReturnReceivedProcess` stand aside, and responses come only from `settle#Return`. `ReturnServices.get#ReturnSettlementMode`

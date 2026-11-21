@@ -1,5 +1,5 @@
 // Requests for quotation and supplier quotes (design-purchasing §5 QuoteRequests, QuoteRequestDetail, Quotes, QuoteDetail;
-// impl-purchasing P11, §4, R-PUR-13, R-PUR-21, F19, F35, F41): no RFQ, invitation or quote entity (SourcingEntities.xml).
+// impl-purchasing P11, §4, R-PUR-13, R-PUR-21, F19, F35, F41): no RFQ, invitation or quote entity (entity/request/RequestAndRequirementAndSupportExtensions.xml).
 // An RFQ is a Request of type RqtPurchaseRfq whose organization is its OrgInternal RequestParty, one of the user's; its items
 // are RequestItems, and an item made from an approved purchase request line is linked to it by RequestItemAssoc. Its
 // revision is the time of the last change to its audit-logged material fields (an item's product, quantity, unit, required

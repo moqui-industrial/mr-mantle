@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+<!-- Purchase requests (design-purchasing §4 RequestDetail; impl-purchasing P10, F3, F18, F57): a request line's unit and cost
+    centre (the cost centre is carried to OrderItem.costCenterId when the line is sourced), and the audit log on its product,
+    quantity, unit, required date, supplier and cost centre, logged on create and update ("true", F57), so a request's
+    revision is the time of the last change to them and a decision made before it is refused
+    (mantle.request.RequestServices, PurchaseRequests.js). The request's organization is its OrgInternal RequestParty. -->
+    <extend-entity entity-name="RequestItem" package="mantle.request">
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="quantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="requiredByDate" type="date-time" enable-audit-log="true"/>
+        <field name="supplierPartyId" type="id" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"><description>The unit of the quantity (the product's
+            unit by default)</description></field>
+        <field name="costCenterId" type="id" enable-audit-log="true"><description>The cost centre of the line: the request's
+            organization or one that rolls up to it (PrtOrgRollup); a sourced line carries it to
+            OrderItem.costCenterId</description></field>
+        <relationship type="one-nofk" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId" related="uomId"/></relationship>
+        <relationship type="one-nofk" title="CostCenter" related="mantle.party.Party" short-alias="costCenter">
+            <key-map field-name="costCenterId" related="partyId"/></relationship>
+    </extend-entity>
+
+<!-- Sales' commercial order changes (IronStone Sales design §6 OrderChangeDetail, §17 SAL-CHANGE; impl-sales P14): the commercial
+    kinds of Customer Service's proposal (entity/request/SupportEntities.xml) are applied by the order's owner under SALES_ORDER_CHANGE
+    (mantle.order.OrderChangeServices over OrderChanges.js and SalesOrderChanges.js). An address, ship method or carrier change
+    applies to one part of the order, named on the proposal, so it never reaches a part the proposal did not show; the field is
+    audit-logged and so counts in the proposal's revision. No change or application record of Sales' own. -->
+    <extend-entity entity-name="Request" package="mantle.request">
+        <field name="orderPartSeqId" type="id" enable-audit-log="true"><description>An order change of an address, ship method or
+            carrier (OckAddress, OckShipMethod, OckCarrier): the part of the order it changes; empty on another kind (its lines
+            name their order lines) and on every other request.</description></field>
+    </extend-entity>
+
+<!-- Requests for quotation and supplier quotes (design-purchasing §5 QuoteRequests, QuoteRequestDetail, Quotes, QuoteDetail;
+    impl-purchasing P11, §4, F19, F35, F41, F57): no RFQ, invitation or quote entity. An RFQ is a Request of type
+    RqtPurchaseRfq, its organization the OrgInternal RequestParty, its items RequestItems; its published PDF is RequestContent
+    (RqCntRfqPublished), stamped with its time. Each invited supplier's quote is a purchase OrderHeader with one part (the
+    supplier the vendor, the buying organization the customer) in OrderRequested and then OrderProposed, its lines linked to
+    the RFQ items by RequestItemOrder; the channel a quote came by is the order's salesChannelEnumId and its evidence
+    OrderContent (OctSupplierQuote). The RFQ items' material fields and the quote's validity are audit-logged on create and update
+    ("true", F57: the first value set is the change that matters), the RFQ header's by store#QuoteRequest, so an RFQ prints as of its send time and a quote's
+    amendments read back. A published quote price names its source order and line. -->
+    <extend-entity entity-name="Request" package="mantle.request">
+        <!-- no audit log on Request's fields: every request's audit-logged change shows in its timeline, so an RFQ's header
+            changes (response date, text, facility, currency) are logged by store#QuoteRequest itself, a first value set
+            included (F-P11-11) -->
+    </extend-entity>
+
+    <extend-entity entity-name="RequestItem" package="mantle.request">
+        <!-- a line with no product is described: its text is part of the RFQ sent -->
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+    </extend-entity>
+
+<!-- Support cases (design-customer-service §3, §9; impl-customer-service P2, CS-QUEUE, CS-SETTINGS, CX-REQUEST, F5, F6, F62):
+    a case is a Request in a service queue, made so by mantle.request.SupportCaseServices.ensure#CaseProfile (the
+    SupportCaseRule rules of entity/Request.eecas.xml, after the commit) or by create#Case. The queue is a RequestCategory
+    with an owner organization and a current ServiceQueue row; the case's organization, customer, contact and assignee are
+    RequestParty rows (OrgInternal, Customer, Reporter, Assignee); a team member is a dated PartyRelationship
+    (PrtServiceTeam) from the agent (Agent, or Manager for one who manages the team) to the team (an OrgTeam party owned by
+    the organization). Policies and settings are effective-dated rows with their key fields audit-logged: a draft has no
+    from date, a save starts a row from its date and ends the row it replaces; a case keeps the policy and workflow it was
+    opened under (CaseProfile). Nothing here exists until an organization has a ServicePolicy, so no Mantle default
+    changes without Customer Service configured. -->
+    <!-- the audit log on a request's type, category, priority, due date and resolution (status is logged already, §2) -->
+    <extend-entity entity-name="Request" package="mantle.request">
+        <field name="requestTypeEnumId" type="id" enable-audit-log="update"/>
+        <field name="requestCategoryId" type="id" enable-audit-log="update"/>
+        <field name="priority" type="number-integer" enable-audit-log="update"/>
+        <field name="responseRequiredDate" type="date-time" enable-audit-log="update"/>
+        <field name="requestResolutionEnumId" type="id" enable-audit-log="update"/>
+        <field name="senderVerified" type="text-indicator" enable-audit-log="update"><description>N for a request a public
+            form filed with the address its sender typed (SEC-PSS-28): staff see "sender not verified" until a reply comes
+            from that address or the filer opens the case signed in, which sets Y; empty for any other request (its sender
+            came by mail, a sign-in or staff)</description></field>
+    </extend-entity>
+
+    <!-- a queue's organization (F6), as Products P3 gave feature groups one -->
+    <extend-entity entity-name="RequestCategory" package="mantle.request">
+        <field name="ownerPartyId" type="id"><description>The organization whose queue this category is (an internal
+            organization); a category with no owner is no organization's queue</description></field>
+        <relationship type="one-nofk" title="Owner" related="mantle.party.Party" short-alias="owner">
+            <key-map field-name="ownerPartyId" related="partyId"/></relationship>
+    </extend-entity>
+
+<!-- Order changes (design-customer-service §4 OrderChanges and OrderChangeDetail, crosscut CX-ORDER-CHANGE; impl-customer-service
+    §4, P10; mantle.order.OrderChangeServices, OrderChanges.js). A proposed change of a sales order is its Request of type
+    RqtOrderChange (the order, the kind, the order revision it was made against, the customer's consent), its lines
+    RequestItems linked to the order's lines by RequestItemOrder (product, quantity, unit, ship date as requiredByDate, and
+    here the line action and the proposed unit price); the key fields are audit-logged on create and update, so the
+    proposal's revision is the time of the last change to them. A decision on it is an OrderChangeDecision of its own, as
+    Purchasing's PurchaseApprovalDecision is. There is no OrderChange, OrderChangeLine or application record: an applied
+    change is the Request completed with its PDF stored as the order's OrderContent (OctOrderChangeApplied). Also: the
+    organization's flag that narrows a sales order's revision to commercial changes (X2, F55), and ServicePolicy's
+    separation and expiry of an order-change approval. -->
+    <extend-entity entity-name="Request" package="mantle.request">
+        <field name="orderId" type="id" enable-audit-log="true"><description>An order change (RqtOrderChange): the sales
+            order it changes.</description></field>
+        <field name="orderChangeKindEnumId" type="id" enable-audit-log="true"><description>An order change: what it changes
+            (OrderChangeKind). Cancel and substitute are applied by OrderChangeServices; the commercial kinds are filed and
+            routed to the order's owner.</description></field>
+        <field name="expectedOrderRevision" type="number-integer" enable-audit-log="true"><description>An order change: the
+            order's revision (OrderHeader.orderRevision) the proposal was made against; apply refuses another
+            (STALE_ORDER).</description></field>
+        <field name="customerConsentRef" type="text-medium" enable-audit-log="true"><description>An order change: the
+            customer's consent (a message, a call, a reference), required for a substitute.</description></field>
+        <field name="cancellationReason" type="text-medium" enable-audit-log="true"/>
+        <field name="addressContactMechId" type="id" enable-audit-log="true"><description>An address change: the proposed
+            ship-to address.</description></field>
+        <field name="shipmentMethodEnumId" type="id" enable-audit-log="true"/>
+        <field name="carrierPartyId" type="id" enable-audit-log="true"/>
+        <field name="caseRequestId" type="id"><description>An order change: the case it was asked for from, when
+            any.</description></field>
+        <field name="changeAppliedDate" type="date-time"/>
+        <field name="changeSavedByUserIds" type="text-long"><description>An order change: each user who saved the proposal
+            (its first filing and every re-save), comma separated. None of them decides it unless the policy allows
+            self-approval (decide#OrderChange, SEC-BAP-111).</description></field>
+        <relationship type="one-nofk" title="OrderChange" related="mantle.order.OrderHeader" short-alias="changeOrder">
+            <key-map field-name="orderId"/></relationship>
+        <relationship type="one-nofk" title="OrderChangeKind" related="moqui.basic.Enumeration" short-alias="orderChangeKind">
+            <key-map field-name="orderChangeKindEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Case" related="mantle.request.Request" short-alias="caseRequest">
+            <key-map field-name="caseRequestId" related="requestId"/></relationship>
+        <index name="REQUEST_CHANGE_ORDER"><index-field name="orderId"/></index>
+        <index name="REQUEST_CHANGE_CASE"><index-field name="caseRequestId"/></index>
+    </extend-entity>
+
+    <extend-entity entity-name="RequestItem" package="mantle.request">
+        <field name="changeActionEnumId" type="id" enable-audit-log="true"><description>An order change's line: what it does
+            to the order line its RequestItemOrder names (OrderChangeAction).</description></field>
+        <field name="proposedUnitAmount" type="currency-precise" enable-audit-log="true"><description>An order change's line:
+            the proposed unit price (a price change), in the request's currency.</description></field>
+        <field name="pickExceptionId" type="id"><description>A substitute line: the short pick it answers
+            (ShipmentPickException).</description></field>
+        <relationship type="one-nofk" title="OrderChangeAction" related="moqui.basic.Enumeration" short-alias="changeAction">
+            <key-map field-name="changeActionEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.shipment.ShipmentPickException" short-alias="pickException">
+            <key-map field-name="pickExceptionId" related="exceptionId"/></relationship>
+    </extend-entity>
+
+<!-- Warranty claims (CS-WARRANTY; design-customer-service §5 WarrantyClaims and WarrantyAssessment, crosscut §3.2
+    DeliveredItems; impl-customer-service §4, P11; mantle.request.WarrantyServices, Warranty.js). A claim is its case, a Request
+    of type RqtWarranty: its product a RequestItem, its asset (the sold serial), order, invoice and agreement RequestRecord
+    links; there is no WarrantyClaim record. The claim's revision (claimRevision, audit-logged) counts each change of that
+    evidence, so a decision made before it no longer counts. Its coverage is read, never stored: an AgrService agreement of the
+    organization with the customer that has a warranty term (TtWarranty) for the product first, then the product's warranty
+    at sale (the serial or lot traced through AssetIssuance to its order, customer and ship date, the term from the product's
+    PftWarranty feature), else goodwill only. A decision on it is a WarrantyDecision of its own, as Purchasing's
+    PurchaseApprovalDecision is (F45). A repair is one AssetMaintenance on the sold serial's Asset with a WepMaintenance task
+    (F67), linked to the case by RequestRecord; its completion tells the case's agent (WarrantyRepairFinished) and resolves
+    nothing (SupportWarranty.eecas.xml). Named to load after RequestEntities, ProductAssetEntities, PartyEntities and
+    AccountingAccountEntities, whose enumeration types its seeds use (F150). -->
+    <extend-entity entity-name="Request" package="mantle.request">
+        <field name="claimRevision" type="number-integer" enable-audit-log="true"><description>A warranty claim (RqtWarranty):
+            its evidence's revision, counted once by each change of its product, asset, order, invoice or agreement
+            (WarrantyServices.save#WarrantyClaim). A WarrantyDecision is bound to it.</description></field>
+    </extend-entity>
+
+<!-- The shared supply plan (design-crosscut CX-PLANNING, §3.20 and §4.2; design-manufacturing §7 SupplyPlanning;
+    impl-manufacturing P13): a planning run's snapshot (PlanningRun), its buy, make and transfer suggestions with their
+    demand provenance (PlanningSuggestion), each on a Requirement of the organization (a RequirementParty in the OrgInternal
+    role, R-SA-15) in the stock unit (Requirement.quantityUomId), the one covered-demand link from a requirement to the
+    supply that covers it (RequirementSupply), and the organization's one plan schedule (PlanSchedule, D20).
+    mantle.product.SupplyPlanningServices (SupplyPlanning.js) writes them; nothing else does. -->
+    <extend-entity entity-name="Requirement" package="mantle.request.requirement">
+        <field name="quantityUomId" type="id"><description>The unit of quantity: the product's stock unit (requirement
+            quantity stays in the stock unit and is converted when supply is created, R-SA-15)</description></field>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId" related="uomId"/></relationship>
+    </extend-entity>
+
+    <!-- the separation of a return exception's approval, by the organization's ServicePolicy row (SEC-BAP-112 review) -->
+    <extend-entity entity-name="ServicePolicy" package="mantle.request.support">
+        <field name="returnExceptionSelfApproval" type="text-indicator" enable-audit-log="true"><description>Y: who asked
+            for a return's exception or entered the return may also approve it (a team of one manager). Empty or N (the
+            default): another holder of RETURN_EXCEPTION_APPROVE decides (SELF_APPROVAL).</description></field>
+    </extend-entity>
+
+<!-- Case assignment and saved replies (design-customer-service §9 AgentTeams, AssignmentRules, SavedReplies; impl-customer-service
+    P5, CS-ASSIGNMENT, CS-REPLIES, D24, F3, F71). Assignment: a team member's participation (eligible, the most open cases,
+    a substitute, a calendar) is effective-dated rows beside P2's membership (PrtServiceTeam); a queue's assignment rules are
+    effective-dated rows with their key fields audit-logged and typed condition rows (an allowlisted field, operator and value;
+    no new form element, F71), one winning rule then the fallback; the cursor of a rule (round robin's last agent, the last
+    result) is a record of its own, locked with the assignment so two intakes never take the same slot. A team's saved
+    replies are shared with its user group (moqui.security.UserGroup SVT_<team>, of type UgtServiceTeam), which
+    mantle.request.SupportCaseServices keeps in step with the team's members (F3), and an organization's service-wide replies
+    with its group SVO_<organization> (UgtServiceOrganization), the members of all its teams. Saved replies: the text is a framework
+    EmailTextBlock (D24, a Comms text block); SavedReply holds its organization, language and declared variables, and
+    SavedReplyAction its ordered case actions, both keyed by emailTextBlockId. mantle.request.SupportCaseServices writes and
+    reads these (assign#Case, save#AssignmentRule, preview#Assignment, preview#SavedReply, apply#SavedReply); nothing here acts
+    until an organization has a rule or a saved reply. -->
+    <!-- the rule a case was last assigned by and why (audit-logged, so each evaluation stays readable) -->
+    <extend-entity entity-name="CaseProfile" package="mantle.request.support">
+        <field name="assignmentRuleId" type="id" enable-audit-log="update"><description>The assignment rule row the case was
+            last assigned by (assign#Case)</description></field>
+        <field name="assignmentOutcomeEnumId" type="id" enable-audit-log="update"/>
+        <field name="assignmentReason" type="text-medium" enable-audit-log="update"/>
+    </extend-entity>
+
+    <!-- the separation and the expiry of an order-change approval, by the organization's ServicePolicy row (P2) -->
+    <extend-entity entity-name="ServicePolicy" package="mantle.request.support">
+        <field name="orderChangeSelfApproval" type="text-indicator" enable-audit-log="true"><description>Y: the person who
+            proposed an order change may also approve it. Empty or N (the default): another approver decides
+            (SELF_APPROVAL).</description></field>
+        <field name="orderChangeApprovalDays" type="number-integer" enable-audit-log="true"><description>How many days an
+            order-change approval holds before apply refuses it (APPROVAL_EXPIRED); empty is 7.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="ArticleFeedback" package="mantle.request.support">
+        <field name="nonceDigest" type="text-medium">
+            <description>The digest of the help page's rating nonce (a customer's rating, AfsCustomer): one rating per page
+                view, a repeat answering the first.</description></field>
+        <index name="ARTICLE_FEEDBACK_NONCE" unique="true"><index-field name="nonceDigest"/></index>
+    </extend-entity>
+
+    <!-- a clock a merge carried onto the case kept: the source's episode it copies and the merge's relation; a case's own
+        clocks have neither -->
+    <extend-entity entity-name="CaseSlaEpisode" package="mantle.request.support">
+        <field name="carriedFromEpisodeId" type="id"><description>The source case's clock this obligation was carried from
+            by a merge (empty for the case's own clocks)</description></field>
+        <field name="caseRelationId" type="id"/>
+        <relationship type="one-nofk" title="CarriedFrom" related="mantle.request.support.CaseSlaEpisode" short-alias="carriedFrom">
+            <key-map field-name="carriedFromEpisodeId" related="caseSlaEpisodeId"/></relationship>
+    </extend-entity>
+
+    <!-- The reports' cohorts and Home's measures read the clocks of a period by their start, end and breach -->
+    <extend-entity entity-name="CaseSlaEpisode" package="mantle.request.support">
+        <index name="CASE_SLA_EP_START"><index-field name="startDate"/></index>
+        <index name="CASE_SLA_EP_ACTUAL"><index-field name="actualDate"/></index>
+        <index name="CASE_SLA_EP_BREACH"><index-field name="breachedDate"/></index>
+    </extend-entity>
+</entities>

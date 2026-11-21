@@ -17,7 +17,7 @@ implementation record are [plan/payments-shipping-edi.md](../plan/payments-shipp
 | `SystemMessageRemote` | `sendUrl` the API endpoint (`https://apitest.authorize.net/xml/v1/request.api` sandbox, `https://api.authorize.net/xml/v1/request.api` production), `usageCode` `T` or `P` (it picks the Accept.js host), `username` the API login id, `password` the transaction key, `sharedSecret` the webhook signature key, `messageAuthEnumId` `SmatHmacSha512`, `authHeaderName` `X-ANET-Signature`. The secrets are encrypted fields |
 | `PaymentGatewayAuthorizeNet` | Non-secret options: `publicClientKey` (Accept.js), `validationMode` for new payment profiles, `duplicateWindow`, `lookupGraceSeconds` |
 
-`data/AuthorizeNetDemoData.xml` names a sandbox gateway `AuthorizeNetDemo` and remote `AuthorizeNetSandbox` without
+`data/30-demo/10Integrations.xml` names a sandbox gateway `AuthorizeNetDemo` and remote `AuthorizeNetSandbox` without
 credentials. Enter them in the System Message Remote screen or a deployment's own data file, never in seed data. A
 product store takes cards with it through a `ProductStorePaymentGateway`.
 

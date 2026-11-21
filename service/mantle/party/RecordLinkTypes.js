@@ -2,7 +2,7 @@
  * The record type registrations (mantle.party.communication.RecordLinkType, SEC-BOS-87): which types get#RecordLinkInfo
  * rules in its own code, so a registration of one may say codeRule Y, and what is wrong with a registration as loaded.
  */
-// the types get#RecordLinkInfo's joins and rules cover (Mantle's seed rows in entity/PartyEntities.xml): only these may claim
+// the types get#RecordLinkInfo's joins and rules cover (Mantle's seed rows in entity/party/CommunicationEntities.xml): only these may claim
 // codeRule; any other registration names its own rule
 const codeRuled = new Set([
     "mantle.order.OrderHeader",

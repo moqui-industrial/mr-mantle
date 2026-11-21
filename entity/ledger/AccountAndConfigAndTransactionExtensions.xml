@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <extend-entity entity-name="GlAccountOrganization" package="mantle.ledger.account">
+        <field name="fromDate" type="date-time" enable-audit-log="update"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="facilityRequired" type="text-indicator" enable-audit-log="update"/>
+        <field name="costCenterRequired" type="text-indicator" enable-audit-log="update"/>
+    </extend-entity>
+
+    <extend-entity entity-name="GlAccountCategoryMember" package="mantle.ledger.account">
+        <field name="fromDate" type="date-time" is-pk="true" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+    </extend-entity>
+
+    <extend-entity entity-name="GlAccountGroupMember" package="mantle.ledger.account">
+        <field name="glAccountGroupId" type="id" enable-audit-log="update"/>
+    </extend-entity>
+
+    <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
+        <field name="projectCostPostingEnabled" type="text-indicator" default="'N'" enable-audit-log="update">
+            <description>Post approved project time at its cost rate to project cost, from the labor clearing account
+                (OtherAutoPostServices.post#WorkEffortCost, on timesheet approval). Off by default.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
+        <field name="postingGuardEnabled" type="text-indicator" default="'N'" enable-audit-log="update"/>
+        <field name="requiredLedgerDimensionsEnabled" type="text-indicator" default="'N'" enable-audit-log="update"/>
+        <field name="forwardIssuanceRepostEnabled" type="text-indicator" default="'N'" enable-audit-log="update"/>
+        <field name="forwardReceiptRepostEnabled" type="text-indicator" default="'N'" enable-audit-log="update">
+            <description>Y: repost#AssetReceipt posts a dated delta (ReceiptAdjustments.js) and leaves the posted history, as
+                forwardIssuanceRepostEnabled does for issuances (impl-manufacturing F32)</description></field>
+        <field name="allowAccountingSelfApproval" type="text-indicator" default="'N'" enable-audit-log="update"/>
+        <field name="writeOffToleranceAmount" type="currency-amount" enable-audit-log="update"><description>The largest
+            amount, in the base currency, a user without INVOICE_APPROVE writes off on a settlement or credits against an issued
+            invoice without an approver (SEC-BOS-127); empty or 0: every write-off and linked customer credit needs an
+            approver</description></field>
+        <field name="invoiceDocumentTemplate" type="text-medium" enable-audit-log="update"/>
+        <field name="paymentDocumentTemplate" type="text-medium" enable-audit-log="update"/>
+        <field name="documentLocale" type="text-medium" enable-audit-log="update"/>
+        <field name="documentFooter" type="text-medium" enable-audit-log="update"/>
+        <field name="invoiceEmailTemplateId" type="text-medium" enable-audit-log="update"/>
+        <field name="rateProviderServiceName" type="text-medium" enable-audit-log="update">
+            <description>The exchange rate provider refresh#Rates calls: the enumCode (a service implementing
+                CurrencyServices.define#RateProvider) of an ExchangeRateProvider enumeration; none, no
+                fetch.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
+        <field name="receiptInvoiceSelfBilledOnly" type="text-indicator" default="'N'" enable-audit-log="update">
+            <description>Y: a delivered incoming shipment bills itself only for a self-billing supplier (SupplierProfile), and
+                then for the accepted quantity only, with no leftover or charge lines; other bills come from the supplier
+                (import#Bill) or from the order (create#InvoiceFromSource). N, the default: every delivered incoming
+                shipment is billed as before.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
+        <field name="invoicePayGatewayConfigId" type="id" enable-audit-log="update">
+            <description>The gateway a customer pays an invoice through on the organization's Billing pages; one of its
+                PaymentGatewayOrganization bindings. Empty, the pages offer no payment.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
+        <field name="inventoryRevaluationEnabled" type="text-indicator" default="'N'" enable-audit-log="update"/>
+    </extend-entity>
+
+    <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
+        <field name="invoiceApprovalRequired" type="text-indicator" default="'N'" enable-audit-log="update"/>
+    </extend-entity>
+
+<!-- A sales order's confirmation as placed (design-customer-service §4 OrderDetail, impl-customer-service §4, P3, F29, F55;
+    mantle.order.OrderConfirmationServices): its PDF, rendered as of the order's placed time, is an OrderContent of type
+    OctOrderConfirmation (seeded in data/15-seed-initial/Notifications.xml) stored once; each resend is an OrderEmailMessage naming the
+    content it sent (orderContentId, the version) with its recipient party, the message holding the address and its
+    result. An organization's orderConfirmationOnPlace (off by default) stores it at
+    placement. -->
+    <!-- The organization's flag, beside its other order and invoice flags (invoiceApprovalRequired, returnSettlementRequired):
+        off by default, so Mantle's placement path is unchanged; on, a sales order the organization places has its
+        confirmation stored after the placement commits (OrderReturn.secas.xml OrderPlacedStoreConfirmation). -->
+    <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
+        <field name="orderConfirmationOnPlace" type="text-indicator" default="'N'" enable-audit-log="update">
+            <description>Y: store each placed sales order's confirmation PDF as OrderContent (OctOrderConfirmation) after
+                the placement commits, in a transaction of its own; a failure is logged and never fails the placement. N (the default):
+                the first store or resend renders it as of the placed time.</description></field>
+    </extend-entity>
+
+<!-- Return settlement (mantle.order.ReturnServices preview#ReturnSettlement and settle#Return) and the sales invoice
+    finalized at ship: the organization's two flags and what a settlement records on its billing links. -->
+    <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
+        <field name="returnSettlementRequired" type="text-indicator" default="'N'" enable-audit-log="update">
+            <description>Y: approving a return only creates its shipment, a return is received through
+                WarehouseTaskServices.receive#ReturnItems, and credits, refunds and replacements come only from
+                ReturnServices.settle#Return, for the quantity received. N, the default: Mantle responds at approval
+                (immediate responses), at receipt and when the return shipment is delivered, as before.</description>
+        </field>
+        <field name="salesInvoiceFinalizedAtShip" type="text-indicator" default="'N'" enable-audit-log="update">
+            <description>Y: the sales invoice made when an outgoing shipment is packed stays in process, with no payment
+                applied, until the shipment ships, when it is finalized, applied the order's captured payments and sent;
+                until then InvoiceServices.release#ShipmentDraftInvoice takes a reopened package's lines off it. N, the
+                default: the invoice is finalized and paid at pack, as before.</description>
+        </field>
+    </extend-entity>
+
+<!-- Packing (design-warehouse §10 Pack, §12 BoxTypes; impl-warehouse P12): the organization's kit cost flag (F41), read by
+    mantle.work.ManufacturingServices.produce#AvailableAssemblies, and what a box type needs beyond Mantle's: a retire date
+    (a used type is retired, never removed from the packages it is on) and the most weight it carries. -->
+    <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
+        <field name="kitCostFromComponents" type="text-indicator" default="'N'" enable-audit-log="update">
+            <description>Y: a pick-assembly kit made at pack (produce#AvailableAssemblies, for every caller) is received
+                at the cost of the component issuances it uses (each issuance's quantity times its asset's acquireCost),
+                divided by the kit quantity at the four decimals acquireCost keeps, a remainder received apart on its own
+                unit, so the components leave work in process exactly and the kit's issue posts its cost of goods sold.
+                N, the default: the kit is received with no cost, as before (AtrNoAcquireCost).</description>
+        </field>
+    </extend-entity>
+
+    <!-- The commercial revision of a sales order (crosscut CX-ORDER-AUTHORITY, X2, F55): beside Purchasing's
+        commercialRevisionOnly for purchase parts, the selling organization's flag, off by default, so Mantle's counting is
+        unchanged without it (mantle.order.OrderServices.increment#OrderRevision). -->
+    <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
+        <field name="salesCommercialRevisionOnly" type="text-indicator" default="'N'" enable-audit-log="update">
+            <description>Y: a sales order this organization sells counts only commercial changes in its revision (a line's
+                quantity or price, the part's address, carrier or method, its parties and terms), not a stored file, a note or
+                a status-only part update (a hold, an approval), so an order-change proposal or a quote approval stays bound
+                to the order it saw. N (the default): every change counts, as before.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="AssetTypeGlAccount" package="mantle.ledger.config">
+        <field name="scrapGlAccountId" type="id"><description>The debit account of a count variance with a scrap reason
+            (an InventoryVarianceReason with enumCode scrap) when the organization has no VarianceReasonGlAccount row
+            for the reason</description></field>
+        <relationship type="one" title="Scrap" related="mantle.ledger.account.GlAccount">
+            <key-map field-name="scrapGlAccountId"/></relationship>
+    </extend-entity>
+
+    <extend-entity entity-name="AcctgTransEntry" package="mantle.ledger.transaction">
+        <field name="facilityId" type="id" enable-audit-log="update"/>
+        <field name="costCenterId" type="id" enable-audit-log="update"/>
+    </extend-entity>
+
+    <extend-entity entity-name="AcctgTrans" package="mantle.ledger.transaction">
+        <field name="acctgTransTemplateId" type="id" enable-audit-log="update"/>
+        <field name="templateFromDate" type="date-time"/>
+        <field name="templateVersion" type="number-integer"/>
+        <field name="description" type="text-medium" enable-audit-log="update"/>
+        <field name="postingFailureCode" type="text-short" enable-audit-log="update"/>
+        <field name="postingFailureMessage" type="text-long" enable-audit-log="update"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="update"/>
+    </extend-entity>
+
+    <!-- Base-currency posting (AC-19): the decimal rate a posting applied, with its date and source. The rate is text
+        holding the exact decimal, since number-decimal keeps 6 places (a JPY to USD rate needs more). -->
+    <extend-entity entity-name="AcctgTrans" package="mantle.ledger.transaction">
+        <field name="exchangeRate" type="text-short" enable-audit-log="update">
+            <description>One unit of originalCurrencyUomId in amountUomId (the base currency), as decimal text; set by
+                post#AcctgTrans when it converts a transaction from its document's currency.</description></field>
+        <field name="exchangeRateDate" type="date-time" enable-audit-log="update"/>
+        <field name="exchangeRateSource" type="text-medium" enable-audit-log="update"/>
+    </extend-entity>
+
+    <extend-entity entity-name="PostingOperation" package="mantle.ledger.transaction">
+        <field name="resultJson" type="text-very-long"/>
+    </extend-entity>
+
+    <extend-entity entity-name="AcctgTrans" package="mantle.ledger.transaction">
+        <field name="accountingDate" type="date" enable-audit-log="true"/>
+        <index name="ACCTG_TRANS_ORG_BOOK_DATE">
+            <index-field name="organizationPartyId"/>
+            <index-field name="accountingDate"/>
+        </index>
+    </extend-entity>
+
+    <extend-entity entity-name="AcctgTrans" package="mantle.ledger.transaction">
+        <field name="payrollOrigin" type="text-indicator"><description>Y: a transaction of a payroll-origin invoice or payment, read
+            with PAYROLL_VIEW alone</description></field>
+    </extend-entity>
+
+    <!-- the pick operations of a source line, which reverse#Pick reads for the locations the stock came from -->
+    <extend-entity entity-name="PostingOperation" package="mantle.ledger.transaction">
+        <index name="POSTOP_RESULT"><index-field name="resultId"/><index-field name="operationType"/></index>
+    </extend-entity>
+</entities>

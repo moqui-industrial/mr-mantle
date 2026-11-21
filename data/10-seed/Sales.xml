@@ -1,0 +1,260 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed">
+    <!-- The sales access profile of CalcGrid (mr-moqui plans/IronCalc-DB.md, Access and row scope; docs/tools/Database.md,
+        CalcGrid and access profiles): what a person who is not an administrator may put on a spreadsheet's data sheet, as
+        authorization data. The group holds the profile artifact, which CalcGrid enters before it reads, and an artifact
+        org.moqui.calc.entity.[entityName] for each entity and view offered; an offer is CalcGrid's own name and grants
+        nothing on the entity anywhere else. A view is read only with each of its member entities offered too, which is why
+        the plain members (an order's header and items, an invoice's items, a party's organization and person) are listed.
+
+        No grant is here: an application grants the group to its sales groups, AUTHZT_ALWAYS for view, and puts the row
+        scope on that grant as entity filter sets (MANTLE_USER_ORG: the organizations the user works in; MANTLE_ACTIVE_ORG:
+        the one chosen). Under a grant with a filter set CalcGrid refuses an offered entity that no filter of the sets
+        applies to, so the plain members are not read on their own (an order header has no organization; its part has), and
+        a view is read through the filter on its scoped member: orders by OrderPart's vendor and customer, invoices by their
+        from and to party, returns by vendor and customer, payments by from and to party, parties and products by owner,
+        stores by organization. -->
+    <moqui.security.ArtifactGroup artifactGroupId="CALC_PROFILE_SALES" description="Sales: orders, returns, invoices, payments, customers and products"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            artifactName="org.moqui.calc.profile.sales"/>
+    <!-- orders: the part carries the organizations; the header and the items are members of the views -->
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.OrderPart"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.OrderHeader"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.OrderItem"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.OrderHeaderAndPart"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.OrderHeaderAndPartSummary"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.OrderItemAndPartSummary"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.return.ReturnHeader"/>
+    <!-- invoices and the payments applied to them -->
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.invoice.Invoice"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.invoice.InvoiceItem"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.invoice.InvoiceSummary"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.payment.Payment"/>
+    <!-- customers, products and stores -->
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.party.Party"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.party.Organization"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.party.Person"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.party.PartyDetail"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.party.PartyRole"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.product.Product"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.product.category.ProductCategory"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.product.store.ProductStore"/>
+
+    <!-- Drop-ship (impl-purchasing P7; entity/facility/FacilityExtensions.xml and entity/order/OrderAndPurchaseAndReturnExtensions.xml): the facility type and the rare order roles of Moqui Java's
+        dropship-moqui branch, and the transaction that moves a drop-ship line's cost from Unreceived Inventory to the cost of
+        goods sold when the supplier's delivery is confirmed (F39). -->
+    <moqui.basic.Enumeration description="Drop-ship" enumId="FcTpDropShip" enumTypeId="FacilityType"/>
+
+    <mantle.party.RoleType description="Customer - Ship From (rare)" parentTypeId="Customer" roleTypeId="CustomerShipFrom"/>
+    <mantle.party.RoleType description="Vendor - Ship To (rare)" parentTypeId="Vendor" roleTypeId="VendorShipTo"/>
+    <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="CustomerShipFrom"/>
+    <mantle.party.RoleGroupMember roleGroupEnumId="RgpOrder" roleTypeId="VendorShipTo"/>
+
+    <moqui.basic.Enumeration enumId="AttDropShipDelivery" description="Drop-ship delivery" enumTypeId="AcctgTransType"/>
+
+    <!-- Sales' accounts (IronStone Sales design §4; impl-sales P3; service/mantle/sales/SalesAccounts.js): an account's manager is a
+        dated relationship from the representative (role SalesRepresentative) to the account (role Account), started and ended by
+        mantle.sales.AccountServices create#Account and set#AccountManager, never deleted. Kept in its own file, apart from
+        15-seed-initial/MarketingAndSales.xml, which the pipeline setup (P2) extends. -->
+    <moqui.basic.Enumeration description="Account Manager" enumId="PrtAccountManager" enumTypeId="PartyRelationshipType"/>
+
+    <!-- Sales' fixed setup (impl-sales P2; IronStone Sales design §9 Stages, Teams, LeadSources and TypesAndReasons, SAL-CRM): the
+        values the opportunity services act on, so seed, not initial setup. The editable initial setup (the default pipeline and its
+        stages, the lost reasons, the recurring plans) is data/15-seed-initial/MarketingAndSales.xml's. The legacy LeadStatus flow there stays unused (F4).
+        - SalesOpportunityType: Lead and Opportunity, the fixed semantic ids SalesOpportunity.typeEnumId takes.
+        - The opportunity outcome (SalesOpportunity.statusId): Open, Won and Lost; Won and Lost are outcomes, not stages.
+        - SalesLostReason: the structured reasons (values in 15-seed-initial/MarketingAndSales.xml), ended by Enumeration.thruDate, never deleted.
+        - SalesRecurringPlan: a recurring amount's plan, enumCode its months (values in 15-seed-initial/MarketingAndSales.xml).
+        - A sales team is an Organization party with the SalesTeam role, owned by its organization; its dated PrtSalesTeamOf row to
+          the organization is its effective interval, and a member's dated PrtSalesTeamMember row (from a SalesRepresentative or a
+          Manager) is the membership (OpportunityServices store#SalesTeam and store#SalesTeamMember). No People record is read or
+          written: an organization without People picks members by party.
+        - The readiness service the framework's registry calls as the user (Admin's Health, Sales' Settings): every user may call it,
+          and it checks SALES_CONFIGURE and the organization itself, as Maintenance's (10-seed/Maintenance.xml). -->
+    <moqui.basic.EnumerationType enumTypeId="SalesOpportunityType" description="Sales Opportunity Type"/>
+    <moqui.basic.Enumeration enumId="SotLead" enumTypeId="SalesOpportunityType" description="Lead" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SotOpportunity" enumTypeId="SalesOpportunityType" description="Opportunity" sequenceNum="2"/>
+
+    <moqui.basic.StatusType statusTypeId="SalesOpportunity" description="Sales Opportunity Outcome"/>
+    <moqui.basic.StatusItem statusId="SalesOppOpen" statusTypeId="SalesOpportunity" description="Open" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="SalesOppWon" statusTypeId="SalesOpportunity" description="Won" sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="SalesOppLost" statusTypeId="SalesOpportunity" description="Lost" sequenceNum="3"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SalesOppOpen" toStatusId="SalesOppWon" transitionName="Win"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SalesOppOpen" toStatusId="SalesOppLost" transitionName="Lose"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SalesOppWon" toStatusId="SalesOppOpen" transitionName="Reopen"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SalesOppLost" toStatusId="SalesOppOpen" transitionName="Reopen"/>
+
+    <moqui.basic.EnumerationType enumTypeId="SalesLostReason" description="Sales Lost Reason"/>
+    <moqui.basic.EnumerationType enumTypeId="SalesRecurringPlan" description="Sales Recurring Plan (enumCode: months)"/>
+
+    <!-- P4 (design-sales §3 OpportunityDetail): how a deal's probability is set (Stage: the stage's default, copied on create and
+        move; Manual: the rep's value, kept until Stage is chosen again), and a competitor's position on a deal -->
+    <moqui.basic.EnumerationType enumTypeId="SalesProbabilityMode" description="Sales Probability Mode"/>
+    <moqui.basic.Enumeration enumId="SpmStage" enumTypeId="SalesProbabilityMode" description="From the stage" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SpmManual" enumTypeId="SalesProbabilityMode" description="Manual" sequenceNum="2"/>
+    <moqui.basic.EnumerationType enumTypeId="SalesCompetitorPosition" description="Sales Competitor Position"/>
+    <moqui.basic.Enumeration enumId="ScpLeading" enumTypeId="SalesCompetitorPosition" description="Ahead of us" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="ScpEven" enumTypeId="SalesCompetitorPosition" description="Even" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="ScpTrailing" enumTypeId="SalesCompetitorPosition" description="Behind us" sequenceNum="3"/>
+
+    <mantle.party.RoleType roleTypeId="SalesTeam" description="Sales Team"/>
+    <moqui.basic.Enumeration enumId="PrtSalesTeamOf" description="Sales Team of" enumTypeId="PartyRelationshipType"/>
+    <moqui.basic.Enumeration enumId="PrtSalesTeamMember" description="Sales Team Member" enumTypeId="PartyRelationshipType"/>
+
+    <moqui.security.ArtifactGroup artifactGroupId="MantleSalesSetupServices" description="Sales' readiness service"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleSalesSetupServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            artifactName="mantle.sales.SalesWorkspaceServices.get#SalesReadiness"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleSalesSetupServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleSalesSetupServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+
+    <!-- Sales' lead intake and its stack contributions (impl-sales P5; IronStone Sales design §3 Leads, §9 LeadSources, §1.4 Comms hooks,
+        CX-MAIL-INTAKE and CX-SYNC; SAL-CRM, SAL-MAIL-INTAKE, SAL-SYNC):
+        - SalesLeadIntakeSource: where an intake came from (mantle.sales.OpportunityServices store#LeadIntake's sourceKind), and
+          SalesLeadIntakeOutcome: whether it made its lead or joined an open one (a review item).
+        - createLead, the mail rule action beside Mantle's createRequest and createWorkItem (15-seed-initial/Notifications.xml, F27): a message to a
+          sales team's plus-tag address (sales+leads@...) or to the team the rule's value names becomes an intake in that team's queue
+          (OpportunityServices create#LeadFromEmail). A team's plus tag and its default lead source are PartySettings of the team.
+        - My accounts, a projected CardDAV address book (mantle.party.ContactDavServices: collectionId projected-SalesMyAccounts, read
+          only) answered by SalesWorkspaceServices get#AccountContactProjection as the user.
+        - The purge of unverified intakes whose lead never qualified (purge#LeadIntakes), nightly, registered for Admin's jobs. -->
+    <moqui.basic.EnumerationType enumTypeId="SalesLeadIntakeSource" description="Sales Lead Intake Source"/>
+    <moqui.basic.Enumeration enumId="SlisFormResponse" enumTypeId="SalesLeadIntakeSource" enumCode="formResponse" description="Form" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SlisEmailMessage" enumTypeId="SalesLeadIntakeSource" enumCode="emailMessage" description="Mail" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="SlisCommEvent" enumTypeId="SalesLeadIntakeSource" enumCode="communicationEvent" description="Message" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="SlisChatMessage" enumTypeId="SalesLeadIntakeSource" enumCode="chatMessage" description="Chat" sequenceNum="4"/>
+    <moqui.basic.Enumeration enumId="SlisVoicemail" enumTypeId="SalesLeadIntakeSource" enumCode="voicemail" description="Voicemail" sequenceNum="5"/>
+    <moqui.basic.Enumeration enumId="SlisStaff" enumTypeId="SalesLeadIntakeSource" enumCode="staff" description="Staff entry" sequenceNum="6"/>
+    <!-- Marketing P18 (an owner contract; impl-marketing §4 Nov 15): an event offer's lead rules hand a registration or an attendance,
+        one intake per registration and kind -->
+    <moqui.basic.Enumeration enumId="SlisEventRegistration" enumTypeId="SalesLeadIntakeSource" enumCode="eventRegistration" description="Event registration" sequenceNum="7"/>
+    <moqui.basic.Enumeration enumId="SlisEventAttendance" enumTypeId="SalesLeadIntakeSource" enumCode="eventAttendance" description="Event attendance" sequenceNum="8"/>
+    <moqui.basic.EnumerationType enumTypeId="SalesLeadIntakeOutcome" description="Sales Lead Intake Outcome"/>
+    <moqui.basic.Enumeration enumId="SlioCreated" enumTypeId="SalesLeadIntakeOutcome" description="New lead" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SlioDuplicate" enumTypeId="SalesLeadIntakeOutcome" description="Joined an open lead" sequenceNum="2"/>
+
+    <moqui.basic.Enumeration enumId="ErActCreateLead" enumTypeId="EmailRuleAction" enumCode="createLead" sequenceNum="6"
+            description="Make a sales lead" optionValue="mantle.sales.OpportunityServices.create#LeadFromEmail"/>
+    <!-- P8 (design-sales §5 QuoteRequests, CX-MAIL-INTAKE): createQuoteRequest, a message to a sales team's plus-tag address
+        (sales+rfq@...) or to the team the rule's value names as a request for quote in that team's queue (SalesQuoteServices
+        create#QuoteRequestFromEmail; its owner needs SALES_QUOTE_EDIT, check#LeadRuleOwner) -->
+    <moqui.basic.Enumeration enumId="ErActCreateQuoteRequest" enumTypeId="EmailRuleAction" enumCode="createQuoteRequest" sequenceNum="7"
+            description="Make a request for quote" optionValue="mantle.order.SalesQuoteServices.create#QuoteRequestFromEmail"/>
+    <!-- P8, the chargeable repair's notices both ways (the user's call of Nov 13, 2026; SalesQuoteRequests.js): Customer Service's
+        chargeable warranty decision tells the organization's default Sales team (SalesRepairToQuote: requestId, customerName,
+        productName), and a repair's quote tells the claim's assignee or queue (SalesRepairQuoted: requestId, orderId, customerName,
+        madeByName, the claim as the record). Neither title carries the fault text, diagnosis, decision or an amount. The apps that
+        work them set the links (IronStone: BossSetupSalesData.xml, BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="SalesRepairToQuote" inboxEnumId="NinNotifications"
+            description="Repair to quote" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Repair to quote: claim ${requestId} for ${customerName} (${productName})"/>
+    <moqui.security.user.NotificationTopic topic="SalesRepairQuoted" inboxEnumId="NinNotifications"
+            description="Repair estimate made" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Repair estimate ${orderId} made for claim ${requestId} (${customerName}, ${madeByName})"/>
+    <moqui.server.TopicRegistration topic="SalesRepairToQuote" ownerApp="Sales" purpose="A warranty claim's chargeable repair for Sales to quote"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="SALES_QUOTE_EDIT" sequenceNum="50"/>
+    <moqui.server.TopicRegistration topic="SalesRepairQuoted" ownerApp="CustomerService" purpose="Sales made the estimate of a warranty claim's repair"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="SUPPORT_CASE_EDIT" sequenceNum="51"/>
+    <mantle.party.PartySettingType partySettingTypeId="SalesIntakePlusTag" description="Sales intake plus tag"/>
+    <mantle.party.PartySettingType partySettingTypeId="SalesIntakeSource" description="Sales intake default lead source"/>
+
+    <mantle.party.contact.ContactProjection projectionId="SalesMyAccounts" title="My accounts"
+            description="The contacts of the sales accounts you manage or have deals with" sequenceNum="20"
+            ownerServiceName="mantle.sales.SalesWorkspaceServices.get#AccountContactProjection"/>
+
+    <!-- The purge: nightly at 2:30 am; a run again changes nothing it changed, as a purged intake is left out -->
+    <moqui.service.job.ServiceJob jobName="purge_SalesLeadIntakes" description="Purge unverified sales lead intakes"
+            serviceName="mantle.sales.OpportunityServices.purge#LeadIntakes" cronExpression="0 30 2 * * ?" paused="N"
+            transactionTimeout="1800"/>
+    <moqui.server.JobRegistration jobName="purge_SalesLeadIntakes" ownerApp="Sales" title="Purge unverified lead intakes"
+            description="Blanks the submitted name, organization, email and phone of the unverified intakes whose lead never qualified, after the retention days"
+            managePermission="SALES_CONFIGURE" scheduleEditable="Y" minIntervalMinutes="60" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="SALES_CONFIGURE" sequenceNum="50"/>
+    <moqui.server.JobParameterDefinition jobName="purge_SalesLeadIntakes" parameterName="retentionDays"
+            title="Retention days" description="Days an unverified intake keeps what was submitted; 30 until Sales' defaults set them"
+            valueType="integer" minValue="1" maxValue="3650" sequenceNum="1"/>
+
+    <!-- Sales orders (IronStone Sales design §6, §16; impl-sales P11, X1, F15, F16; mantle.order.SalesOrderServices): the delivery
+        ledger's source of the storeless confirmation, with its build service, so a confirmation goes once to a recipient for an order's
+        revision (X8), and its EmailTemplate, whose subject, sender and body the build makes (an organization names another through
+        SalesPolicy.confirmationEmailTemplateId). -->
+    <moqui.basic.Enumeration enumId="MdsrcSalesOrderConfirmation" description="Sales order confirmation" sequenceNum="22"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.order.SalesOrderServices.build#OrderConfirmationMessage"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_SALES_ORDER_CONFIRMATION" description="Sales order confirmation to the customer"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+
+    <!-- A quote's issue, send and reminders (IronStone Sales design §5, §13.2, §16; impl-sales P10, F16, F70;
+        mantle.order.SalesQuoteIssueServices): the issued PDF's content type; the delivery ledger's two sources, each with its build
+        service, so a send for another rep, a batch send and a reminder each go once to a recipient for an issue (X8); the quote's and
+        the reminder's EmailTemplates, whose subject, sender and body the build makes (the cover and reminder text a stored
+        .html.fancy-locked resource rendered with an explicit map, F70); and the reminder job, daily: reminders are off by default, as an
+        organization sends them only once it sets its reminder days (SalesPolicy.reminderDays). -->
+    <moqui.basic.Enumeration enumId="OctSalesQuoteIssued" description="Issued quote" enumTypeId="OrderContentType"/>
+    <moqui.basic.Enumeration enumId="MdsrcSalesQuote" description="Sales quote" sequenceNum="20" enumTypeId="MessageDeliverySource"
+            enumCode="mantle.order.SalesQuoteIssueServices.build#QuoteMessage"/>
+    <moqui.basic.Enumeration enumId="MdsrcSalesQuoteReminder" description="Sales quote reminder" sequenceNum="21"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.order.SalesQuoteIssueServices.build#QuoteReminderMessage"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_SALES_QUOTE" description="Sales quote to the customer" emailServerId="SYSTEM"
+            fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_SALES_QUOTE_REMINDER" description="Sales quote reminder to the customer"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+    <!-- Sales P20 review (design-sales §16; impl-sales §4 Nov 14, the user's call): the acknowledgement of a request for quote made
+        from mail, a delivery of the intake's organization built fresh at each attempt (its text a stored .html.fancy-locked resource
+        with an explicit map, F70); off until the organization's SalesPolicy turns it on (rfqAcknowledge) -->
+    <moqui.basic.Enumeration enumId="MdsrcSalesRfqAck" description="Sales request for quote acknowledgement" sequenceNum="22"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.order.SalesQuoteServices.build#QuoteRequestAcknowledgement"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_SALES_RFQ_ACK" description="Sales request for quote acknowledgement"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+    <moqui.service.job.ServiceJob jobName="send_SalesQuoteReminders" description="Send reminders of issued sales quotes"
+            serviceName="mantle.order.SalesQuoteIssueServices.send#QuoteReminders" cronExpression="0 0 8 * * ?" paused="N"
+            errorHistoryOnly="Y" transactionTimeout="1800"/>
+
+    <!-- Sales' workspace (impl-sales P6; IronStone Sales design §3 Home and OpportunityImport, §1.4 CX-OPS-REPORTS, §16; F24, F44, F54,
+        F66):
+        - the `opportunities` import target of the framework's org.moqui.admin.DataTransferServices (rows mode, the framework keeps the
+          batch), on the staff invitations' and Maintenance's equipment pattern: its fields are a deal's facts, its source key and the
+          people and stage it names, never a price, cost or password; its permissions Sales' own, all required, and no ADMIN_* one
+          (impl-sales §4, F44); each row validated and applied by Sales' own guarded services as the importer (SalesImport.js);
+        - the ReportScopePolicy MantleSalesScope: the pipeline dataset's row filter, Sales' scope (the organization, then the
+          assignment or team), not the organization alone (F66), so the report engine calls it as its own reviewed code;
+        - the row, scope and lifecycle services every user may call, each checking its own permission (SALES_IMPORT with
+          SALES_OPPORTUNITY_EDIT; SALES_OWNER_CHANGE for another user's assignments), as Maintenance's import services are, and the
+          check of a mail rule's createLead action every rule save runs (SalesIntake.secas.xml);
+        - the lost reason the intake purge closes an untouched lead with (the user's call of Nov 13), ended from the start so it is
+          offered to no one. -->
+    <moqui.server.TransferTarget targetId="opportunities" direction="import" targetMode="rows" title="Leads and opportunities"
+            description="Leads and opportunities of an organization, each with its stage, owner, account and amount"
+            effectsNote="Each row makes one lead or opportunity, or changes the one its source key or ID names when you choose to update matched deals, as New lead and New opportunity do. No account is made: a row names an existing account or none."
+            ownerApp="Sales" targetVersion="1" fieldLabel="Deal field" scopeLabel="Organization"
+            columnsJson="[{&quot;name&quot;:&quot;externalSource&quot;,&quot;label&quot;:&quot;Source system&quot;},{&quot;name&quot;:&quot;externalKey&quot;,&quot;label&quot;:&quot;Source key&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;salesOpportunityId&quot;,&quot;label&quot;:&quot;Existing deal ID&quot;},{&quot;name&quot;:&quot;typeEnumId&quot;,&quot;label&quot;:&quot;Type (lead or opportunity)&quot;},{&quot;name&quot;:&quot;opportunityName&quot;,&quot;label&quot;:&quot;Name&quot;},{&quot;name&quot;:&quot;description&quot;,&quot;label&quot;:&quot;Description&quot;},{&quot;name&quot;:&quot;accountPartyId&quot;,&quot;label&quot;:&quot;Account ID&quot;},{&quot;name&quot;:&quot;contactPartyId&quot;,&quot;label&quot;:&quot;Contact ID&quot;},{&quot;name&quot;:&quot;salesPipelineId&quot;,&quot;label&quot;:&quot;Pipeline ID&quot;},{&quot;name&quot;:&quot;opportunityStageId&quot;,&quot;label&quot;:&quot;Stage&quot;},{&quot;name&quot;:&quot;ownerPartyId&quot;,&quot;label&quot;:&quot;Owner ID&quot;},{&quot;name&quot;:&quot;teamPartyId&quot;,&quot;label&quot;:&quot;Team ID&quot;},{&quot;name&quot;:&quot;estimatedAmount&quot;,&quot;label&quot;:&quot;Amount&quot;},{&quot;name&quot;:&quot;currencyUomId&quot;,&quot;label&quot;:&quot;Currency&quot;},{&quot;name&quot;:&quot;estimatedProbability&quot;,&quot;label&quot;:&quot;Probability&quot;},{&quot;name&quot;:&quot;estimatedCloseDate&quot;,&quot;label&quot;:&quot;Expected close&quot;},{&quot;name&quot;:&quot;dataSourceId&quot;,&quot;label&quot;:&quot;Lead source ID&quot;},{&quot;name&quot;:&quot;nextStep&quot;,&quot;label&quot;:&quot;Next step&quot;},{&quot;name&quot;:&quot;organizationPartyId&quot;,&quot;label&quot;:&quot;Organization ID&quot;}]"
+            keyFields="externalSource,externalKey"
+            optionsJson="[{&quot;name&quot;:&quot;duplicateStrategy&quot;,&quot;label&quot;:&quot;A deal already here&quot;,&quot;type&quot;:&quot;option&quot;,&quot;default&quot;:&quot;skip&quot;,&quot;options&quot;:[{&quot;value&quot;:&quot;skip&quot;,&quot;label&quot;:&quot;Skip it&quot;},{&quot;value&quot;:&quot;update&quot;,&quot;label&quot;:&quot;Update matched deals&quot;}]}]"
+            refusedColumns="password,group,permission,authz,privilege,userid,cost,margin"
+            validateRowService="mantle.sales.OpportunityServices.validate#OpportunityImportRow"
+            applyRowService="mantle.sales.OpportunityServices.apply#OpportunityImportRow"
+            scopeService="mantle.sales.OpportunityServices.find#OpportunityImportScopes"
+            maxBytes="262144" maxRows="1000" retentionDays="30"
+            importPermission="SALES_IMPORT,SALES_OPPORTUNITY_EDIT,SALES_TEAM_MANAGE" viewPermission="SALES_TEAM_VIEW"
+            ownerRoute="salesOpportunityImport" sequenceNum="48"/>
+
+    <moqui.basic.Enumeration enumId="MantleSalesScope" enumTypeId="ReportScopePolicy"
+            enumCode="mantle.sales.SalesWorkspaceServices.get#PipelineRowFilter" description="the viewer's sales scope (organization, then assignment or team)"/>
+    <!-- impl-sales P20: the quote dataset's (report/mantle-sales-quotes.json) -->
+    <moqui.basic.Enumeration enumId="MantleSalesQuoteScope" enumTypeId="ReportScopePolicy"
+            enumCode="mantle.sales.SalesWorkspaceServices.get#QuoteRowFilter" description="the viewer's sales quote scope (organization, then assignment or team)"/>
+
+    <moqui.security.ArtifactGroup artifactGroupId="MantleSalesWorkspaceServices" description="Sales' import and lifecycle services"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleSalesWorkspaceServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            nameIsPattern="Y" artifactName="mantle\.sales\.OpportunityServices\.(validate#OpportunityImportRow|apply#OpportunityImportRow|find#OpportunityImportScopes|check#LeadRuleOwner)"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleSalesWorkspaceServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            nameIsPattern="Y" artifactName="mantle\.sales\.SalesWorkspaceServices\.(find#OwnedSalesAssignments|transfer#SalesAssignment)"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleSalesWorkspaceServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleSalesWorkspaceServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+
+    <moqui.basic.Enumeration enumId="SlrIntakePurged" enumTypeId="SalesLostReason" description="Unverified inquiry purged"
+            sequenceNum="99" thruDate="2000-01-01 00:00:00.000"/>
+</entity-facade-xml>

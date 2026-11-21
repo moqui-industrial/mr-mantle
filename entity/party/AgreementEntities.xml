@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!-- mantle.party.agreement -->
+    <!-- ========================================================= -->
+    <entity entity-name="Agreement" package="mantle.party.agreement" short-alias="agreements">
+        <field name="agreementId" type="id" is-pk="true"/>
+        <field name="agreementTypeEnumId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="organizationRoleTypeId" type="id"/>
+        <field name="otherPartyId" type="id" enable-audit-log="update"/>
+        <field name="otherRoleTypeId" type="id"/>
+        <field name="agreementDate" type="date-time"/>
+        <field name="fromDate" type="date-time" enable-audit-log="update"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="description" type="text-medium"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="isTemplate" type="text-indicator"/>
+        <field name="templateAgreementId" type="id"><description>The template agreement this agreement was cloned from</description></field>
+        <field name="textData" type="text-very-long"/>
+        <relationship type="one" title="AgreementType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="agreementTypeEnumId"/></relationship>
+        <relationship type="one" title="Agreement" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" title="Organization" related="mantle.party.RoleType" short-alias="organizationRole">
+            <key-map field-name="organizationRoleTypeId"/></relationship>
+        <relationship type="one" title="Other" related="mantle.party.Party" short-alias="other">
+            <key-map field-name="otherPartyId"/></relationship>
+        <relationship type="one" title="Other" related="mantle.party.RoleType" short-alias="otherRole">
+            <key-map field-name="otherRoleTypeId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId"/></relationship>
+        <relationship type="one" title="Template" related="mantle.party.agreement.Agreement" short-alias="templateAgreement">
+            <key-map field-name="templateAgreementId"/></relationship>
+
+        <relationship type="many" related="mantle.party.agreement.AgreementTerm" short-alias="terms">
+            <key-map field-name="agreementId"/></relationship>
+        <relationship type="many" related="mantle.party.agreement.AgreementItem" short-alias="items">
+            <key-map field-name="agreementId"/></relationship>
+        <relationship type="many" related="mantle.party.agreement.AgreementParty" short-alias="parties">
+            <key-map field-name="agreementId"/></relationship>
+
+        <seed-data>
+            <!-- Agreement Type -->
+            <moqui.basic.EnumerationType description="Agreement Type" enumTypeId="AgreementType"/>
+            <moqui.basic.Enumeration enumId="AgrProduct" description="Product" enumTypeId="AgreementType"/>
+            <moqui.basic.Enumeration enumId="AgrSales" description="Sales" enumTypeId="AgreementType"/>
+            <moqui.basic.Enumeration enumId="AgrEmployment" description="Employment" enumTypeId="AgreementType"/>
+            <moqui.basic.Enumeration enumId="AgrOther" description="Other" enumTypeId="AgreementType"/>
+            <moqui.basic.Enumeration enumId="AgrCommission" description="Commission" enumTypeId="AgreementType"/>
+            <moqui.basic.Enumeration enumId="AgrEula" description="End User License Agreement" enumTypeId="AgreementType"/>
+
+            <!-- Agreement Status -->
+            <moqui.basic.StatusType description="Agreement" statusTypeId="Agreement"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="AgreementAddendum" package="mantle.party.agreement">
+        <field name="agreementAddendumId" type="id" is-pk="true"/>
+        <field name="agreementId" type="id"/>
+        <field name="agreementItemSeqId" type="id"/>
+        <field name="addendumCreationDate" type="date-time"/>
+        <field name="addendumEffectiveDate" type="date-time"/>
+        <field name="addendumText" type="text-long"/>
+        <relationship type="one" related="mantle.party.agreement.Agreement"/>
+        <relationship type="one" related="mantle.party.agreement.AgreementItem">
+            <key-map field-name="agreementId"/>
+            <key-map field-name="agreementItemSeqId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="AgreementAssoc" package="mantle.party.agreement">
+        <field name="agreementAssocId" type="id" is-pk="true"/>
+        <field name="agreementId" type="id" not-null="true"/>
+        <field name="toAgreementId" type="id" not-null="true"/>
+        <field name="agreementAssocTypeEnumId" type="id"/>
+        <field name="geoId" type="id"/>
+
+        <relationship type="one" related="mantle.party.agreement.Agreement" short-alias="agreement"/>
+        <relationship type="one" title="To" related="mantle.party.agreement.Agreement" short-alias="toAgreement">
+            <key-map field-name="toAgreementId"/></relationship>
+        <relationship type="one" related="moqui.basic.Geo" short-alias="geo">
+            <key-map field-name="geoId"/></relationship>
+        <relationship type="one" title="AgreementAssocType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="agreementAssocTypeEnumId"/></relationship>
+        <seed-data>
+            <!-- Agreement Assoc Type -->
+            <moqui.basic.EnumerationType description="Agreement Association Type" enumTypeId="AgreementAssocType"/>
+
+            <moqui.basic.Enumeration description="Alternate" enumId="AatAlternate" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Addendum" enumId="AatAddendum" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Upgrade" enumId="AatUpgrade" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Replacement" enumId="AatReplacement" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Amendment" enumId="AatAmendment" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Restatement" enumId="AatRestatement" enumTypeId="AgreementAssocType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="AgreementContent" package="mantle.party.agreement">
+        <field name="agreementContentId" type="id" is-pk="true"/>
+        <field name="agreementId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.party.agreement.Agreement"/>
+        <relationship type="one" title="AgreementContentType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Agreement Content Type" enumTypeId="AgreementContentType"/>
+            <moqui.basic.Enumeration description="Agreement Document" enumId="AcntDocument" enumTypeId="AgreementContentType"/>
+            <moqui.basic.Enumeration description="Supporting Document" enumId="AcntSupporting" enumTypeId="AgreementContentType"/>
+            <moqui.basic.Enumeration description="Price Sheet" enumId="AcntPriceSheet" enumTypeId="AgreementContentType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="AgreementParty" package="mantle.party.agreement">
+        <field name="agreementId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.party.agreement.Agreement" short-alias="agreement"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="mantle.party.RoleType" short-alias="roleType"/>
+    </entity>
+
+    <entity entity-name="AgreementTerm" package="mantle.party.agreement">
+        <field name="agreementTermId" type="id" is-pk="true"/>
+        <field name="agreementId" type="id"/>
+        <field name="agreementItemSeqId" type="id"/>
+        <field name="settlementTermId" type="id"/>
+        <field name="termTypeEnumId" type="id"/>
+        <!-- Really need these? redundant with fields on Agreement: <field name="fromDate" type="date-time"/><field name="thruDate" type="date-time"/> -->
+        <field name="termText" type="text-long"/>
+        <field name="termNumber" type="number-decimal"/>
+        <relationship type="one" related="mantle.party.agreement.Agreement"/>
+        <relationship type="one-nofk" related="mantle.party.agreement.AgreementItem">
+            <key-map field-name="agreementId"/><key-map field-name="agreementItemSeqId"/></relationship>
+        <relationship type="one" related="mantle.account.invoice.SettlementTerm"/>
+        <relationship type="one" title="TermType" related="moqui.basic.Enumeration">
+            <key-map field-name="termTypeEnumId"/></relationship>
+        <!-- see the mantle.account.invoice.SettlementTerm entity for TermType enums -->
+    </entity>
+
+    <entity entity-name="AgreementItem" package="mantle.party.agreement">
+        <description>For price lists associated with an AgreementItem use the ProducePrice entity.</description>
+        <field name="agreementId" type="id" is-pk="true"/>
+        <field name="agreementItemSeqId" type="id" is-pk="true"/>
+        <field name="agreementItemTypeEnumId" type="id"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="productId" type="id"/>
+        <field name="quantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="itemText" type="text-very-long"/>
+        <relationship type="one" related="mantle.party.agreement.Agreement"/>
+        <relationship type="one" title="AgreementItemType" related="moqui.basic.Enumeration">
+            <key-map field-name="agreementItemTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId"/></relationship>
+        <relationship type="many" related="mantle.party.agreement.AgreementTerm" short-alias="terms">
+            <key-map field-name="agreementId"/><key-map field-name="agreementItemSeqId"/></relationship>
+        <seed-data>
+            <!-- Agreement Item Type -->
+            <moqui.basic.EnumerationType description="Agreement Item Type" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitSubAgreement" description="Sub-Agreement" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitExhibit" description="Exhibit" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitPricing" description="Pricing" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitPurchase" description="Purchase" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitSection" description="Section" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitCommissionRate" description="Commission Rate" enumTypeId="AgreementItemType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="AgreementItemEmployment" package="mantle.party.agreement">
+        <field name="agreementId" type="id" is-pk="true"/>
+        <field name="agreementItemSeqId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment"/>
+        <relationship type="one" related="mantle.party.agreement.AgreementItem">
+            <key-map field-name="agreementId"/>
+            <key-map field-name="agreementItemSeqId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="AgreementItemGeo" package="mantle.party.agreement">
+        <field name="agreementId" type="id" is-pk="true"/>
+        <field name="agreementItemSeqId" type="id" is-pk="true"/>
+        <field name="geoId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.party.agreement.AgreementItem">
+            <key-map field-name="agreementId"/>
+            <key-map field-name="agreementItemSeqId"/>
+        </relationship>
+        <relationship type="one" related="moqui.basic.Geo"/>
+    </entity>
+
+    <entity entity-name="AgreementItemParty" package="mantle.party.agreement">
+        <field name="agreementId" type="id" is-pk="true"/>
+        <field name="agreementItemSeqId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.party.agreement.AgreementItem">
+            <key-map field-name="agreementId"/>
+            <key-map field-name="agreementItemSeqId"/>
+        </relationship>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.RoleType"/>
+    </entity>
+
+    <entity entity-name="AgreementItemWorkEffort" package="mantle.party.agreement">
+        <field name="agreementId" type="id" is-pk="true"/>
+        <field name="agreementItemSeqId" type="id" is-pk="true"/>
+        <field name="workEffortId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.party.agreement.AgreementItem">
+            <key-map field-name="agreementId"/>
+            <key-map field-name="agreementItemSeqId"/>
+        </relationship>
+        <relationship type="one" related="mantle.work.effort.WorkEffort"/>
+    </entity>
+
+    <entity entity-name="AgreementRelease" package="mantle.party.agreement" cache="never">
+        <description>One release of a purchase agreement's item to a purchase order line, a fact of its own (impl-purchasing
+            §2): the order and line, the quantity and value released at the agreement's price, and the agreement's revision
+            and its time. Written only by mantle.party.AgreementServices.release#PurchaseAgreement, under a lock on the
+            agreement, so two releases cannot take more than the caps and tolerance together. What a release still uses is
+            read from its line: the released quantity less the line's cancelled quantity, none once the order is cancelled
+            or rejected, so an expired, closed or cancelled agreement keeps its fulfilled history.</description>
+        <field name="agreementReleaseId" type="id" is-pk="true"/>
+        <field name="agreementId" type="id" not-null="true"/>
+        <field name="agreementItemSeqId" type="id" not-null="true"/>
+        <field name="orderId" type="id" not-null="true"/>
+        <field name="orderItemSeqId" type="id" not-null="true"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="unitAmount" type="currency-precise"/>
+        <field name="amount" type="currency-amount"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="agreementRevision" type="number-integer"/>
+        <field name="agreementRevisionDate" type="date-time"/>
+        <field name="productPriceId" type="id"/>
+        <field name="releaseDate" type="date-time"/>
+        <field name="releasedByUserId" type="id"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one" related="mantle.party.agreement.Agreement" short-alias="agreement"/>
+        <relationship type="one" related="mantle.party.agreement.AgreementItem" short-alias="agreementItem">
+            <key-map field-name="agreementId"/><key-map field-name="agreementItemSeqId"/></relationship>
+        <relationship type="one" related="mantle.order.OrderHeader" short-alias="order"/>
+        <relationship type="one-nofk" related="mantle.order.OrderItem" short-alias="orderItem">
+            <key-map field-name="orderId"/><key-map field-name="orderItemSeqId"/></relationship>
+        <relationship type="one-nofk" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId" related="uomId"/></relationship>
+        <index name="AGR_RELEASE_AGR"><index-field name="agreementId"/><index-field name="agreementItemSeqId"/></index>
+        <index name="AGR_RELEASE_ORDER"><index-field name="orderId"/><index-field name="orderItemSeqId"/></index>
+        <seed-data>
+            <moqui.basic.Enumeration enumId="AgrPurchase" description="Purchase" enumTypeId="AgreementType"/>
+            <!-- the one Mantle Agreement status flow (review X13): approval activates a draft; an active agreement expires
+                past its thru date, is closed or cancelled; an expired one is closed -->
+            <moqui.basic.StatusItem statusId="AgmStDraft" statusTypeId="Agreement" sequenceNum="1" description="Draft"/>
+            <moqui.basic.StatusItem statusId="AgmStActive" statusTypeId="Agreement" sequenceNum="2" description="Active"/>
+            <moqui.basic.StatusItem statusId="AgmStExpired" statusTypeId="Agreement" sequenceNum="3" description="Expired"/>
+            <moqui.basic.StatusItem statusId="AgmStClosed" statusTypeId="Agreement" sequenceNum="4" description="Closed"/>
+            <moqui.basic.StatusItem statusId="AgmStCancelled" statusTypeId="Agreement" sequenceNum="5" description="Cancelled"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AgmStDraft" toStatusId="AgmStActive"
+                    transitionName="Activate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AgmStDraft" toStatusId="AgmStCancelled"
+                    transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AgmStActive" toStatusId="AgmStExpired"
+                    transitionName="Expire"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AgmStActive" toStatusId="AgmStClosed"
+                    transitionName="Close"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AgmStActive" toStatusId="AgmStCancelled"
+                    transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AgmStExpired" toStatusId="AgmStClosed"
+                    transitionName="Close"/>
+            <!-- the approved agreement's PDF, stored once per approved revision -->
+            <moqui.basic.Enumeration enumId="AcntApprovedVersion" description="Approved agreement"
+                    enumTypeId="AgreementContentType"/>
+            <!-- a signer of the agreement, of either party (AgreementParty) -->
+            <mantle.party.RoleType roleTypeId="AgreementSigner" description="Agreement signer"/>
+        </seed-data>
+    </entity>
+</entities>

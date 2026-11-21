@@ -31,9 +31,9 @@ Recheck the relevant contract and changelog when starting each adapter.
 
 | Area | Reuse | Gaps relevant to this plan |
 | --- | --- | --- |
-| Payments | [`PaymentServices.xml`](../service/mantle/account/PaymentServices.xml): gateway interfaces, `*#SinglePayment`, reviewed actions, response history, refund limits and details polling. [`AccountingAccountEntities.xml`](../entity/AccountingAccountEntities.xml) defines the gateway and response entities. | No external processor implementation. `operationKey` is checked by the outer services and attached after the provider call; it is not passed through the gateway interfaces. Local response replay alone cannot recover a remote success followed by a timeout or local rollback. |
-| Payment methods and hosted payment | [`PaymentMethodServices.xml`](../service/mantle/account/PaymentMethodServices.xml), organization bindings and portal records in [`AccountingPortalEntities.xml`](../entity/AccountingPortalEntities.xml); authorization already accepts `returnUrl`, and responses can contain `redirectUrl`. [`PaymentTestServices.xml`](../service/mantle/account/PaymentTestServices.xml) exercises pending and hosted outcomes. | Reuse these pending/lookup paths. Define token/session inputs and provider object references; extend only where the real provider lifecycle needs more information. A browser return is not proof of payment. |
-| Shipping | [`CarrierServices.xml`](../service/mantle/shipment/CarrierServices.xml) and [`ShipmentEntities.xml`](../entity/ShipmentEntities.xml): gateway routing, rates, labels, refunds, tracking, address validation, carrier/service/box mappings and the local rate gateway. | No external carrier adapter. Define durable purchase/refund attempts and pending label completion. Review `get#AutoPackageInfo` separately; a rate adapter does not supply a packing algorithm. |
+| Payments | [`PaymentServices.xml`](../service/mantle/account/PaymentServices.xml): gateway interfaces, `*#SinglePayment`, reviewed actions, response history, refund limits and details polling. [`MethodEntities.xml`](../entity/account/MethodEntities.xml) defines the gateway and response entities. | No external processor implementation. `operationKey` is checked by the outer services and attached after the provider call; it is not passed through the gateway interfaces. Local response replay alone cannot recover a remote success followed by a timeout or local rollback. |
+| Payment methods and hosted payment | [`PaymentMethodServices.xml`](../service/mantle/account/PaymentMethodServices.xml), organization bindings and portal records in [`InvoiceEntities.xml`](../entity/account/InvoiceEntities.xml) and [`PaymentEntities.xml`](../entity/account/PaymentEntities.xml); authorization already accepts `returnUrl`, and responses can contain `redirectUrl`. [`PaymentTestServices.xml`](../service/mantle/account/PaymentTestServices.xml) exercises pending and hosted outcomes. | Reuse these pending/lookup paths. Define token/session inputs and provider object references; extend only where the real provider lifecycle needs more information. A browser return is not proof of payment. |
+| Shipping | [`CarrierServices.xml`](../service/mantle/shipment/CarrierServices.xml) and [`ShipmentEntities.xml`](../entity/shipment/ShipmentEntities.xml) and [`CarrierEntities.xml`](../entity/shipment/CarrierEntities.xml): gateway routing, rates, labels, refunds, tracking, address validation, carrier/service/box mappings and the local rate gateway. | No external carrier adapter. Define durable purchase/refund attempts and pending label completion. Review `get#AutoPackageInfo` separately; a rate adapter does not supply a packing algorithm. |
 | EDI parsing | Framework [`edi.rs`](../../../../../crates/moqui-core/src/edi.rs), the [`EdiHandler` script binding](../../../../crates/moqui-core/src/script/runtime/edi.rs), and converted X12 grammar fixtures in `crates/moqui-core/src/edi/testdata/mantle`. X12 and EDIFACT parsing/writing are available. | Mantle transaction services are missing. The grammar loader currently ignores `MIN`/`MAX`; successful parsing is not full X12 or partner-guide validation. EDIFACT business mappings are not supplied by having an EDIFACT parser. |
 | Messaging and transport | Framework [`SystemMessageServices.xml`](../../../../components/base/framework/service/org/moqui/impl/SystemMessageServices.xml), message types/remotes, error history and jobs; [`SftpMessageServices.xml`](../../../../components/base/framework/service/org/moqui/sftp/SftpMessageServices.xml) already sends and polls files. | Configure and harden these paths rather than build a second queue or SFTP client. The current [SFTP poller](../../../../../crates/moqui-core/src/service/system_sync/sftp.rs) stops on a receive error and propagates some file errors out of its loop. Per-file isolation and recovery need attention. |
 
@@ -411,8 +411,8 @@ worksheet, E2 and Stripe are not part of it. Nothing is committed yet; the recor
 
 **Changed artifacts.**
 
-- mr-mantle: `entity/PaymentGatewayEntities.xml` (PaymentGatewayResponse `idempotencyKey`, `resultUnknown`,
-  `outcomeResolvedDate`, `outcomeFound`; PaymentMethod `gatewayCustomerId`), `entity/ShippingGatewayEntities.xml` (ShippingGatewayConfig
+- mr-mantle: `entity/account/MethodAndPaymentExtensions.xml` (PaymentGatewayResponse `idempotencyKey`, `resultUnknown`,
+  `outcomeResolvedDate`, `outcomeFound`; PaymentMethod `gatewayCustomerId`), `entity/shipment/ShipmentAndCarrierExtensions.xml` (ShippingGatewayConfig
   `systemMessageRemoteId`), `service/mantle/account/PaymentServices.xml` (the gateway interfaces, `begin#PaymentGatewayOperation`,
   `make#GatewayIdempotencyKey`, `record#PaymentAuthorized`, the four `*#SinglePayment` services, `get#SinglePaymentGatewayDetails`,
   `poll#PaymentGatewayDetails`, `get#PaymentGatewayActions`, `execute#PaymentGatewayAction`,
@@ -607,7 +607,7 @@ the signature key in `X-ANET-Signature`, up to 10 retries, no ordering or duplic
 - mr-mantle: `service/mantle/ext/account/gateway/AuthorizeNetServices.xml` and `AuthorizeNet.js` (new: the five gateway services and
   `authorizeAndCapture#Payment`, `store#`/`delete#CustomerPaymentProfile`, `receive#`/`consume#Webhook`,
   `get#BrowserPaymentConfig`, `submit#BrowserPaymentToken`), `service/AuthorizeNet.secas.xml` (new: a deleted method's
-  profile), `entity/PaymentGatewayEntities.xml` (`PaymentGatewayAuthorizeNet`, non-secret options, and the `PgtAuthorizeNet`
+  profile), `entity/account/MethodEntities.xml` (`PaymentGatewayAuthorizeNet`, non-secret options, and the `PgtAuthorizeNet`
   seed), `data/AuthorizeNetSetupData.xml` (seed: SystemMessageType `AuthorizeNetWebhook`), `data/AuthorizeNetDemoData.xml`
   (demo: gateway `AuthorizeNetDemo` and remote `AuthorizeNetSandbox`, no credentials), `service/mantle.rest.xml`
   (`my/payments/{paymentId}/authorizeNet` GET and POST), `service/mantle/account/PaymentServices.xml` (the common
@@ -743,7 +743,7 @@ Protect.js client key) and `PUT /v3/invoice/by-transaction-id/{id}` (Enhanced Da
   `PidtCommodityCode`), `data/PayTraceSetupData.xml` (seed-initial: the paused job `retry_PayTraceEnhancedData`),
   `data/PayTraceDemoData.xml` (demo: gateway `PayTraceDemo`, remote `PayTraceSandbox`, no credentials, merchant or
   integrator id), `docs/PayTrace.md`, `docs/examples/PayTraceProtect.html`, `test/ext/PayTraceGateway.spec.js`.
-- mr-mantle, changed: `entity/PaymentGatewayEntities.xml` (`PaymentGatewayPayTrace`: `merchantId`, `integratorId`,
+- mr-mantle, changed: `entity/account/MethodEntities.xml` (`PaymentGatewayPayTrace`: `merchantId`, `integratorId`,
   `currencyUomId`, `lookupGraceSeconds`, `sendEnhancedData`, `commodityCode`, `defaultUnitOfMeasure`,
   `customerLabelPrefix`; seed `PgtPayTrace`), `service/mantle.rest.xml` (`my/payments/{paymentId}/payTrace` GET and
   POST), `service/mantle/ext/account/gateway/AuthorizeNet.js` (onto `GatewayLib.js`, behavior unchanged), `docs/AuthorizeNet.md`
@@ -951,7 +951,7 @@ The versioning page carried "agent instructions" naming MCP servers; they were n
   `ShippoWebhook`), `data/ShippoDemoData.xml` (demo: gateway `SHIPPO_DEMO` in test mode, remote `ShippoSandbox`, USPS,
   UPS, FedEx and DHL Express with empty carrier accounts, the USPS ground override `usps_ground_advantage`, three USPS
   flat-rate box templates; no token, secret or account id), `docs/Shippo.md`, `test/ext/ShippoGateway.spec.js`.
-- mr-mantle, changed: `entity/ShippingGatewayEntities.xml` (seed `ShGtwyShippo`, `SgoLookupGraceSeconds`; on
+- mr-mantle, changed: `entity/shipment/ShipmentAndCarrierExtensions.xml` (seed `ShGtwyShippo`, `SgoLookupGraceSeconds`; on
   ShipmentPackageRouteSeg `gatewayShipmentId`, `gatewayAmountUomId`, `labelFileType` and their `return*` fields),
   `service/mantle/shipment/Shipping.js` (`finishPending`; the refusals `CONFIG_INVALID`, `PARCEL_INVALID`,
   `RATE_EXPIRED`, `REFUND_REFUSED`, `RATE_LIMITED`, `RATES_NO_ANSWER`; a succeeded request's `amountUomId`),
@@ -1146,7 +1146,7 @@ full-message logging. `X12Envelope.groovy` is not used: the envelope pass is X12
 
 **Changed artifacts.**
 
-- mr-mantle, new: `entity/EdiEntities.xml` (`EdiProfile`, `EdiProfileDocument`, `EdiProfileCode`, `EdiConnection`,
+- mr-mantle, new: `entity/edi/EdiEntities.xml` (`EdiProfile`, `EdiProfileDocument`, `EdiProfileCode`, `EdiConnection`,
   `EdiLocation`, `EdiControlSequence`, `EdiInterchange`, `EdiGroup`, `EdiDocument` with their statuses, transitions and
   enumerations; `ShipmentPackage.sscc`), `service/mantle/edi/EdiServices.xml`, `X12.js`, `X12Lib.js`, `X12Documents.js`,
   `order/X12OrderServices.xml`, `shipment/X12ShipmentServices.xml`, `account/X12InvoiceServices.xml`,

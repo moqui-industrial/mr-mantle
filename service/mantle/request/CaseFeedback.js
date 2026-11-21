@@ -1,6 +1,6 @@
 // Case feedback (design-customer-service §7 SatisfactionResults, ResponseDetail, §8 Feedback, §9 FeedbackForms,
-// FeedbackFormDetail, FeedbackDeliveryPolicy; impl-customer-service P13, CS-FEEDBACK, CS-JOBS, F16, F61; SupportFeedbackEntities.xml,
-// FormPublicationEntities.xml). A resolved case's customer is invited once to rate how it was handled:
+// FeedbackFormDetail, FeedbackDeliveryPolicy; impl-customer-service P13, CS-FEEDBACK, CS-JOBS, F16, F61; entity/request/SupportEntities.xml,
+// entity/party/PartyEntities.xml). A resolved case's customer is invited once to rate how it was handled:
 // - The form is a feedback form: a dated DbForm of the organization (purpose DbfpCaseFeedback; DbForm.ownerPartyId) changed by
 //   dated fields and options as a case template is (CaseTemplates.js: save, successor, end, conditions, checks), every field
 //   customer-visible. Its rating is its first choice field whose option keys are whole numbers, and the key chosen is the

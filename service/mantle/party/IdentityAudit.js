@@ -5,7 +5,7 @@
 // ids of its audit rows only: the framework reads and masks the rows by its registered projections.
 //
 // Scope is not computed here. Each kind of record has a view that joins the audit log's rows back to an internal organization
-// (entity/IdentityEntities.xml: an account's rows by the organizations its party works for now, a membership's by its member,
+// (entity/party/PartyAndAgreementAndCommunicationViews.xml: an account's rows by the organizations its party works for now, a membership's by its member,
 // the others by their own organization), and the find on it runs under the organization entity filters of the authorization
 // the call runs under (Identity.js scopedFind: MANTLE_USER_ORG the caller's organizations, MANTLE_ACTIVE_ORG the active one
 // or every one; nothing in scope when neither is named, but for an instance administrator). An account that works for no

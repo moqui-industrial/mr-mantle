@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!-- mantle.work.estimate -->
+    <!-- ========================================================= -->
+    <view-entity entity-name="ProductionEstimateAndParty" package="mantle.work.estimate">
+        <member-entity entity-alias="PE" entity-name="mantle.work.estimate.ProductionEstimate"/>
+        <member-entity entity-alias="PEP" entity-name="mantle.work.estimate.ProductionEstimateParty" join-from-alias="PE" join-optional="true">
+            <key-map field-name="productionEstimateId"/></member-entity>
+        <alias-all entity-alias="PE"/>
+        <alias-all entity-alias="PEP"/>
+    </view-entity>
+    <view-entity entity-name="ProductionEstimatePartyAndPerson" package="mantle.work.estimate">
+        <member-entity entity-alias="PEP" entity-name="mantle.work.estimate.ProductionEstimateParty"/>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="PEP">
+            <key-map field-name="partyId"/></member-entity>
+        <alias-all entity-alias="PEP"/>
+        <alias-all entity-alias="PER"><exclude field="partyId"/></alias-all>
+    </view-entity>
+    <view-entity entity-name="ProductionEstimateAndPartyDetail" package="mantle.work.estimate">
+        <member-entity entity-alias="PE" entity-name="mantle.work.estimate.ProductionEstimate"/>
+        <member-entity entity-alias="PEP" entity-name="mantle.work.estimate.ProductionEstimateParty" join-from-alias="PE">
+            <key-map field-name="productionEstimateId"/></member-entity>
+        <member-entity entity-alias="PTY" entity-name="mantle.party.Party" join-from-alias="PEP">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="ORG" entity-name="mantle.party.Organization" join-from-alias="PEP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="PEP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="USRACT" entity-name="moqui.security.UserAccount" join-from-alias="PEP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <alias-all entity-alias="PE"/>
+        <alias-all entity-alias="PEP"><exclude field="productionEstimateId"/></alias-all>
+        <alias-all entity-alias="PTY"/>
+        <alias-all entity-alias="PER"><exclude field="partyId"/></alias-all>
+        <alias-all entity-alias="ORG"><exclude field="partyId"/></alias-all>
+        <alias name="username" entity-alias="USRACT"/>
+    </view-entity>
+    <view-entity entity-name="ProductionEstimateWorkEffDetail" package="mantle.work.estimate">
+        <member-entity entity-alias="PEWE" entity-name="mantle.work.estimate.ProductionEstimateWorkEff"/>
+        <member-entity entity-alias="WEF" entity-name="mantle.work.effort.WorkEffort" join-from-alias="PEWE">
+            <key-map field-name="workEffortId"/></member-entity>
+        <alias-all entity-alias="PEWE"/>
+        <alias-all entity-alias="WEF"><exclude field="workEffortId"/></alias-all>
+    </view-entity>
+    <view-entity entity-name="WorkEffortProductionEstimateDetail" package="mantle.work.estimate">
+        <member-entity entity-alias="PEWE" entity-name="mantle.work.estimate.ProductionEstimateWorkEff"/>
+        <member-entity entity-alias="PE" entity-name="mantle.work.estimate.ProductionEstimate" join-from-alias="PEWE">
+            <key-map field-name="productionEstimateId"/></member-entity>
+        <alias-all entity-alias="PEWE"/>
+        <alias-all entity-alias="PE"><exclude field="productionEstimateId"/></alias-all>
+    </view-entity>
+    <view-entity entity-name="ProductionEstimateSummary" package="mantle.work.estimate">
+        <member-entity entity-alias="PEST" entity-name="mantle.work.estimate.ProductionEstimate"/>
+        <alias-all entity-alias="PEST"><exclude field="quantity"/></alias-all>
+        <alias entity-alias="PEST" name="quantity" function="sum"/>
+    </view-entity>
+
+    <view-entity entity-name="MaintenanceWorkOrderDetail" package="mantle.work.maintenance">
+        <description>A work order with its root WorkEffort, for the scoped lists (find#MaintenanceWorkOrders): the scope, the
+            filters, the order and the page are in the query.</description>
+        <member-entity entity-alias="MWO" entity-name="mantle.work.maintenance.MaintenanceWorkOrder"/>
+        <member-entity entity-alias="WEFF" entity-name="mantle.work.effort.WorkEffort" join-from-alias="MWO">
+            <key-map field-name="workEffortId"/></member-entity>
+        <alias-all entity-alias="MWO"/>
+        <alias entity-alias="WEFF" name="workEffortName"/>
+        <alias entity-alias="WEFF" name="description"/>
+        <alias entity-alias="WEFF" name="statusId"/>
+        <alias entity-alias="WEFF" name="priority"/>
+        <alias entity-alias="WEFF" name="ownerPartyId"/>
+        <alias entity-alias="WEFF" name="facilityId"/>
+        <alias entity-alias="WEFF" name="isTemplate"/>
+        <alias entity-alias="WEFF" name="estimatedStartDate"/>
+        <alias entity-alias="WEFF" name="estimatedCompletionDate"/>
+        <alias entity-alias="WEFF" name="actualStartDate"/>
+        <alias entity-alias="WEFF" name="actualCompletionDate"/>
+        <alias entity-alias="WEFF" name="estimatedWorkTime"/>
+        <alias entity-alias="WEFF" name="lastUpdatedStamp"/>
+    </view-entity>
+
+<!-- Maintenance intake (IronStone Maintenance design §3 Requests, MT-02, MT-15; impl-maintenance P4). A reported problem is a
+    Request of type RqtMaintenance with its organization as its OrgInternal party (as Manufacturing's maintenance request has it,
+    ProductionDowntime.js), its one target (an Asset or a Facility) as a RequestRecord and its work order by RequestWorkEffort; no
+    record of its own. This view is the scoped list of mantle.work.MaintenanceServices.find#MaintenanceRequests: the scope (the
+    organization, or the reporter), the filters, the order and the page are in the query. -->
+    <view-entity entity-name="MaintenanceRequestDetail" package="mantle.work.maintenance">
+        <description>A request with its organization (an OrgInternal RequestParty; the query names roleTypeId OrgInternal and a
+            current row), for find#MaintenanceRequests.</description>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request"/>
+        <member-entity entity-alias="RPTY" entity-name="mantle.request.RequestParty" join-from-alias="REQ">
+            <key-map field-name="requestId"/></member-entity>
+        <alias-all entity-alias="REQ"/>
+        <alias entity-alias="RPTY" name="organizationPartyId" field="partyId"/>
+        <alias entity-alias="RPTY" name="organizationRoleTypeId" field="roleTypeId"/>
+        <alias entity-alias="RPTY" name="organizationThruDate" field="thruDate"/>
+    </view-entity>
+
+    <!-- ========================================================= -->
+    <!-- mantle.work.time -->
+    <!-- ========================================================= -->
+    <view-entity entity-name="TimeEntryAndRates" package="mantle.work.time">
+        <member-entity entity-alias="TENT" entity-name="mantle.work.time.TimeEntry"/>
+        <member-entity entity-alias="CRA" entity-name="mantle.humanres.rate.RateAmount" join-from-alias="TENT" join-optional="true">
+            <key-map field-name="rateAmountId"/></member-entity>
+        <member-entity entity-alias="VRA" entity-name="mantle.humanres.rate.RateAmount" join-from-alias="TENT" join-optional="true">
+            <key-map field-name="vendorRateAmountId"/></member-entity>
+        <alias entity-alias="TENT" name="workEffortId"/>
+        <alias entity-alias="TENT" name="timesheetId"/>
+        <alias entity-alias="TENT" name="rateTypeEnumId"/>
+        <alias entity-alias="TENT" name="hours"/>
+        <alias entity-alias="TENT" name="breakHours"/>
+        <alias entity-alias="TENT" name="clientHourRate"/>
+        <alias entity-alias="TENT" name="vendorHourRate"/>
+        <alias entity-alias="CRA" name="clientRateAmount" field="rateAmount"/>
+        <alias entity-alias="CRA" name="clientRateCurrencyUomId" field="rateCurrencyUomId"/>
+        <alias entity-alias="VRA" name="vendorRateAmount" field="rateAmount"/>
+        <alias entity-alias="VRA" name="vendorRateCurrencyUomId" field="rateCurrencyUomId"/>
+    </view-entity>
+
+    <view-entity entity-name="TimeEntryAndEmployment" package="mantle.work.time">
+        <member-entity entity-alias="TENT" entity-name="mantle.work.time.TimeEntry"/>
+        <member-entity entity-alias="PREL" entity-name="mantle.party.PartyRelationship" join-from-alias="TENT">
+            <key-map field-name="partyId" related="fromPartyId"/></member-entity>
+        <member-entity entity-alias="EMPL" entity-name="mantle.humanres.employment.Employment" join-from-alias="PREL">
+            <key-map field-name="partyRelationshipId"/></member-entity>
+        <alias-all entity-alias="TENT"/>
+        <alias-all entity-alias="PREL" prefix="rel"/>
+        <alias-all entity-alias="EMPL"/>
+    </view-entity>
+
+    <view-entity entity-name="TimeEntryAndPartyDetail" package="mantle.work.time">
+        <member-entity entity-alias="TENT" entity-name="mantle.work.time.TimeEntry"/>
+        <member-entity entity-alias="PTY" entity-name="mantle.party.Party" join-from-alias="TENT">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="ORG" entity-name="mantle.party.Organization" join-from-alias="TENT" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="TENT" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="TORG" entity-name="mantle.party.Organization" join-from-alias="TENT" join-optional="true">
+            <key-map field-name="teamPartyId"/></member-entity>
+        <alias-all entity-alias="TENT"/>
+        <alias-all entity-alias="PTY"><exclude field="comments"/></alias-all>
+        <alias-all entity-alias="PER"/>
+        <alias-all entity-alias="ORG"/>
+        <alias name="teamName" field="organizationName" entity-alias="TORG"/>
+    </view-entity>
+
+    <view-entity entity-name="TimeEntrySummary" package="mantle.work.time">
+        <member-entity entity-alias="TENT" entity-name="mantle.work.time.TimeEntry"/>
+        <alias entity-alias="TENT" name="workEffortId"/>
+        <alias entity-alias="TENT" name="timesheetId"/>
+        <alias entity-alias="TENT" name="rateTypeEnumId"/>
+        <alias entity-alias="TENT" name="hours" function="sum"/>
+        <alias entity-alias="TENT" name="breakHours" function="sum"/>
+    </view-entity>
+
+    <view-entity entity-name="TaskTimeSummary" package="mantle.work.time">
+        <member-entity entity-alias="WEFF" entity-name="mantle.work.effort.WorkEffort"/>
+        <alias entity-alias="WEFF" name="rootWorkEffortId"/>
+        <alias entity-alias="WEFF" name="workEffortTypeEnumId"/>
+        <alias entity-alias="WEFF" name="ownerPartyId"/>
+        <alias entity-alias="WEFF" name="estimatedWorkTime" function="sum"/>
+        <alias entity-alias="WEFF" name="actualWorkTime" function="sum"/>
+        <alias entity-alias="WEFF" name="remainingWorkTime" function="sum"/>
+        <alias entity-alias="WEFF" name="actualCost" function="sum"/>
+        <alias entity-alias="WEFF" name="actualClientCost" function="sum"/>
+    </view-entity>
+
+    <view-entity entity-name="TimeEntryAndChild" package="mantle.work.time">
+        <member-entity entity-alias="TENT" entity-name="mantle.work.time.TimeEntry"/>
+        <member-entity entity-alias="TENTC" entity-name="mantle.work.time.TimeEntry"
+                       join-from-alias="TENT" join-optional="true">
+            <key-map field-name="timeEntryId" related="parentEntryId"/>
+        </member-entity>
+        <alias-all entity-alias="TENT"/>
+        <alias-all entity-alias="TENTC" prefix="child"/>
+        <entity-condition>
+            <econdition field-name="parentEntryId" operator="is-null" entity-alias="TENT"/>
+        </entity-condition>
+    </view-entity>
+
+    <view-entity entity-name="TimeEntryAndWorkEffort" package="mantle.work.time">
+        <member-entity entity-alias="TENT" entity-name="mantle.work.time.TimeEntry"/>
+        <member-entity entity-alias="WEFF" entity-name="mantle.work.effort.WorkEffort" join-from-alias="TENT" join-optional="true">
+            <key-map field-name="workEffortId"/></member-entity>
+        <alias-all entity-alias="TENT"/>
+        <alias-all entity-alias="WEFF"><exclude field="workTypeEnumId"/><exclude field="facilityId"/></alias-all>
+        <alias name="workEffortFacilityId" entity-alias="WEFF" field="facilityId"/>
+    </view-entity>
+
+    <view-entity entity-name="TimeEntryAndWorkEffortPartyDetail" package="mantle.work.time">
+        <member-entity entity-alias="TENT" entity-name="mantle.work.time.TimeEntry"/>
+        <member-entity entity-alias="WEFF" entity-name="mantle.work.effort.WorkEffort" join-from-alias="TENT" join-optional="true">
+            <key-map field-name="workEffortId"/></member-entity>
+        <member-entity entity-alias="WEP" entity-name="mantle.work.effort.WorkEffortParty" join-from-alias="WEFF">
+            <key-map field-name="workEffortId"/></member-entity>
+        <member-entity entity-alias="PTY" entity-name="mantle.party.Party" join-from-alias="WEP">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="ORG" entity-name="mantle.party.Organization" join-from-alias="WEP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="WEP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <alias-all entity-alias="TENT"/>
+        <alias-all entity-alias="WEFF"><exclude field="workTypeEnumId"/><exclude field="facilityId"/></alias-all>
+        <alias-all entity-alias="WEP"><exclude field="statusId"/><exclude field="comments"/><exclude field="fromDate"/>
+            <exclude field="thruDate"/><exclude field="emplPositionClassId"/><exclude field="workTypeEnumId"/></alias-all>
+        <alias-all entity-alias="PTY"><exclude field="comments"/><exclude field="ownerPartyId"/></alias-all>
+        <alias-all entity-alias="PER"/>
+        <alias-all entity-alias="ORG"/>
+        <alias name="workEffortFacilityId" entity-alias="WEFF" field="facilityId"/>
+        <alias name="workEffortEmplPositionClassId" entity-alias="WEP" field="emplPositionClassId"/>
+        <alias name="workEffortPartyComments" entity-alias="WEP" field="comments"/>
+        <alias name="workEffortPartyFromDate" entity-alias="WEP" field="fromDate"/>
+        <alias name="workEffortPartyThruDate" entity-alias="WEP" field="thruDate"/>
+        <alias name="workEffortPartyWorkTypeEnumId" entity-alias="WEP" field="workTypeEnumId"/>
+        <alias name="partyStatusId" entity-alias="WEP" field="statusId"/>
+    </view-entity>
+
+    <view-entity entity-name="WorkEffortPartyAndTimeEntry" package="mantle.work.time">
+        <member-entity entity-alias="WEP" entity-name="mantle.work.effort.WorkEffortParty"/>
+        <member-entity entity-alias="PTY" entity-name="mantle.party.Party" join-from-alias="WEP">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="ORG" entity-name="mantle.party.Organization" join-from-alias="WEP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="WEP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="TENT" entity-name="mantle.work.time.TimeEntry" join-from-alias="WEP" join-optional="true">
+            <key-map field-name="partyId"/><key-map field-name="workEffortId"/></member-entity>
+        <alias-all entity-alias="WEP"/>
+        <alias-all entity-alias="TENT" prefix="te"/>
+        <alias-all entity-alias="PTY"><exclude field="comments"/></alias-all>
+        <alias-all entity-alias="PER"/>
+        <alias-all entity-alias="ORG"/>
+    </view-entity>
+</entities>

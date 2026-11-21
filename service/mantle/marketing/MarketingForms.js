@@ -3,7 +3,7 @@
 // Grant of Patent License.
 //
 // - The forms are the survey builder's (mantle.party.FormDefinitionServices) of Marketing's purposes, registered in Mantle's seed data
-//   (data/MarketingSeedData.xml: the survey, the lead form and the registration questions; edited with MARKETING_CONTENT_EDIT, read
+//   (data/10-seed/MarketingAndCommerce.xml: the survey, the lead form and the registration questions; edited with MARKETING_CONTENT_EDIT, read
 //   with MARKETING_AUDIENCE_VIEW or MARKETING_REPORT_VIEW, in the organizations get#FormScope answers). No case feedback or People
 //   form is reached here: those are other purposes, and a response is read only through a submission to a Marketing publication.
 // - The publications are Commons' (FormPublication.js); these are thin wrappers that add Marketing's checks: the form a Marketing

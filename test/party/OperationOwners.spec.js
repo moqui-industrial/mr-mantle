@@ -2,7 +2,7 @@
 // (StoreChannelServices.find#MessageRecoveryTargets, recover#StoreMessage), the delivery ledger's mail outcomes
 // (MessageServices.find#MailOutcomeOwners, recover#OwnedMailOutcome) and the forum's
 // (DeliveryWorkerServices.find#MailOutcomeOwners).
-// Every user may call them (MantleOperationOwners, data/PartyAccessData.xml), so an operator reaches them with no grant of
+// Every user may call them (MantleOperationOwners, data/10-seed/PartyAndIdentity.xml), so an operator reaches them with no grant of
 // its own; each refuses a caller without its permission by its own check. Authorization on, spec-local users and records.
 // Run: ./moq test mr-mantle --spec OperationOwners
 const SC = "mantle.product.StoreChannelServices.",

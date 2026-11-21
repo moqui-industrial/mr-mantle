@@ -1,5 +1,5 @@
 // Service levels of support cases (design-customer-service §3 CaseDetail, §7 CaseAnalytics, §9 ServiceLevelPolicies;
-// impl-customer-service P4, CS-SLA, CS-JOBS, D23, F8, F32, F64, F83; SupportSlaEntities.xml; SlaServices.xml). A case gets
+// impl-customer-service P4, CS-SLA, CS-JOBS, D23, F8, F32, F64, F83; entity/request/SupportEntities.xml; SlaServices.xml). A case gets
 // its clocks at intake (start#CaseEpisode, from ensure#CaseProfile): the policy of its organization whose conditions hold,
 // the most specific first (a service agreement, the customer, the queue, the type, the default; impl-customer-service §4), as
 // in effect at the accepted intake time, and its target for the case's priority band. Each clock is an episode bound to that

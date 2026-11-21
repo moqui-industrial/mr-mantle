@@ -4,7 +4,7 @@
 // the caller's People scope first (People.js scopeOf: an HR editor, PEOPLE_HR_VIEW and PEOPLE_HR_EDIT, of the employer, for a hire
 // and a change) and reads and writes with authorization off after it. A decision is checked by record#Decision (Approvals.js).
 //
-// The records (HumanResourcesEntities.xml):
+// The records (entity/humanres/EmploymentEntities.xml):
 // - an employment is the PrtEmployee relationship from the person to the legal employer and its Employment row, one at a time per
 //   person and employer (create#Employment's overlap check is of PrtEmployee alone, F3); a rehire is a new one, the old one kept;
 //   an orphan PrtEmployee relationship (no Employment row) is completed, never duplicated; People never deletes one, nor calls

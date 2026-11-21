@@ -1,0 +1,660 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!-- mantle.account.payment -->
+    <!-- ========================================================= -->
+    <entity entity-name="Deduction" package="mantle.account.payment" cache="never">
+        <field name="deductionId" type="id" is-pk="true"/>
+        <field name="deductionTypeEnumId" type="id"/>
+        <field name="paymentId" type="id"/>
+        <field name="amount" type="currency-amount"/>
+        <relationship type="one" title="DeductionType" related="moqui.basic.Enumeration">
+            <key-map field-name="deductionTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.account.payment.Payment"/>
+    </entity>
+
+    <entity entity-name="Payment" package="mantle.account.payment" short-alias="payments" cache="never" optimistic-lock="true">
+        <field name="paymentId" type="id" is-pk="true"/>
+        <field name="paymentTypeEnumId" type="id"/>
+        <field name="fromPartyId" type="id" enable-audit-log="update"/>
+        <field name="toPartyId" type="id" enable-audit-log="update"/>
+
+        <!-- Deprecated, use paymentInstrumentEnumId: <field name="paymentMethodTypeEnumId" type="id"/> -->
+        <field name="paymentInstrumentEnumId" type="id"><description>The payment instrument used for the payment; for
+            non-cash and other instruments represented by an account specify details of it with paymentMethodId</description></field>
+
+        <field name="paymentMethodId" type="id"><description>The from PaymentMethod (owned by fromPartyId)</description></field>
+        <field name="toPaymentMethodId" type="id"><description>The to PaymentMethod (owned by toPartyId), if applicable,
+            the account the payment goes to</description></field>
+        <field name="paymentGatewayConfigId" type="id"><description>Use this PaymentGatewayConfig for auth/etc. For Payments
+            by CC/etc that are not from an order and/or the order is not associated with a ProductStore. Also set
+            automatically on auth for capture, etc.</description></field>
+        <field name="orderId" type="id"><description>Set if the Payment represents the payment settings for an Order.</description></field>
+        <field name="orderPartSeqId" type="id"><description>Set if the Payment represents the payment settings for an OrderPart.</description></field>
+        <field name="orderItemSeqId" type="id"><description>Set if the Payment represents the payment settings for an OrderItem.</description></field>
+
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="effectiveDate" type="date-time" enable-audit-log="update"><description>When the payment is issued (delivered)</description></field>
+        <field name="settlementDate" type="date-time"><description>When the payment is settled (confirmed)</description></field>
+        <field name="dueDate" type="date-time"><description>Due Date for this Payment, different concept than Invoice Due Date for planned split payments, etc</description></field>
+        <field name="paymentAuthCode" type="text-short"/>
+        <field name="paymentRefNum" type="text-short" enable-audit-log="update"/>
+        <field name="comments" type="text-medium"/>
+        <field name="memo" type="text-medium"/>
+        <field name="distGroupEnumId" type="id"/>
+
+        <field name="amount" type="currency-amount" enable-audit-log="update"/>
+        <field name="amountUomId" type="id"/>
+        <field name="appliedTotal" type="currency-amount"/>
+        <field name="unappliedTotal" type="currency-amount"/>
+
+        <field name="forInvoiceId" type="id" enable-audit-log="update"/>
+        <field name="refundForPaymentId" type="id"/>
+        <field name="finAccountId" type="id"/>
+        <field name="finAccountAuthId" type="id"/>
+        <field name="finAccountTransId" type="id"/>
+        <field name="overrideGlAccountId" type="id"><description>Overrides the GlAccount for the PaymentMethod entry,
+            ie for the cash account the payment goes into.</description></field>
+        <field name="overrideOrgPartyId" type="id"><description>Used to specify the organization override rather than
+            using the fromPartyId and/or toPartyId (depending on which is an internal org).</description></field>
+
+        <field name="partyRelationshipId" type="id"><description>For Payroll payments, points to Employment record</description></field>
+        <field name="timePeriodId" type="id"><description>For Payroll payments, points to Payroll TimePeriod</description></field>
+
+        <!-- The Original Currency amount and uomId are for the values coming from the bank (if known) and are to be used for reconciliation and such later, and not for PaymentApplication. -->
+        <field name="originalCurrencyAmount" type="currency-amount"/>
+        <field name="originalCurrencyUomId" type="id"/>
+
+        <field name="presentFlag" type="text-indicator"/>
+        <field name="swipedFlag" type="text-indicator"/>
+        <field name="processAttempt" type="number-integer"/>
+        <field name="needsNsfRetry" type="text-indicator"/>
+
+        <field name="visitId" type="id"><description>Track the Visit so we know the session info, including client IP,
+            for audit and fraud purposes.</description></field>
+        <field name="acctgTransResultEnumId" type="id"/>
+        <field name="reconcileStatusId" type="id" default="'PmtrNot'"/>
+        <field name="paymentMethodFileId" type="id"><description>If included in a file for processing, file ID goes here</description></field>
+
+        <relationship type="one" title="PaymentType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="paymentTypeEnumId"/></relationship>
+        <relationship type="one" title="PaymentInstrument" related="moqui.basic.Enumeration" short-alias="instrument">
+            <key-map field-name="paymentInstrumentEnumId"/></relationship>
+        <relationship type="one" related="mantle.account.method.PaymentMethod" short-alias="method"/>
+        <relationship type="one" title="To" related="mantle.account.method.PaymentMethod" short-alias="toMethod">
+            <key-map field-name="toPaymentMethodId"/></relationship>
+        <relationship type="one-nofk" related="mantle.account.method.CreditCard" short-alias="creditCard"/>
+        <relationship type="one" related="mantle.account.method.PaymentGatewayConfig" short-alias="paymentGatewayConfig"/>
+        <relationship type="one" related="mantle.order.OrderHeader" short-alias="orderHeader"/>
+        <relationship type="one-nofk" related="mantle.order.OrderPart" short-alias="orderPart"/>
+        <relationship type="one-nofk" related="mantle.order.OrderItem" short-alias="orderItem"/>
+        <relationship type="one" title="PayDistributionGroup" related="moqui.basic.Enumeration" short-alias="distGroup">
+            <key-map field-name="distGroupEnumId"/></relationship>
+
+        <relationship type="one" title="Amount" related="moqui.basic.Uom" short-alias="amountUom">
+            <key-map field-name="amountUomId"/></relationship>
+        <relationship type="one" title="From" related="mantle.party.Party" short-alias="fromParty">
+            <key-map field-name="fromPartyId"/></relationship>
+        <relationship type="one" title="To" related="mantle.party.Party" short-alias="toParty">
+            <key-map field-name="toPartyId"/></relationship>
+        <relationship type="one" title="Payment" related="moqui.basic.StatusItem" short-alias="status"/>
+
+        <relationship type="one" title="For" related="mantle.account.invoice.Invoice" short-alias="forInvoice">
+            <key-map field-name="forInvoiceId"/></relationship>
+        <relationship type="one" title="RefundFor" related="mantle.account.payment.Payment" short-alias="refundForPayment">
+            <key-map field-name="refundForPaymentId"/></relationship>
+        <relationship type="one" related="mantle.account.financial.FinancialAccount" short-alias="financialAccount"/>
+        <relationship type="one" related="mantle.account.financial.FinancialAccountAuth" short-alias="financialAccountAuth"/>
+        <relationship type="one" related="mantle.account.financial.FinancialAccountTrans" short-alias="financialAccountTrans"/>
+        <relationship type="one" title="Override" related="mantle.ledger.account.GlAccount" short-alias="overrideGlAccount">
+            <key-map field-name="overrideGlAccountId"/></relationship>
+        <relationship type="one" title="OverrideOrg" related="mantle.party.Party" short-alias="overrideOrgParty">
+            <key-map field-name="overrideOrgPartyId"/></relationship>
+
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one" related="mantle.party.time.TimePeriod" short-alias="timePeriod"/>
+
+        <relationship type="one" title="OriginalCurrency" related="moqui.basic.Uom" short-alias="originalCurrencyUom">
+            <key-map field-name="originalCurrencyUomId"/></relationship>
+        <relationship type="one" related="moqui.server.Visit"/>
+        <relationship type="one" title="AcctgTransResult" related="moqui.basic.Enumeration" short-alias="acctgTransResultEnum">
+            <key-map field-name="acctgTransResultEnumId"/></relationship>
+        <relationship type="one" title="AcctgTransEntryReconcile" related="moqui.basic.StatusItem" short-alias="reconcileStatus">
+            <key-map field-name="reconcileStatusId"/></relationship>
+        <relationship type="one" related="mantle.account.method.PaymentMethodFile" short-alias="paymentMethodFile"/>
+
+        <relationship type="many" related="mantle.account.payment.PaymentApplication" short-alias="applications">
+            <key-map field-name="paymentId"/></relationship>
+        <relationship type="many" title="To" related="mantle.account.payment.PaymentApplication" short-alias="toApplications">
+            <key-map field-name="paymentId" related="toPaymentId"/></relationship>
+        <relationship type="many" related="mantle.account.payment.PaymentContent" short-alias="contents">
+            <key-map field-name="paymentId"/></relationship>
+
+        <index name="PAYMENT_REFNUM"><index-field name="paymentRefNum"/></index>
+
+
+        <seed-data>
+            <!-- Payment Type -->
+            <moqui.basic.EnumerationType description="Payment Type" enumTypeId="PaymentType"/>
+            <moqui.basic.Enumeration description="Disbursement" enumId="PtDisbursement" enumTypeId="PaymentType"/>
+            <moqui.basic.Enumeration description="Refund" enumId="PtRefund" enumTypeId="PaymentType"/>
+            <moqui.basic.Enumeration description="VAT Tax Settlement" enumId="PtVatTaxSettlement" enumTypeId="PaymentType"/>
+            <!-- Payment meant to be applied to an invoice -->
+            <moqui.basic.Enumeration description="Invoice Payment" enumId="PtInvoicePayment" enumTypeId="PaymentType"/>
+            <moqui.basic.Enumeration description="Pre Payment - Expense" enumId="PtPrePayment" parentEnumId="PtInvoicePayment" enumTypeId="PaymentType"/>
+            <moqui.basic.Enumeration description="Pre Payment - Inventory" enumId="PtPrePaymentInventory" parentEnumId="PtInvoicePayment" enumTypeId="PaymentType"/>
+            <!-- Payment for deposit to or withdrawal from a FinancialAccount, never applied to an invoice -->
+            <moqui.basic.Enumeration description="Financial Account Transaction" enumId="PtFinancialAccount" enumTypeId="PaymentType"/>
+            <moqui.basic.Enumeration description="Order Payment Preference" enumId="PtOrderPref" enumTypeId="PaymentType"/>
+            <!-- Payment of payroll invoices -->
+            <moqui.basic.Enumeration description="Payroll Employee Payment" enumId="PtPayrollPayment" enumTypeId="PaymentType" parentEnumId="PtInvoicePayment"/>
+            <moqui.basic.Enumeration description="Payroll Other Payment" enumId="PtPayrollOtherPayment" enumTypeId="PaymentType" parentEnumId="PtInvoicePayment"/>
+
+            <!-- Payment Instrument -->
+            <moqui.basic.EnumerationType description="Payment Instrument" enumTypeId="PaymentInstrument"/>
+            <moqui.basic.Enumeration description="ACH Direct" enumId="PiAch" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Amazon Pay" enumId="PiAmazonPay" enumTypeId="PaymentInstrument" relatedEnumId="PmtAmazonPayAccount"/>
+            <moqui.basic.Enumeration description="Bitcoin" enumId="PiBitcoinWallet" enumTypeId="PaymentInstrument" relatedEnumId="PmtBitcoinWallet"/>
+            <moqui.basic.Enumeration description="Credit Card" enumId="PiCreditCard" enumCode="MP08" enumTypeId="PaymentInstrument" relatedEnumId="PmtCreditCard"/>
+            <moqui.basic.Enumeration description="Debit Card" enumId="PiDebitCard" enumCode="MP08" enumTypeId="PaymentInstrument" relatedEnumId="PmtCreditCard"/>
+            <moqui.basic.Enumeration description="PayPal Account" enumId="PiPayPalAccount" enumTypeId="PaymentInstrument" relatedEnumId="PmtPayPalAccount"/>
+            <moqui.basic.Enumeration description="Gift Card" enumId="PiGiftCard" enumTypeId="PaymentInstrument" relatedEnumId="PmtGiftCard"/>
+            <moqui.basic.Enumeration description="Gift Certificate" enumId="PiGiftCertificate" enumTypeId="PaymentInstrument"/>
+            <moqui.basic.Enumeration description="Cash" enumId="PiCash" enumCode="MP01" enumTypeId="PaymentInstrument"/>
+            <moqui.basic.Enumeration description="Financial Account" enumId="PiFinancialAccount" enumTypeId="PaymentInstrument" relatedEnumId="PmtFinancialAccount"/>
+            <moqui.basic.Enumeration description="Personal Check" enumId="PiPersonalCheck" enumCode="MP02" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Company Check" enumId="PiCompanyCheck" enumCode="MP02" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Certified Check" enumId="PiCertifiedCheck" enumCode="MP03" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Money Order" enumId="PiMoneyOrder" enumTypeId="PaymentInstrument"/>
+            <moqui.basic.Enumeration description="Company Account" enumId="PiCompanyAccount" enumTypeId="PaymentInstrument" relatedEnumId="PmtFinancialAccount"/>
+            <moqui.basic.Enumeration description="Billing Account" enumId="PiBillingAccount" enumTypeId="PaymentInstrument"/>
+            <moqui.basic.Enumeration description="Cash On Delivery" enumId="PiCod" enumTypeId="PaymentInstrument"/>
+            <moqui.basic.Enumeration description="Wire Transfer" enumId="PiWireTransfer" enumCode="MP05" enumTypeId="PaymentInstrument"/>
+            <moqui.basic.Enumeration description="Other" enumId="PiOther" enumTypeId="PaymentInstrument"/>
+            <moqui.basic.Enumeration description="Check" enumId="PiCheck" enumCode="MP02" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Banker's Draft" enumId="PiBankersDraft" enumCode="MP03" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Cash at Treasury" enumId="PiCashAtTreasury" enumCode="MP04" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Bank Transfer" enumId="PiBankTransfer" enumCode="MP05" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Promissory Note (Vaglia Cambiario)" enumId="PiPromissoryNote" enumCode="MP06" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Pre-compiled Bank Payment Slip" enumId="PiPreCompiledBankPaymentSlip" enumCode="MP07" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Payment Card" enumId="PiPaymentCard" enumCode="MP08" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Direct Debit (RID)" enumId="PiDirectDebit" enumCode="MP09" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Utilities Direct Debit" enumId="PiUtilitiesDirectDebit" enumCode="MP10" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Fast Direct Debit" enumId="PiFDD" enumCode="MP11" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Collection Order" enumId="PiCollectionOrder" enumCode="MP12" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/><!-- RIBA -->
+            <moqui.basic.Enumeration description="Payment by Notice" enumId="PiPN" enumCode="MP13" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Tax Office Quittance" enumId="PiTaxOfficeQuittance" enumCode="MP14" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Transfer on Special Accounting Account" enumId="PiTransfSpecAcctgAccount" enumCode="MP15" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Order for Direct Payment from Bank Account" enumId="PiOrdDirPaymentBankAccount" enumCode="MP16" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Order for Direct Payment from Post Office Account" enumId="PiOrdDirPaymentPostOfficeAccount" enumCode="MP17" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Bulletin Postal Account" enumId="PiBulletinPostalAccount" enumCode="MP18" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="SEPA Direct Debit" enumId="PiSEPADirectDebit" enumCode="MP19" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="SEPA Direct Debit Core" enumId="PiSEPADirectDebitCore" enumCode="MP20" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="SEPA Direct Debit B2B" enumId="PiSEPADirectDebitB2B" enumCode="MP21" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Deduction on Sums already Collected" enumId="PiDeducSumsCollected" enumCode="MP22" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="Pago PA" enumId="PiPagoPA" enumCode="MP23" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <moqui.basic.Enumeration description="F24" enumId="PiF24" enumTypeId="PaymentInstrument" relatedEnumId="PmtBankAccount"/>
+            <!-- Using Payment for these is messy, use adjust#Invoice with appropriate item type instead:
+            <moqui.basic.Enumeration description="Write-off" enumId="PiWriteOff" enumTypeId="PaymentInstrument"/>
+            <moqui.basic.Enumeration description="Discount" enumId="PiDiscount" enumTypeId="PaymentInstrument"/>
+            -->
+            <!-- really need this? implied by various more specific others... <moqui.basic.Enumeration description="Offline Payment" enumId="PiOffline" enumTypeId="PaymentInstrument"/> -->
+
+            <!-- Payment Distribution Group -->
+            <moqui.basic.EnumerationType description="Payment Distribution Group" enumTypeId="PayDistributionGroup"/>
+            <moqui.basic.Enumeration sequenceNum="1" description="Employee - Executive" enumId="PdgEmployeeExecutive" enumTypeId="PayDistributionGroup"/>
+            <moqui.basic.Enumeration sequenceNum="2" description="Employee - Regular" enumId="PdgEmployeeRegular" enumTypeId="PayDistributionGroup"/>
+            <moqui.basic.Enumeration sequenceNum="3" description="Employee - Labor" enumId="PdgEmployeeLabor" enumTypeId="PayDistributionGroup"/>
+            <moqui.basic.Enumeration sequenceNum="9" description="Supplier - General" enumId="PdgSupplierGeneral" enumTypeId="PayDistributionGroup"/>
+
+            <!-- Payment Status -->
+            <moqui.basic.StatusType description="Payment Status" statusTypeId="Payment"/>
+            <moqui.basic.StatusItem description="Proposed" sequenceNum="1" statusId="PmntProposed" statusTypeId="Payment"/>
+            <moqui.basic.StatusItem description="Promised" sequenceNum="2" statusId="PmntPromised" statusTypeId="Payment"/>
+            <moqui.basic.StatusItem description="Authorized" sequenceNum="3" statusId="PmntAuthorized" statusTypeId="Payment"/>
+            <moqui.basic.StatusItem description="Delivered" sequenceNum="4" statusId="PmntDelivered" statusTypeId="Payment"/>
+            <moqui.basic.StatusItem description="Confirmed Paid" sequenceNum="6" statusId="PmntConfirmed" statusTypeId="Payment"/>
+            <moqui.basic.StatusItem description="Cancelled" sequenceNum="91" statusId="PmntCancelled" statusTypeId="Payment"/>
+            <moqui.basic.StatusItem description="Void" sequenceNum="92" statusId="PmntVoid" statusTypeId="Payment"/>
+            <moqui.basic.StatusItem description="Declined" sequenceNum="93" statusId="PmntDeclined" statusTypeId="Payment"/>
+            <!-- deprecated, should always be separate payment applied to refunded payment: <moqui.basic.StatusItem description="Refunded" sequenceNum="94" statusId="PmntRefunded" statusTypeId="Payment"/> -->
+
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntProposed" toStatusId="PmntPromised" transitionName="Promise"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntProposed" toStatusId="PmntCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntPromised" toStatusId="PmntAuthorized" transitionName="Authorize"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntPromised" toStatusId="PmntDelivered" transitionName="Deliver"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntPromised" toStatusId="PmntCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntPromised" toStatusId="PmntDeclined" transitionName="Decline"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntDeclined" toStatusId="PmntPromised" transitionName="Promise"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntDeclined" toStatusId="PmntAuthorized" transitionName="Authorize"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntAuthorized" toStatusId="PmntPromised" transitionName="Unauthorize"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntAuthorized" toStatusId="PmntDelivered" transitionName="Deliver"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntAuthorized" toStatusId="PmntCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntAuthorized" toStatusId="PmntVoid" transitionName="Void"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntAuthorized" toStatusId="PmntDeclined" transitionName="Decline"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntDelivered" toStatusId="PmntAuthorized" transitionName="Undeliver"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntDelivered" toStatusId="PmntPromised" transitionName="Undeliver and Unauthorize"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntDelivered" toStatusId="PmntConfirmed" transitionName="Confirm"/>
+            <!-- deprecated: <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntDelivered" toStatusId="PmntRefunded" transitionName="Refund"/> -->
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntDelivered" toStatusId="PmntCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntDelivered" toStatusId="PmntVoid" transitionName="Void"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntDelivered" toStatusId="PmntDeclined" transitionName="Decline"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntConfirmed" toStatusId="PmntDelivered" transitionName="Unconfirm"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntConfirmed" toStatusId="PmntVoid" transitionName="Void"/>
+            <!-- deprecated: <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmntConfirmed" toStatusId="PmntRefunded" transitionName="Refund"/> -->
+
+            <!-- Payment Reconcile Status -->
+            <moqui.basic.StatusType description="Payment Reconcile Status" statusTypeId="PaymentReconcile"/>
+            <moqui.basic.StatusItem description="Not Reconciled" sequenceNum="1" statusId="PmtrNot" statusTypeId="PaymentReconcile"/>
+            <moqui.basic.StatusItem description="Partly Reconciled" sequenceNum="2" statusId="PmtrPartly" statusTypeId="PaymentReconcile"/>
+            <moqui.basic.StatusItem description="Reconciled" sequenceNum="3" statusId="PmtrRec" statusTypeId="PaymentReconcile"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmtrNot" toStatusId="PmtrPartly" transitionName="Partly Reconcile"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmtrNot" toStatusId="PmtrRec" transitionName="Reconcile"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmtrPartly" toStatusId="PmtrRec" transitionName="Reconcile"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmtrPartly" toStatusId="PmtrNot" transitionName="Unreconcile"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PmtrRec" toStatusId="PmtrNot" transitionName="Unreconcile"/>
+        </seed-data>
+        <master>
+            <detail relationship="type"/>
+            <detail relationship="instrument"/>
+            <detail relationship="method" use-master="default"/>
+            <detail relationship="toMethod" use-master="default"/>
+            <detail relationship="distGroup"/>
+            <detail relationship="amountUom"/>
+            <detail relationship="fromParty" use-master="basic"/>
+            <detail relationship="toParty" use-master="basic"/>
+            <detail relationship="status"/>
+            <detail relationship="applications"/>
+            <detail relationship="contents"/>
+        </master>
+    </entity>
+
+    <entity entity-name="PaymentFraudEvidence" package="mantle.account.payment" cache="never">
+        <description>
+            Evidence of payment fraud with references to the Payment and possibly OrderHeader that represents the fraud.
+
+            Other entities like ContactMech and PaymentMethod have a reference to this entity when they are gray- or
+            black-listed based on this evidence.
+        </description>
+        <field name="paymentFraudEvidenceId" type="id" is-pk="true"/>
+        <field name="fraudTypeEnumId" type="id"/>
+        <field name="comments" type="text-medium"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="paymentId" type="id"/>
+        <field name="orderId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="visitId" type="id"/>
+        <relationship type="one" title="FraudType" related="moqui.basic.Enumeration">
+            <key-map field-name="fraudTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.account.payment.Payment"/>
+        <relationship type="one" related="mantle.order.OrderHeader"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="moqui.server.Visit"/>
+    </entity>
+
+    <entity entity-name="PaymentApplication" package="mantle.account.payment" short-alias="paymentApplications" cache="never">
+        <description>
+            Payment application to settle payments and invoices. Can be used for multiple scenarios using different fields:
+
+            1. Apply a Payment (paymentId) to an Invoice (invoiceId)
+            2. Apply a Payment (paymentId) such as a refund to another Payment (toPaymentId) such as an invoice payment
+            3. Apply an Invoice (invoiceId) such as a Credit Memo payable to another Invoice (toInvoiceId) such as a Sales/Purchase receivable
+
+            In all cases the two opposing records should have reverse from/to party IDs.
+
+            To constrain to these three scenarios if toPaymentId is set paymentId should always be set, and if toInvoiceId is set invoiceId should always be set.
+        </description>
+        <field name="paymentApplicationId" type="id" is-pk="true"/>
+        <field name="paymentId" type="id"/>
+        <field name="invoiceId" type="id"/>
+        <field name="billingAccountId" type="id"/>
+        <field name="overrideGlAccountId" type="id">
+            <description>If specified payment is applied directly against this GL account instead of the mapped AR/AP account</description></field>
+        <field name="toPaymentId" type="id">
+            <description>Use to apply a Payment to another Payment like a payment that is a return of a mistaken or over-payment</description></field>
+        <field name="toInvoiceId" type="id">
+            <description>Use to apply an Invoice to another Invoice like a Credit Memo payable to a Sales/Purchase receivable</description></field>
+        <field name="taxAuthGeoId" type="id"/>
+        <field name="amountApplied" type="currency-amount" enable-audit-log="update"/>
+        <field name="amountOriginallyApplied" type="currency-amount"/>
+        <field name="appliedDate" type="date-time" enable-audit-log="update"/>
+        <field name="acctgTransResultEnumId" type="id"/>
+        <relationship type="one" related="mantle.account.payment.Payment" short-alias="payment">
+            <key-map field-name="paymentId"/></relationship>
+        <relationship type="one" related="mantle.account.invoice.Invoice" short-alias="invoice">
+            <key-map field-name="invoiceId"/></relationship>
+        <relationship type="one-nofk" related="mantle.account.invoice.InvoiceItem" short-alias="invoiceItem">
+            <key-map field-name="invoiceId"/><key-map field-name="invoiceItemSeqId"/></relationship>
+        <relationship type="one" related="mantle.account.billing.BillingAccount" short-alias="billingAccount">
+            <key-map field-name="billingAccountId"/></relationship>
+        <relationship type="one" title="To" related="mantle.account.payment.Payment" short-alias="toPayment">
+            <key-map field-name="toPaymentId"/></relationship>
+        <relationship type="one" title="To" related="mantle.account.invoice.Invoice" short-alias="toInvoice">
+            <key-map field-name="toInvoiceId"/></relationship>
+        <relationship type="one" title="TaxAuth" related="moqui.basic.Geo" short-alias="taxAuthGeo">
+            <key-map field-name="taxAuthGeoId"/></relationship>
+        <relationship type="one" title="Override" related="mantle.ledger.account.GlAccount" short-alias="overrideGlAccount">
+            <key-map field-name="overrideGlAccountId"/></relationship>
+        <relationship type="one" title="AcctgTransResult" related="moqui.basic.Enumeration" short-alias="acctgTransResultEnum">
+            <key-map field-name="acctgTransResultEnumId"/></relationship>
+    </entity>
+
+    <entity entity-name="PaymentBudgetAllocation" package="mantle.account.payment" cache="never">
+        <field name="paymentId" type="id" is-pk="true"/>
+        <field name="budgetId" type="id" is-pk="true"/>
+        <field name="budgetItemSeqId" type="id" is-pk="true"/>
+        <field name="amount" type="currency-amount"/>
+        <relationship type="one" related="mantle.other.budget.BudgetItem">
+            <key-map field-name="budgetId"/><key-map field-name="budgetItemSeqId"/></relationship>
+        <relationship type="one" related="mantle.account.payment.Payment"/>
+    </entity>
+
+    <entity entity-name="PaymentContent" package="mantle.account.payment" cache="never">
+        <field name="paymentContentId" type="id" is-pk="true"/>
+        <field name="paymentId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.account.payment.Payment" short-alias="payment"/>
+        <relationship type="one" title="PaymentContentType" related="moqui.basic.Enumeration" short-alias="contentTypeEnum">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <seed-data>
+            <!-- Payment Content Type -->
+            <moqui.basic.EnumerationType description="Payment Content Type" enumTypeId="PaymentContentType"/>
+            <moqui.basic.Enumeration enumId="PctPaymentDocument" description="Payment Document" enumTypeId="PaymentContentType"/>
+            <moqui.basic.Enumeration enumId="PctReceipt" description="Receipt" enumTypeId="PaymentContentType"/>
+            <moqui.basic.Enumeration enumId="PctCheckImage" description="Check Image" enumTypeId="PaymentContentType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PaymentRun" package="mantle.account.payment" cache="never">
+        <description>A batch of supplier payments from one of the organization's bank accounts: the due approved bills
+            selected (PaymentRunItem), approved as a whole (its approved total and the version of its selection), then
+            executed, one payment per supplier, with the bank file of its payments. A change to a supplier's bank details
+            voids a pending approval (void#RunApproval).</description>
+        <field name="paymentRunId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="paymentMethodId" type="id">
+            <description>The organization's bank account the run pays from.</description></field>
+        <field name="paymentInstrumentEnumId" type="id"><description>ACH (PiAch) or check (PiCompanyCheck).</description></field>
+        <field name="currencyUomId" type="id"/>
+        <field name="dueThroughDate" type="date"/>
+        <field name="payDate" type="date"/>
+        <field name="description" type="text-medium"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="approvedByUserId" type="id" enable-audit-log="true"/>
+        <field name="approvedDate" type="date-time" enable-audit-log="true"/>
+        <field name="approvedTotal" type="currency-amount" enable-audit-log="true"/>
+        <field name="approvedVersion" type="text-medium"><description>The fingerprint of the selection approved; execution
+            refuses a selection that differs.</description></field>
+        <field name="isSelfApproved" type="text-indicator" enable-audit-log="true"/>
+        <field name="changedByUserIds" type="text-long"><description>Each user who changed the run's selection, comma separated:
+            none of them approves it unless the organization allows self-approval (SEC-BOS-126)</description></field>
+        <field name="approvalVoidedDate" type="date-time" enable-audit-log="true"/>
+        <field name="approvalVoidReason" type="text-medium" enable-audit-log="true"/>
+        <field name="executedByUserId" type="id"/>
+        <field name="executedDate" type="date-time"/>
+        <field name="executeOperationKey" type="id"><description>The claim of an execution in progress or done: the one key
+            that may execute or resume the run; a completed execution is also a PostingOperation under the
+            key.</description></field>
+        <field name="executionMessage" type="text-medium"><description>Why an executed run is not finished yet (its bank file,
+            or payments not yet applied); the same key resumes it.</description></field>
+        <field name="paymentMethodFileId" type="id"><description>The bank file of the run's payments: NACHA for ACH,
+            Positive Pay for checks when the bank account has a format.</description></field>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.account.method.PaymentMethod"/>
+        <relationship type="one" title="PaymentInstrument" related="moqui.basic.Enumeration">
+            <key-map field-name="paymentInstrumentEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one" title="PaymentRun" related="moqui.basic.StatusItem">
+            <key-map field-name="statusId"/></relationship>
+        <relationship type="one" related="mantle.account.method.PaymentMethodFile"/>
+        <relationship type="many" related="mantle.account.payment.PaymentRunItem" short-alias="items">
+            <key-map field-name="paymentRunId"/></relationship>
+        <index name="PAYMENT_RUN_ORG"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Payment Run" statusTypeId="PaymentRun"/>
+            <moqui.basic.StatusItem statusId="PrunDraft" statusTypeId="PaymentRun" sequenceNum="1" description="Proposed"/>
+            <moqui.basic.StatusItem statusId="PrunApproved" statusTypeId="PaymentRun" sequenceNum="2" description="Approved"/>
+            <moqui.basic.StatusItem statusId="PrunExecuted" statusTypeId="PaymentRun" sequenceNum="3" description="Executed"/>
+            <moqui.basic.StatusItem statusId="PrunCancelled" statusTypeId="PaymentRun" sequenceNum="9" description="Cancelled"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrunDraft" toStatusId="PrunApproved"
+                    transitionName="Approve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrunDraft" toStatusId="PrunCancelled"
+                    transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrunApproved" toStatusId="PrunDraft"
+                    transitionName="Void approval"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrunApproved" toStatusId="PrunExecuted"
+                    transitionName="Execute"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrunApproved" toStatusId="PrunCancelled"
+                    transitionName="Cancel"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PaymentRunItem" package="mantle.account.payment" cache="never">
+        <description>A bill of a payment run: what was open and due when it was selected, the discount within its date, the
+            amount to pay and whether it is in the run, or why it is left out (a hold, no bank account, the user). At
+            execution each supplier's selected items get one payment (paymentId), and the result of each.</description>
+        <field name="paymentRunId" type="id" is-pk="true"/>
+        <field name="paymentRunItemSeqId" type="id" is-pk="true"/>
+        <field name="invoiceId" type="id"/>
+        <field name="supplierPartyId" type="id"/>
+        <field name="toPaymentMethodId" type="id">
+            <description>The supplier's bank account when it was selected.</description></field>
+        <field name="dueDate" type="date"/>
+        <field name="discountDate" type="date"/>
+        <field name="unpaidAmount" type="currency-amount"/>
+        <field name="discountAmount" type="currency-amount"/>
+        <field name="paymentAmount" type="currency-amount"/>
+        <field name="selectedIndicator" type="text-indicator" enable-audit-log="true"/>
+        <field name="excludeReasonEnumId" type="id" enable-audit-log="true"/>
+        <field name="excludeComment" type="text-medium"/>
+        <field name="paymentId" type="id"/>
+        <field name="discountInvoiceId" type="id">
+            <description>The prompt-payment discount credit applied to the bill.</description></field>
+        <field name="resultEnumId" type="id"/>
+        <field name="resultMessage" type="text-medium"/>
+        <relationship type="one" related="mantle.account.payment.PaymentRun"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <relationship type="one" title="Supplier" related="mantle.party.Party">
+            <key-map field-name="supplierPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="To" related="mantle.account.method.PaymentMethod">
+            <key-map field-name="toPaymentMethodId" related="paymentMethodId"/></relationship>
+        <relationship type="one" related="mantle.account.payment.Payment"/>
+        <relationship type="one" title="PaymentRunExclusion" related="moqui.basic.Enumeration">
+            <key-map field-name="excludeReasonEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="PaymentRunResult" related="moqui.basic.Enumeration">
+            <key-map field-name="resultEnumId" related="enumId"/></relationship>
+        <index name="PAYMENT_RUN_ITEM_INVOICE"><index-field name="invoiceId"/></index>
+        <index name="PAYMENT_RUN_ITEM_PAYMENT"><index-field name="paymentId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payment Run Exclusion" enumTypeId="PaymentRunExclusion"/>
+            <moqui.basic.Enumeration enumId="PrxHeld" enumTypeId="PaymentRunExclusion" sequenceNum="1" description="On hold"/>
+            <moqui.basic.Enumeration enumId="PrxNoBankAccount" enumTypeId="PaymentRunExclusion" sequenceNum="2"
+                    description="No bank account for ACH"/>
+            <moqui.basic.Enumeration enumId="PrxInOtherRun" enumTypeId="PaymentRunExclusion" sequenceNum="3"
+                    description="In another open run"/>
+            <moqui.basic.Enumeration enumId="PrxUser" enumTypeId="PaymentRunExclusion" sequenceNum="4"
+                    description="Left out by the user"/>
+            <!-- People P27 (F69): an ACH file is PPD (a person's account), so a payroll payee that is no person (a localization's
+                authority) is paid by check or its own channel -->
+            <moqui.basic.Enumeration enumId="PrxPayeeChannel" enumTypeId="PaymentRunExclusion" sequenceNum="5"
+                    description="Paid by check or the payee's own channel"/>
+            <moqui.basic.EnumerationType description="Payment Run Result" enumTypeId="PaymentRunResult"/>
+            <moqui.basic.Enumeration enumId="PrrPaid" enumTypeId="PaymentRunResult" sequenceNum="1" description="Paid"/>
+            <moqui.basic.Enumeration enumId="PrrSent" enumTypeId="PaymentRunResult" sequenceNum="2"
+                    description="Sent to the bank"/>
+            <moqui.basic.Enumeration enumId="PrrFailed" enumTypeId="PaymentRunResult" sequenceNum="3" description="Failed"/>
+            <moqui.basic.Enumeration enumId="PrrReturned" enumTypeId="PaymentRunResult" sequenceNum="4"
+                    description="Returned by the bank"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PortalPaymentAttempt" package="mantle.account.payment" cache="never">
+        <description>A payment started from a Billing page (start#InvoicePayment): its invoice, the site and the link or
+            contact it came from, and the digest of the reference the gateway's return carries. The pages show, refresh
+            and capture only these payments, never one made in Accounting for the same invoice. Since Shop P5 it is Accounting's
+            typed payment attempt (purposeEnumId): Shop's checkout attempts carry their order, checkout, store and site,
+            the snapshot hash, phase, safe outcome and lookup backoff, and have no invoice.</description>
+        <field name="paymentId" type="id" is-pk="true"/>
+        <field name="invoiceId" type="id"/>
+        <field name="siteId" type="id"/>
+        <field name="capabilityId" type="id"/>
+        <field name="contactPartyId" type="id"/>
+        <field name="returnKeyDigest" type="text-medium"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="settledDate" type="date-time"><description>When the payment stopped being pending; the return
+            reference reads the attempt for a day after it.</description></field>
+        <!-- Accounting's typed payment-attempt coordinator (AC-02, review X9; mr-pass impl-shop P5, F13): each attempt has
+            its purpose, and each worker selects its own (Billing's invoice attempts are PapInvoice, or empty for those made
+            before; Shop's checkout attempts PapShopCheckout), so one worker never refreshes or captures another's. -->
+        <field name="purposeEnumId" type="id"><description>PaymentAttemptPurpose: PapInvoice (Billing, also when empty),
+            PapShopCheckout, PapShopRenewal, PapEventRegistration.</description></field>
+        <field name="orderId" type="id"/>
+        <field name="checkoutId" type="id"/>
+        <field name="occurrenceId" type="id"/>
+        <field name="productStoreId" type="id"/>
+        <field name="snapshotHash" type="text-medium"><description>The hash of what the attempt charges (the caller's
+            frozen snapshot).</description></field>
+        <field name="phase" type="text-short"><description>Where the attempt is: authorizing, pending (at the provider),
+            authorized, placed, failed.</description></field>
+        <field name="outcome" type="text-short"><description>The safe outcome a customer may see: approved, declined,
+            unknown, cancelled, mismatch.</description></field>
+        <field name="checkCount" type="number-integer"/>
+        <field name="lastCheckDate" type="date-time"/>
+        <field name="nextCheckDate" type="date-time"><description>When its worker looks it up next (bounded backoff).</description></field>
+        <relationship type="one" related="mantle.account.payment.Payment"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <!-- a checkout attempt's store, whose organization scopes Commerce's payment attempts dataset (BOSS impl-insights F30) -->
+        <relationship type="one-nofk" related="mantle.product.store.ProductStore" short-alias="productStore"/>
+        <relationship type="one" title="PaymentAttemptPurpose" related="moqui.basic.Enumeration">
+            <key-map field-name="purposeEnumId" related="enumId"/></relationship>
+        <index name="PORTAL_PAY_INVOICE"><index-field name="invoiceId"/></index>
+        <index name="PORTAL_PAY_OPEN"><index-field name="settledDate"/><index-field name="createdDate"/></index>
+        <index name="PORTAL_PAY_PURPOSE"><index-field name="purposeEnumId"/><index-field name="settledDate"/>
+            <index-field name="nextCheckDate"/></index>
+        <index name="PORTAL_PAY_CHECKOUT"><index-field name="checkoutId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payment Attempt Purpose" enumTypeId="PaymentAttemptPurpose"/>
+            <moqui.basic.Enumeration description="Invoice payment (Billing)" enumId="PapInvoice" enumTypeId="PaymentAttemptPurpose" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Shop checkout" enumId="PapShopCheckout" enumTypeId="PaymentAttemptPurpose" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Shop renewal" enumId="PapShopRenewal" enumTypeId="PaymentAttemptPurpose" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Event registration" enumId="PapEventRegistration" enumTypeId="PaymentAttemptPurpose" sequenceNum="4"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PaymentDeposit" package="mantle.account.payment" cache="never">
+        <description>A deposit slip: receipts of one bank account and currency taken to the bank together, so the bank
+            reports one line for them. Each receipt points at its deposit (Payment.paymentDepositId), and the deposit's one
+            bank line reconciles them all (PaymentMethodTrans.paymentDepositId).</description>
+        <field name="paymentDepositId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="paymentMethodId" type="id"><description>The bank account the receipts are deposited in</description>
+        </field>
+        <field name="depositDate" type="date-time"/>
+        <field name="referenceNumber" type="text-medium"/>
+        <field name="totalAmount" type="currency-amount"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="paymentCount" type="number-integer"/>
+        <field name="operationKey" type="id"/>
+        <field name="requestHash" type="text-long"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.account.method.PaymentMethod" short-alias="paymentMethod"/>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currency">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="many" related="mantle.account.payment.Payment" short-alias="payments">
+            <key-map field-name="paymentDepositId"/></relationship>
+        <index name="PAYMENT_DEPOSIT_BANK"><index-field name="paymentMethodId"/><index-field name="depositDate"/></index>
+        <index name="PAYMENT_DEPOSIT_KEY" unique="true"><index-field name="operationKey"/></index>
+    </entity>
+
+    <entity entity-name="PaymentReview" package="mantle.account.payment" cache="never">
+        <description>A review its user confirms once: a settlement, automatic application, payment state change,
+            unapplication, gateway action, refund or internal transfer (previewKindEnumId), or a settlement draft. The
+            request is what confirming plans again, the payload what the user reviewed, and the result what confirming
+            returned; a retry with the same operation key answers the result.</description>
+        <field name="previewId" type="id" is-pk="true"/>
+        <field name="previewKindEnumId" type="id"/>
+        <field name="statusId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="paymentId" type="id"><description>The payment reviewed, or the source of an automatic
+            application.</description></field>
+        <field name="userId" type="id"/>
+        <field name="inputFingerprint" type="text-long"/>
+        <field name="requestJson" type="text-very-long"/>
+        <field name="payloadJson" type="text-very-long"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="expiresDate" type="date-time"/>
+        <field name="operationKey" type="id"/>
+        <field name="resultJson" type="text-very-long"/>
+        <relationship type="one" title="PaymentReviewKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="previewKindEnumId"/>
+        </relationship>
+        <relationship type="one" title="PaymentReview" related="moqui.basic.StatusItem" short-alias="status">
+            <key-map field-name="statusId"/>
+        </relationship>
+        <relationship type="one" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/>
+        </relationship>
+        <relationship type="one" related="mantle.account.payment.Payment" short-alias="payment"/>
+        <relationship type="one" related="moqui.security.UserAccount" short-alias="user"/>
+        <index name="PAYMENT_REVIEW_OWNER">
+            <index-field name="organizationPartyId"/>
+            <index-field name="userId"/>
+        </index>
+        <index name="PAYMENT_REVIEW_OPERATION">
+            <index-field name="operationKey"/>
+        </index>
+    </entity>
+
+    <entity entity-name="PaymentLifecycleEvent" package="mantle.account.payment" cache="never">
+        <description>What a payment's History shows beside its status audit log: each draft, edit, reviewed state change,
+            unapplication and validation decision, by whom, with its reference and reason. A draft's event keeps the
+            revision and method versions its validation notice approves.</description>
+        <field name="paymentLifecycleEventId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="paymentId" type="id"/>
+        <field name="userId" type="id"/>
+        <field name="action" type="text-short"/>
+        <field name="beforeStatusId" type="id"/>
+        <field name="afterStatusId" type="id"/>
+        <field name="referenceNumber" type="text-short"/>
+        <field name="reason" type="text-long"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="operationKey" type="id"/>
+        <field name="expectedSourceVersion" type="text-long"/>
+        <field name="validationPolicyJson" type="text-very-long"/>
+        <field name="sourceValidationEventId" type="id"/>
+        <relationship type="one" related="mantle.account.payment.Payment" short-alias="payment"/>
+        <index name="PAYMENT_EVENT_RECORD">
+            <index-field name="paymentId"/>
+            <index-field name="createdDate"/>
+        </index>
+    </entity>
+</entities>

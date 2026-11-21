@@ -17,9 +17,20 @@ It has no screens of its own. To see it at work, run one of those applications.
 
 ## What is in it
 
-- **The Universal Data Model** (`entity/`): the entities, from party, product, order, shipment, facility and
-  inventory through work effort, request, human resources, the ledger and accounting, to marketing, the forum and
-  public sites. `data/` has their seed, install and demo data, including the demo company Ziziwork Industries.
+- **The Universal Data Model** (`entity/`): business entities grouped by package domain, with separate
+  `*Entities.xml`, `*Views.xml` and `*Extensions.xml` files. Entity ECA rules live directly under `entity/`.
+  Seed records usually live in `<seed-data>` blocks with their definitions. Seed-only `*Data.xml` extensions
+  place records that need a different load order. Root entity files load first, then each domain's files,
+  in name order.
+- **Additional data** (`data/`), grouped by domain within four load phases:
+  - `10-seed/` holds required reference records and repeatable migrations.
+  - `15-seed-initial/` holds initial settings that a deployment can change. Omit this type on routine seed reloads.
+  - `20-install/` holds installation defaults to review or customize before loading, including regional geography,
+    the chart of accounts and its posting mappings.
+  - `30-demo/` holds Ziziwork Industries and example integrations for demo, development and tests.
+  The loader reads a directory's files in name order, then visits each subdirectory in name order, depth first.
+  The XML root's `type` selects which records load. Seed grants need the `MANTLE_USER_ORG` and `MANTLE_ACTIVE_ORG`
+  filter sets. Their definitions load first in `10-seed/`, and their customizable filter rules load in `15-seed-initial/`.
 - **The Universal Service Library** (`service/mantle/<package>/`): the business logic, in service XML with
   JavaScript, by package: `account`, `ledger`, `order`, `party`, `product`, `facility`, `shipment`, `work`,
   `humanres`, `request`, `sales`, `marketing`, `forum`, `smithy`, `public`, `pass`, `search` and `other`. The ECA

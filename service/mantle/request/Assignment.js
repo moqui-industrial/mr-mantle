@@ -1,5 +1,5 @@
 // Case assignment (design-customer-service §9 AgentTeams, AssignmentRules; impl-customer-service P5, CS-ASSIGNMENT, F3, F71;
-// SupportAssignmentEntities.xml). A service queue's assignment rules are effective-dated rows of its organization, in order
+// entity/request/SupportEntities.xml). A service queue's assignment rules are effective-dated rows of its organization, in order
 // (sequenceNum); the first whose typed conditions all hold for the case wins, and its distribution picks an agent: manual
 // leaves the case for an agent to take, round robin takes the next eligible member after the rule's cursor, least open the
 // eligible member with the fewest open cases. An agent is eligible when a current member of the rule's team (the queue's by

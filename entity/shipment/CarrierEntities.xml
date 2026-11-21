@@ -1,0 +1,289 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!-- mantle.shipment.carrier -->
+    <!-- ========================================================= -->
+    <entity entity-name="CarrierShipmentMethod" package="mantle.shipment.carrier" cache="true">
+        <field name="carrierPartyId" type="id" is-pk="true"/>
+        <field name="shipmentMethodEnumId" type="id" is-pk="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="carrierServiceCode" type="text-short"/>
+        <field name="scaCode" type="text-short"><description>Standard Carrier Alpha Code</description></field>
+        <field name="gatewayServiceCode" type="text-short"/>
+        <relationship type="one" title="Carrier" related="mantle.party.Party" short-alias="carrierParty">
+            <key-map field-name="carrierPartyId"/></relationship>
+        <relationship type="one" title="ShipmentMethod" related="moqui.basic.Enumeration" short-alias="shipmentMethodEnum">
+            <key-map field-name="shipmentMethodEnumId"/></relationship>
+        <seed-data>
+            <!-- Shipment Method -->
+            <moqui.basic.EnumerationType description="Shipment Method" enumTypeId="ShipmentMethod"/>
+            <moqui.basic.Enumeration sequenceNum="1" description="Next Day Priority" enumId="ShMthNextDayPri" enumTypeId="ShipmentMethod"/>
+            <moqui.basic.Enumeration sequenceNum="2" description="Next Day Standard" enumId="ShMthNextDay" enumTypeId="ShipmentMethod"/>
+            <moqui.basic.Enumeration sequenceNum="3" description="Second Day" enumId="ShMthSecondDay" enumTypeId="ShipmentMethod"/>
+            <moqui.basic.Enumeration sequenceNum="4" description="Third Day" enumId="ShMthThirdDay" enumTypeId="ShipmentMethod"/>
+            <moqui.basic.Enumeration sequenceNum="5" description="Ground Parcel" enumId="ShMthGround" enumTypeId="ShipmentMethod"/>
+            <!-- NOTE Ground Parcel and Ground Commercial have same sequenceNum so sort together;
+                main reason for Ground Commercial is annoying FedEx: FedEx Ground can't go to residential, FedEx Home Delivery can't go to commercial -->
+            <moqui.basic.Enumeration sequenceNum="5" description="Ground Commercial" enumId="ShMthGroundCom" enumTypeId="ShipmentMethod"/>
+            <moqui.basic.Enumeration sequenceNum="6" description="Motor (Common Carrier)" enumId="ShMthMotor" enumTypeId="ShipmentMethod"/>
+            <moqui.basic.Enumeration sequenceNum="9" description="Customer Pick Up" enumId="ShMthPickUp" enumTypeId="ShipmentMethod"/>
+
+            <mantle.shipment.carrier.CarrierShipmentMethod carrierPartyId="_NA_" shipmentMethodEnumId="ShMthPickUp" sequenceNum="0"/>
+            <mantle.shipment.carrier.CarrierShipmentMethod carrierPartyId="_NA_" shipmentMethodEnumId="ShMthGround" sequenceNum="1"/>
+            <mantle.shipment.carrier.CarrierShipmentMethod carrierPartyId="_NA_" shipmentMethodEnumId="ShMthNextDay" sequenceNum="2"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="CarrierShipmentBoxType" package="mantle.shipment.carrier" cache="true">
+        <field name="carrierPartyId" type="id" is-pk="true"/>
+        <field name="shipmentBoxTypeId" type="id" is-pk="true"/>
+        <field name="packagingTypeCode" type="id"/>
+        <field name="oversizeCode" type="text-short"/>
+        <relationship type="one" related="mantle.shipment.ShipmentBoxType"/>
+        <relationship type="one" title="Carrier" related="mantle.party.Party">
+            <key-map field-name="carrierPartyId"/></relationship>
+    </entity>
+
+    <entity entity-name="Delivery" package="mantle.shipment.carrier" cache="never">
+        <field name="deliveryId" type="id" is-pk="true"/>
+        <field name="originFacilityId" type="id"/>
+        <field name="destFacilityId" type="id"/>
+        <field name="actualStartDate" type="date-time"/>
+        <field name="actualArrivalDate" type="date-time"/>
+        <field name="estimatedStartDate" type="date-time"/>
+        <field name="estimatedArrivalDate" type="date-time"/>
+        <field name="assetId" type="id"/>
+        <field name="startMileage" type="number-decimal"/>
+        <field name="endMileage" type="number-decimal"/>
+        <field name="fuelUsed" type="number-decimal"/>
+        <relationship type="one" related="mantle.product.asset.Asset"/>
+        <relationship type="one" title="Origin" related="mantle.facility.Facility">
+            <key-map field-name="originFacilityId"/></relationship>
+        <relationship type="one" title="Dest" related="mantle.facility.Facility">
+            <key-map field-name="destFacilityId"/></relationship>
+    </entity>
+
+    <entity entity-name="PartyCarrierAccount" package="mantle.shipment.carrier" cache="never">
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="carrierPartyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="accountNumber" type="id"/>
+        <relationship type="one" related="mantle.party.Party">
+            <key-map field-name="partyId"/></relationship>
+        <relationship type="one" title="Carrier" related="mantle.party.Party">
+            <key-map field-name="carrierPartyId"/></relationship>
+    </entity>
+
+    <entity entity-name="ShippingGatewayConfig" package="mantle.shipment.carrier" use="configuration" cache="true">
+        <field name="shippingGatewayConfigId" type="id" is-pk="true"/>
+        <field name="shippingGatewayTypeEnumId" type="id"><description>Each shipping gateway integration should define a
+            ShippingGatewayType Enumeration record plus an entity with a shared PK (ie PK is shippingGatewayConfigId).</description></field>
+        <field name="description" type="text-medium"/>
+        <field name="getOrderRateServiceName" type="text-medium"><description>Service implementing
+            mantle.shipment.CarrierServices.get#OrderShippingRate interface.</description></field>
+        <field name="getShippingRatesBulkName" type="text-medium"><description>Service implementing
+            mantle.shipment.CarrierServices.get#ShippingRatesBulk interface.</description></field>
+        <field name="getAutoPackageInfoName" type="text-medium"><description>Service implementing
+            mantle.shipment.CarrierServices.get#AutoPackageInfo interface.</description></field>
+        <field name="getRateServiceName" type="text-medium"><description>Service implementing
+            mantle.shipment.CarrierServices.get#ShippingRate interface.</description></field>
+        <field name="requestLabelsServiceName" type="text-medium"><description>Service implementing
+            mantle.shipment.CarrierServices.request#ShippingLabels interface.</description></field>
+        <field name="refundLabelsServiceName" type="text-medium"><description>Service implementing
+            mantle.shipment.CarrierServices.refund#ShippingLabels interface.</description></field>
+        <field name="trackLabelsServiceName" type="text-medium"><description>Service implementing
+            mantle.shipment.CarrierServices.track#ShippingLabels interface.</description></field>
+        <field name="validateAddressServiceName" type="text-medium"><description>Service implementing
+            mantle.shipment.CarrierServices.validate#ShippingPostalAddress interface.</description></field>
+        <relationship type="one" title="ShippingGatewayType" related="moqui.basic.Enumeration">
+            <key-map field-name="shippingGatewayTypeEnumId"/></relationship>
+        <relationship type="many" related="mantle.shipment.carrier.ShippingGatewayBoxType" short-alias="boxTypes">
+            <key-map field-name="shippingGatewayConfigId"/></relationship>
+        <relationship type="many" related="mantle.shipment.carrier.ShippingGatewayCarrier" short-alias="carriers">
+            <key-map field-name="shippingGatewayConfigId"/></relationship>
+        <relationship type="many" related="mantle.shipment.carrier.ShippingGatewayMethod" short-alias="methods">
+            <key-map field-name="shippingGatewayConfigId"/></relationship>
+        <relationship type="many" related="mantle.shipment.carrier.ShippingGatewayOption" short-alias="options">
+            <key-map field-name="shippingGatewayConfigId"/></relationship>
+        <seed-data>
+            <!-- Shipping Gateway Type -->
+            <moqui.basic.EnumerationType description="Shipping Gateway Type" enumTypeId="ShippingGatewayType"/>
+            <moqui.basic.Enumeration description="Local Shipping Gateway" enumId="ShGtwyLocal" enumTypeId="ShippingGatewayType"/>
+
+            <mantle.shipment.carrier.ShippingGatewayConfig shippingGatewayConfigId="NA_LOCAL"
+                    shippingGatewayTypeEnumId="ShGtwyLocal" description="Local gateway for order shipping rate"
+                    getOrderRateServiceName="mantle.shipment.CarrierServices.get#OrderShippingRateLocal"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ShippingGatewayBoxType" package="mantle.shipment.carrier" use="configuration" cache="true">
+        <description>Use to override gatewayBoxId on ShipmentBoxType</description>
+        <field name="shippingGatewayConfigId" type="id" is-pk="true"/>
+        <field name="shipmentBoxTypeId" type="id" is-pk="true"/>
+        <field name="gatewayBoxId" type="text-medium"/>
+        <relationship type="one" related="mantle.shipment.carrier.ShippingGatewayConfig"/>
+        <relationship type="one" related="mantle.shipment.ShipmentBoxType" short-alias="boxType"/>
+    </entity>
+
+    <entity entity-name="ShippingGatewayCarrier" package="mantle.shipment.carrier" use="configuration" cache="true">
+        <field name="shippingGatewayConfigId" type="id" is-pk="true"/>
+        <field name="carrierPartyId" type="id" is-pk="true"/>
+        <field name="gatewayAccountId" type="text-medium"/>
+        <relationship type="one" related="mantle.shipment.carrier.ShippingGatewayConfig"/>
+        <relationship type="one" title="Carrier" related="mantle.party.Party">
+            <key-map field-name="carrierPartyId"/></relationship>
+    </entity>
+
+    <entity entity-name="ShippingGatewayMethod" package="mantle.shipment.carrier" use="configuration" cache="true">
+        <description>Use to override gatewayServiceCode on CarrierShipmentMethod</description>
+        <field name="shippingGatewayConfigId" type="id" is-pk="true"/>
+        <field name="carrierPartyId" type="id" is-pk="true"/>
+        <field name="shipmentMethodEnumId" type="id" is-pk="true"/>
+        <field name="gatewayServiceCode" type="text-short"/>
+        <relationship type="one" related="mantle.shipment.carrier.ShippingGatewayConfig"/>
+        <relationship type="one" title="Carrier" related="mantle.party.Party">
+            <key-map field-name="carrierPartyId"/></relationship>
+        <relationship type="one" title="ShipmentMethod" related="moqui.basic.Enumeration" short-alias="shipmentMethodEnum">
+            <key-map field-name="shipmentMethodEnumId"/></relationship>
+    </entity>
+
+    <entity entity-name="ShippingGatewayOption" package="mantle.shipment.carrier" use="configuration" cache="true">
+        <field name="shippingGatewayConfigId" type="id" is-pk="true"/>
+        <field name="optionEnumId" type="id" is-pk="true"/>
+        <field name="optionValue" type="text-medium"/>
+        <relationship type="one" related="mantle.shipment.carrier.ShippingGatewayConfig"/>
+        <relationship type="one" title="ShippingGatewayOption" related="moqui.basic.Enumeration">
+            <key-map field-name="optionEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Shipping Gateway Option" enumTypeId="ShippingGatewayOption"/>
+            <moqui.basic.Enumeration description="API Token" enumId="SgoApiToken" enumTypeId="ShippingGatewayOption"/>
+            <moqui.basic.Enumeration description="Label Type" enumId="SgoLabelType" enumTypeId="ShippingGatewayOption"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ShippingGatewayRequest" package="mantle.shipment.carrier" cache="never">
+        <description>One request to a shipping gateway for a package of a shipment's route segment, recorded and committed
+            before the gateway is called (WarehouseTaskServices request#PackageLabels, refund#PackageLabels,
+            track#PackageLabels, request#ReturnLabel). Requested: sent, no answer yet (or the call never came back);
+            Succeeded and Failed: the gateway's answer; Unknown: the call timed out or failed with no answer, so the
+            gateway (find#ShippingLabels) is asked before any retry. The request id is the reference sent to the gateway,
+            so a gateway that keeps it answers a retry with the first label.</description>
+        <field name="shippingGatewayRequestId" type="id" is-pk="true"/>
+        <field name="requestTypeEnumId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="shippingGatewayConfigId" type="id"/>
+        <field name="shipmentId" type="id"/>
+        <field name="shipmentRouteSegmentSeqId" type="id"/>
+        <field name="shipmentPackageSeqId" type="id"/>
+        <field name="carrierPartyId" type="id"/>
+        <field name="shipmentMethodEnumId" type="id"/>
+        <field name="operationKey" type="text-medium"><description>The client's operation key of the request that sent
+            it.</description></field>
+        <field name="userId" type="id"/>
+        <field name="requestDate" type="date-time"/>
+        <field name="sentDate" type="date-time"><description>When the gateway was called for this attempt; set when the
+            row is claimed for sending (claim#ShippingGatewayRequest), so a parallel retry cannot send it too.</description>
+        </field>
+        <field name="firstSentDate" type="date-time"><description>When the gateway was first called for this request; later
+            attempts and asks do not move it, so a lookup's grace and search window and the pending-label driver's age
+            limit run from it.</description></field>
+        <field name="responseDate" type="date-time"/>
+        <field name="attemptCount" type="number-integer"><description>How many times the gateway was called or asked for
+            this request.</description></field>
+        <field name="trackingCode" type="text-medium"/>
+        <field name="gatewayLabelId" type="text-short"/>
+        <field name="amount" type="currency-amount"/>
+        <field name="amountUomId" type="id"/>
+        <field name="reasonCode" type="text-short"><description>A refusal's code (LABEL_REFUSED, ADDRESS_INVALID,
+            CARRIER_TIMEOUT, ...).</description></field>
+        <field name="resultMessage" type="text-medium"/>
+        <relationship type="one" title="ShippingGatewayRequestType" related="moqui.basic.Enumeration"
+                short-alias="requestType">
+            <key-map field-name="requestTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="ShippingGatewayRequest" related="moqui.basic.StatusItem" short-alias="status">
+            <key-map field-name="statusId"/></relationship>
+        <relationship type="one" related="mantle.shipment.carrier.ShippingGatewayConfig"/>
+        <relationship type="one-nofk" related="mantle.shipment.Shipment" short-alias="shipment"/>
+        <relationship type="one-nofk" related="mantle.shipment.ShipmentPackageRouteSeg" short-alias="packageRouteSeg">
+            <key-map field-name="shipmentId"/><key-map field-name="shipmentPackageSeqId"/>
+            <key-map field-name="shipmentRouteSegmentSeqId"/></relationship>
+        <index name="SHP_GTW_REQ_PKG">
+            <index-field name="shipmentId"/><index-field name="shipmentPackageSeqId"/>
+            <index-field name="requestTypeEnumId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Shipping Gateway Request Type" enumTypeId="ShippingGatewayRequestType"/>
+            <moqui.basic.Enumeration description="Label" enumId="SgrLabel" enumTypeId="ShippingGatewayRequestType"
+                    sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Return label" enumId="SgrReturnLabel"
+                    enumTypeId="ShippingGatewayRequestType" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Refund" enumId="SgrRefund" enumTypeId="ShippingGatewayRequestType"
+                    sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Tracking" enumId="SgrTrack" enumTypeId="ShippingGatewayRequestType"
+                    sequenceNum="4"/>
+            <moqui.basic.StatusType description="Shipping Gateway Request" statusTypeId="ShippingGatewayRequest"/>
+            <moqui.basic.StatusItem statusId="SgrqRequested" statusTypeId="ShippingGatewayRequest" sequenceNum="1"
+                    description="Requested"/>
+            <moqui.basic.StatusItem statusId="SgrqUnknown" statusTypeId="ShippingGatewayRequest" sequenceNum="2"
+                    description="No answer"/>
+            <moqui.basic.StatusItem statusId="SgrqSucceeded" statusTypeId="ShippingGatewayRequest" sequenceNum="5"
+                    description="Succeeded"/>
+            <moqui.basic.StatusItem statusId="SgrqFailed" statusTypeId="ShippingGatewayRequest" sequenceNum="6"
+                    description="Failed"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SgrqRequested" toStatusId="SgrqUnknown"
+                    transitionName="No answer"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SgrqRequested" toStatusId="SgrqSucceeded"
+                    transitionName="Succeed"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SgrqRequested" toStatusId="SgrqFailed"
+                    transitionName="Fail"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SgrqUnknown" toStatusId="SgrqRequested"
+                    transitionName="Ask again"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SgrqUnknown" toStatusId="SgrqSucceeded"
+                    transitionName="Succeed"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SgrqUnknown" toStatusId="SgrqFailed"
+                    transitionName="Fail"/>
+        </seed-data>
+    </entity>
+
+<!-- The Mantle test carrier (mantle.shipment.carrier.TestGatewayServices; impl-warehouse §4, F14): its own record of the
+    labels it issued, as a carrier keeps one, so a lookup after a timeout and a refund check something real. Specs, demos and
+    Carriers' CarrierTest use it; real carriers are their own gateways. -->
+    <entity entity-name="TestCarrierLabel" package="mantle.shipment.carrier" cache="never">
+        <description>A label the test carrier issued: written in its own transaction when it issues it, so a label whose
+            answer was lost (a timeout) is still there when the carrier is asked later.</description>
+        <field name="testCarrierLabelId" type="id" is-pk="true"/>
+        <field name="requestReference" type="text-medium"><description>The caller's reference of the request (a
+            ShippingGatewayRequest id): a second request with it answers this label.</description></field>
+        <field name="shippingGatewayConfigId" type="id"/>
+        <field name="shipmentId" type="id"/>
+        <field name="shipmentRouteSegmentSeqId" type="id"/>
+        <field name="shipmentPackageSeqId" type="id"/>
+        <field name="returnLabel" type="text-indicator"/>
+        <field name="shipmentMethodEnumId" type="id"/>
+        <field name="trackingCode" type="text-medium"/>
+        <field name="amount" type="currency-amount"/>
+        <field name="amountUomId" type="id"/>
+        <field name="zone" type="number-integer"/>
+        <field name="weight" type="number-decimal"/>
+        <field name="issuedDate" type="date-time"/>
+        <field name="refundedDate" type="date-time"/>
+        <index name="TEST_CARRIER_LBL_REF"><index-field name="requestReference"/></index>
+        <index name="TEST_CARRIER_LBL_PKG">
+            <index-field name="shipmentId"/><index-field name="shipmentPackageSeqId"/></index>
+    </entity>
+</entities>

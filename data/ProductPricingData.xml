@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<entity-facade-xml type="seed">
-    <moqui.service.ServiceRegister serviceRegisterId="ProductPriceList" serviceTypeEnumId="ProductPriceModify" serviceName="mantle.product.PriceServices.modify#ProductPriceList" description="Dated price-list policy resolver"/>
-    <mantle.product.ProductPriceModify priceModifyId="ProductPriceList" serviceRegisterId="ProductPriceList" sequenceNum="100"/>
-</entity-facade-xml>

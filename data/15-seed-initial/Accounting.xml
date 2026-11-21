@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed-initial">
+    <!-- An order held for credit is released on the order (CreditServices.release#CreditHold), which marks these read -->
+    <moqui.security.user.NotificationTopic topic="CreditHoldRelease" inboxEnumId="NinNotifications"
+            description="Order held for credit" typeString="warning" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" titleTemplate="Order ${orderId} of ${customerName} is held for credit"/>
+    <!-- A recurring invoice that could not be made (RecurringInvoiceServices.generate#Occurrence) -->
+    <moqui.security.user.NotificationTopic topic="RecurringInvoiceFailed" inboxEnumId="NinNotifications"
+            description="Recurring invoice not made" typeString="danger" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Recurring invoice ${invoiceScheduleId} for ${occurrenceDate} was not made"/>
+
+    <!-- Payment reminders (CollectionServices.send#Dunning): from the organization's billing address; the service passes
+        subject, fromAddress and fromName in bodyParameters, and the body -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_DUNNING_EMAIL" description="Payment Reminder" emailServerId="SYSTEM"
+            fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+
+    <!-- The recurring invoice schedules: the occurrences due, each its own draft, every night at 3:00 am -->
+    <moqui.service.job.ServiceJob jobName="generate_RecurringInvoices" description="Make recurring invoices"
+            serviceName="mantle.account.RecurringInvoiceServices.run#Schedules" cronExpression="0 0 3 * * ?" paused="N"
+            transactionTimeout="1800"/>
+
+    <!-- Payments started from a Billing page that are still pending: each is asked of its gateway every ten minutes, so a
+        payer who never comes back still gets an answer (mantle.account.PortalServices.resolve#PortalPayments). -->
+    <moqui.service.job.ServiceJob jobName="resolve_PortalPayments" description="Resolve pending Billing page payments"
+            serviceName="mantle.account.PortalServices.resolve#PortalPayments" cronExpression="0 0/10 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+
+    <!-- Sent to the organization's users holding BUDGET_OVERRIDE when a budget control Stop refuses spending
+        (mantle.other.BudgetServices; the blocked BudgetCommitment is its record). The override is given on the source
+        document, with a reason, never from the notification. -->
+    <moqui.security.user.NotificationTopic topic="BudgetOverride" inboxEnumId="NinNotifications"
+            description="Spending over budget stopped" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" titleTemplate="Over budget: ${sourceId} needs an override"/>
+
+    <!-- The bill match re-evaluation job: the matches a receipt or bill line change made stale, every five minutes; it
+        names each bill's result and holds a bill whose match no longer holds up, and never releases a hold. -->
+    <moqui.service.job.ServiceJob jobName="run_MatchReevaluation" description="Re-evaluate stale bill matches"
+            serviceName="mantle.account.InvoiceMatchServices.run#MatchReevaluation" cronExpression="0 0/5 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+
+    <!-- Sent to the method organization's users holding METHOD_APPROVE when a method engineer asks for a BOM or routing
+        draft to be released (mantle.product.BomServices request#BomRelease, mantle.work.RoutingServices
+        request#RoutingRelease). The release is decided on the method (release#BomDraft, release#RoutingDraft), never from
+        the notification, so these have no approve service; the release marks them read. -->
+    <moqui.security.user.NotificationTopic topic="BomRelease" inboxEnumId="NinNotifications"
+            description="BOM draft to release" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" titleTemplate="Release the BOM of ${methodName}"/>
+    <moqui.security.user.NotificationTopic topic="RoutingRelease" inboxEnumId="NinNotifications"
+            description="Routing draft to release" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" titleTemplate="Release routing ${methodName}"/>
+
+    <!-- Sent to the topic's subscribers (NotificationTopicUser). A bill is approved or a hold released on the bill itself
+        (approve#Payable, release#InvoiceHold), never from the notification, so these have no approve service. -->
+    <moqui.security.user.NotificationTopic topic="BillApproval" inboxEnumId="NinNotifications" description="Bill to approve"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Approve bill ${invoiceId}"/>
+    <moqui.security.user.NotificationTopic topic="BillHoldRelease" inboxEnumId="NinNotifications"
+            description="Bill hold release asked for" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" titleTemplate="Release the hold on bill ${invoiceId}"/>
+    <!-- A payment run is approved on the run (approve#Run), which marks these read -->
+    <moqui.security.user.NotificationTopic topic="PaymentRunApproval" inboxEnumId="NinNotifications"
+            description="Payment run to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" titleTemplate="Approve payment run ${paymentRunId}"/>
+
+    <!-- Sent to the topic's subscribers (NotificationTopicUser) by send#PaymentValidationNotice. -->
+    <moqui.security.user.NotificationTopic topic="PaymentValidation" inboxEnumId="NinNotifications" description="Payment to validate"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y"
+            approveServiceName="mantle.account.PaymentServices.approve#PaymentValidationNotice"
+            refuseServiceName="mantle.account.PaymentServices.refuse#PaymentValidationNotice" refuseReasonRequired="Y"
+            titleTemplate="Validate payment ${paymentId}"/>
+
+    <!-- PayTrace (PaymentGatewayPayTrace, docs/PayTrace.md; its seed is 10-seed/Integrations.xml). This job sends again the
+        enhanced data PayTrace did not accept after a capture or sale (paused by default; every hour); the charge is never
+        sent again, and a settled payment drops out. -->
+    <moqui.service.job.ServiceJob jobName="retry_PayTraceEnhancedData" description="Retry PayTrace enhanced data" serviceName="mantle.ext.account.gateway.PayTraceServices.retry#EnhancedData" cronExpression="0 15 * * * ?" paused="Y" transactionTimeout="1800"/>
+</entity-facade-xml>

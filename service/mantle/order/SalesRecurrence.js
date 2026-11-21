@@ -8,7 +8,7 @@
 //   order (clone#Order with copyPayment=false, as Shop's base is made, and every line: its charges and discounts with its products), so
 //   the order it came from is fulfilled and billed as before and the base only ever holds the schedule. Its cadence is recurCronExpression (a monthly, weekly or yearly day and hour, or a cron
 //   expression), read in its own zone (recurTimeZone); it runs between recurFromDate and recurThruDate, may be paused, and may name the
-//   customer agreement it is kept under (recurAgreementId, entity/SalesRecurrenceEntities.xml). A base a Shop contract renews is Shop's
+//   customer agreement it is kept under (recurAgreementId, entity/order/OrderAndPurchaseAndReturnExtensions.xml). A base a Shop contract renews is Shop's
 //   (SalesAccess.js recurrenceOf) and is only dispatched to Shop, as before.
 // - The worker (OrderServices.create#RecurringOrders, the create_RecurringOrders job, and create#RecurringOrder, its unit) asks
 //   occurrenceOf: the latest scheduled time at or before now in the base's zone, due when it is after the base's last occurrence and

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- the stored resources the quote's text renders from (F70: a `.html.fancy-locked` location rendered with an explicit map; an
+        unknown location renders empty): the cover and terms of the quote's mail and print and the reminder's text, each the
+        organization's own location or, when empty, Mantle's default under template/order/ -->
+    <extend-entity entity-name="SalesPolicy" package="mantle.sales.policy">
+        <field name="quoteTextLocation" type="text-medium" enable-audit-log="true"><description>The cover and terms of the quote's
+            mail and print (a .html.fancy-locked resource); empty for Mantle's default</description></field>
+        <field name="reminderTextLocation" type="text-medium" enable-audit-log="true"><description>The reminder's text (a
+            .html.fancy-locked resource); empty for Mantle's default</description></field>
+        <!-- Sales P20 review (design-sales §16 RFQ acknowledgement; impl-sales §4 Nov 14, the user's call) -->
+        <field name="rfqAcknowledge" type="text-indicator" enable-audit-log="true"><description>Y: a request for quote made from
+            mail (create#QuoteRequestFromEmail) is acknowledged once to the address it came from, when that sender is a contact or
+            account of the organization; N or empty, none is sent</description></field>
+        <field name="rfqAcknowledgeTextLocation" type="text-medium" enable-audit-log="true"><description>The acknowledgement's text (a
+            .html.fancy-locked resource); empty for Mantle's default</description></field>
+    </extend-entity>
+
+    <!-- Sales P13 (design-sales §10 CustomerQuote, QuoteResponse; F36): the customer's own response on PASS (SqsPortal) keeps who
+        answered: the bearer link's capability, or the signed-in account (recordedByUserId, contactPartyId), and the acceptor's name
+        and title as the customer gave them (evidence, not a verified signature) -->
+    <extend-entity entity-name="SalesQuoteResponse" package="mantle.sales.quote">
+        <field name="capabilityId" type="id"><description>The ExternalAccessCapability of the bearer link the customer answered
+            by; empty for staff and a signed-in contact</description></field>
+        <field name="acceptorName" type="text-medium"/>
+        <field name="acceptorTitle" type="text-medium"/>
+    </extend-entity>
+</entities>

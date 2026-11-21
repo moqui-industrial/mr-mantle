@@ -376,7 +376,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <!-- the time-and-attendance import's result contract for the framework's org.moqui.admin.DataTransferServices (the target
-        timeAndAttendance, data/PeopleAttendanceSetupData.xml) -->
+        timeAndAttendance, data/15-seed-initial/People.xml) -->
     <service verb="find" noun="ImportRuns" allow-remote="false">
         <description>The attendance imports of the employers an HR reader reads (PEOPLE_HR_VIEW and People's scope), newest first, as
             summaries: the file's name, the employer, previewed or imported, the rows read, imported, skipped and refused, who read or

@@ -571,7 +571,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <!-- the jobs (design §15.3), each with its operation and a JobRegistration (data/EventRegistrationSetupData.xml) -->
+    <!-- the jobs (design §15.3), each with its operation and a JobRegistration (data/15-seed-initial/Communications.xml) -->
     <service verb="run" noun="RegistrationHolds" authenticate="anonymous-all" allow-remote="false" operation="marketing.registration.holds.run">
         <description>The registration expiry and waitlist job (run_EventRegistrations; design §15.3), as the system: the payment attempts
             of registrations due for a lookup looked up and applied (a success while held pends the places and places the order, a

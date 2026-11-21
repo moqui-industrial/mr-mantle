@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed-initial">
+    <!-- ========== Registered Services ========== -->
+
+    <!-- Registered Services: Store Promotion -->
+    <moqui.service.ServiceRegister serviceRegisterId="NewCustomerDiscount" serviceTypeEnumId="ProductStorePromotion"
+            description="New Customer Discount" serviceName="mantle.product.PromotionServices.apply#NewCustomerDiscount"/>
+    <moqui.service.ServiceRegister serviceRegisterId="BuyGetDiscount" serviceTypeEnumId="ProductStorePromotion"
+            description="Buy X Get Y at Z% Discount" serviceName="mantle.product.PromotionServices.apply#BuyGetDiscount"/>
+    <moqui.service.ServiceRegister serviceRegisterId="FlatDiscount" serviceTypeEnumId="ProductStorePromotion"
+            description="Flat Discount per Quantity" serviceName="mantle.product.PromotionServices.apply#FlatDiscount"/>
+
+    <!-- Registered Services: Store Order Pre-Approve Validation -->
+    <moqui.service.ServiceRegister serviceRegisterId="OrderManualApprove" serviceTypeEnumId="OrderValidate"
+            description="Require Manual Approval" serviceName="mantle.order.OrderInfoServices.validate#OrderRequireManual"/>
+
+    <!-- ========== Service Jobs ========== -->
+
+    <!-- Service Job: Expire Subscription Access - revoke and destroy steps after each subscription ends, every 10 minutes -->
+    <moqui.service.job.ServiceJob jobName="expire_SubscriptionAccess" description="Expire Subscription Access"
+            serviceName="mantle.product.SubscriptionServices.expire#SubscriptionAccess" cronExpression="0 0/10 * * * ?" paused="N"/>
+    <!-- Service Job: Clear Stale Card Security Codes - a code left an hour after its card last changed, every hour (SEC-BAP-05) -->
+    <moqui.service.job.ServiceJob jobName="clear_StaleCardSecurityCodes" description="Clear Stale Card Security Codes"
+            serviceName="mantle.account.PaymentMethodServices.clear#StaleCardSecurityCodes" cronExpression="0 15 * * * ?" paused="N"/>
+    <!-- Service Job: Auto-approve Orders Delayed - every 15 minutes by default -->
+    <moqui.service.job.ServiceJob jobName="autoApprove_OrdersDelayed" description="Auto-approve Orders Delayed"
+            serviceName="mantle.order.OrderServices.autoApprove#OrdersDelayed" cronExpression="0 0/15 * * * ?" paused="N"
+            transactionTimeout="1800"/>
+    <!-- Service Job: Create Recurring Orders - every night at 2:00 am -->
+    <moqui.service.job.ServiceJob jobName="create_RecurringOrders" description="Create Recurring Orders"
+            serviceName="mantle.order.OrderServices.create#RecurringOrders" cronExpression="0 0 2 * * ?" paused="N"
+            transactionTimeout="1800"/>
+
+    <!-- Service Job: Recalculate GL Account Org Summaries - once per hour by default -->
+    <moqui.service.job.ServiceJob jobName="recalculate_GlAccountOrgSummaries" description="Recalculate GL Account Org Summaries"
+            serviceName="mantle.ledger.LedgerServices.recalculate#GlAccountOrgSummaries" cronExpression="0 0 * * * ?" paused="N"
+            transactionTimeout="1800"/>
+
+    <!-- Service Job: Poll Payment Gateway Details (paused by default; cron for every night at 2:00 am) -->
+    <moqui.service.job.ServiceJob jobName="poll_PaymentGatewayDetails" description="Poll Payment Gateway Details"
+            serviceName="mantle.account.PaymentServices.poll#PaymentGatewayDetails" cronExpression="0 0 2 * * ?" paused="Y"
+            transactionTimeout="1800"/>
+
+    <!-- Service Job: Send Sales Invoice Past Due Emails (paused by default; cron for every Monday at 2:00 am) -->
+    <moqui.service.job.ServiceJob jobName="send_SalesInvoicePastDueEmails" description="Send Sales Invoice Past Due Emails"
+            serviceName="mantle.account.InvoiceServices.send#SalesInvoicePastDueEmails" cronExpression="0 0 2 ? * MON" paused="Y"
+            transactionTimeout="3600">
+        <parameters parameterName="daysPastDue" parameterValue="7"/>
+        <parameters parameterName="daysPastInvoice" parameterValue="40"/>
+        <parameters parameterName="daysLastEmail" parameterValue="2"/>
+        <parameters parameterName="alsoPrimaryEmails" parameterValue="false"/>
+        <!-- <parameters parameterName="organizationPartyIdList" parameterValue=""/> -->
+    </moqui.service.job.ServiceJob>
+
+    <!-- Service Job: Payroll Processing -->
+    <moqui.security.user.NotificationTopic topic="ProcessTimePeriodPay" inboxEnumId="NinUpdates" description="Payroll Period Process Pay Completed"
+            typeString="success" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            titleTemplate="Process Pay Completed for Payroll Period ${parameters.timePeriodId} for pay date ${ec.l10n.format(results.payDate, '')}, total pay ${ec.l10n.format(results.totalPayAmount, '0.00')}"
+            errorTitleTemplate="Error in Process Pay for Payroll Period ${parameters.timePeriodId}: ${serviceCallRun.errors}"
+            linkTemplate=""/>
+    <moqui.service.job.ServiceJob jobName="ProcessTimePeriodPay" description="Process Pay for Payroll Period"
+            serviceName="mantle.humanres.PayrollServices.process#TimePeriodPay" topic="ProcessTimePeriodPay"/>
+
+    <!-- Service Job: Send Due Reminders of tasks and events - every minute. A success is not kept: the reminder is the record. -->
+    <moqui.service.job.ServiceJob jobName="send_DueReminders" description="Send Due Task and Event Reminders"
+            serviceName="mantle.work.EventServices.send#DueReminders" cronExpression="0 0/1 * * * ?" paused="N"
+            transactionTimeout="300" errorHistoryOnly="Y"/>
+    <!-- Service Job: Send Missing Time Reminders - every hour; each organization's timesheet policy says on which day and hour its people
+        are reminded of last week's timesheet (mantle.work.TimesheetServices.send#MissingTimeReminders), once a week each -->
+    <moqui.service.job.ServiceJob jobName="send_MissingTimeReminders" description="Send Missing Time Reminders"
+            serviceName="mantle.work.TimesheetServices.send#MissingTimeReminders" cronExpression="0 0 * * * ?" paused="N"
+            transactionTimeout="600"/>
+    <!-- Service Job: Fetch Calendar Subscriptions that are due (each its own refresh interval) - every 15 minutes; nothing is
+        fetched until the framework's ICalendar tool exists -->
+    <moqui.service.job.ServiceJob jobName="fetch_CalendarSubscriptions" description="Fetch Calendar Subscriptions"
+            serviceName="mantle.work.CalendarServices.fetch#CalendarSubscriptions" cronExpression="0 0/15 * * * ?" paused="N"
+            transactionTimeout="1800"/>
+
+    <!-- Service Job: Check All Parties for Duplicates (paused by default; cron for every night at 2:00 am) -->
+    <moqui.service.job.ServiceJob jobName="check_AllPartyDuplicates" description="Check All Parties for Duplicates"
+            serviceName="mantle.party.DuplicateServices.check#AllPartyDuplicates" cronExpression="0 0 2 * * ?" paused="Y"
+            transactionTimeout="3600"/>
+
+    <!-- Commerce P4 (impl-commerce): scheduled page, menu and redirect publication, revalidated at its from date as its
+        author (mantle.public.ThemeServices.run#ScheduledSitePublications); a failure leaves the old version live -->
+    <moqui.service.job.ServiceJob jobName="run_ScheduledSitePublications" description="Publish scheduled site pages, menus and redirects"
+            serviceName="mantle.public.ThemeServices.run#ScheduledSitePublications" cronExpression="0 * * * * ?" paused="N"
+            errorHistoryOnly="Y"/>
+
+    <!-- Commerce P14 (impl-commerce): the feed job; it builds only feeds an operator scheduled (hourly or daily), each in its own
+        transaction, and publishes a complete build with no errors; a failing feed is recorded and the others go on
+        (mantle.product.StoreChannelServices.run#StoreFeeds) -->
+    <moqui.service.job.ServiceJob jobName="run_StoreFeeds" description="Build and publish scheduled store product feeds"
+            serviceName="mantle.product.StoreChannelServices.run#StoreFeeds" cronExpression="0 7 * * * ?" paused="N"
+            errorHistoryOnly="Y"/>
+</entity-facade-xml>

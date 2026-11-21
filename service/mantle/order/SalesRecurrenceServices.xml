@@ -15,7 +15,7 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- Sales' recurring orders and subscriptions (the recurrence part of G of IronStone Sales design §12.1; design §7 RecurringOrders and
     Subscriptions, §13.1; impl-sales P16, SAL-RECURRENCE, CX-RECURRING, F22, F23, §4 Q7), over SalesRecurrence.js: a recurring base is an
     approved copy of a sales order marked OrpRecurringTemplate, with its cadence in its own zone, its dates, a pause and the agreement it
-    is kept under (entity/SalesRecurrenceEntities.xml); the one worker (OrderServices.create#RecurringOrders, create#RecurringOrder)
+    is kept under (entity/order/OrderAndPurchaseAndReturnExtensions.xml); the one worker (OrderServices.create#RecurringOrders, create#RecurringOrder)
     reads them. SALES_RECURRENCE_MANAGE keeps the bases of the caller's organizations and SALES_TEAM_VIEW reads them; another
     organization's answers as missing (RECORD_UNAVAILABLE, SalesAccess.js recurrenceOf); a Shop contract's base is Shop's. Every change
     names the base's revision (recurRevision: REVISION_REQUIRED, REVISION_CHANGED). A Sales reader reads the subscriptions of the scope

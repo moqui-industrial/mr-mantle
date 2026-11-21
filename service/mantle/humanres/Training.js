@@ -4,7 +4,7 @@
 // impl-people P19). Every read is a projection of the caller's People scope (People.js scopeOf), read with authorization off
 // after that check.
 //
-// The records (HumanResourcesEntities.xml; refined from the commented sketches, F6):
+// The records (entity/humanres/AbilityEntities.xml; refined from the commented sketches, F6):
 // - a course (TrainingClass) is an employer's: what passing it grants (a qualification type, valid for a number of months; never
 //   an identity document or work permit) and whether its completion needs an assessment;
 // - a session (TrainingSession) is a WepTraining event of Commons' calendar (EventServices.create#Event: a private event whose

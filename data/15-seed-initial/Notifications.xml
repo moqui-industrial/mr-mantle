@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed-initial">
+    <!-- ========== Notifications - Business Event ========== -->
+
+    <!-- Notification: High Priority Order -->
+    <moqui.security.user.NotificationTopic topic="OrderHighPriority" description="Order - High Priority" typeString="danger"
+            showAlert="Y" alertNoAutoHide="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="High Priority Order ${orderId}:${orderPartSeqId} - Priority ${priority}"
+            linkTemplate="/vapps/PopcAdmin/Order/OrderDetail?orderId=${orderId}"/>
+
+    <!-- Notification: a receipt exception (mantle.shipment.WarehouseTaskServices: rejected units, a remainder closed or
+        backordered), to the receiving organization's users holding STOCK_POLICY_MANAGE. No link template: the receipt's
+        screen belongs to the app. -->
+    <moqui.security.user.NotificationTopic topic="WarehouseReceiptException" description="Receipt exception" typeString="warning"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Receipt ${shipmentId}: ${kind == 'REJECTED' ? 'units rejected'
+                : 'short, remainder ' + kind.toLowerCase()}"/>
+
+    <!-- Notification: a user mentioned in a note or message on a record, and the followers of a record (Chatter;
+        mantle.party.CommunicationServices.notify#RecordMention and notify#RecordFollowers). No link template: the
+        record's screen belongs to the app, so the caller passes it as recordUrl. -->
+    <moqui.security.user.NotificationTopic topic="ChatterMention" description="Mentioned on a Record" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} mentioned you on ${recordName}: ${summary}" linkTemplate=""/>
+    <moqui.security.user.NotificationTopic topic="RecordFollow" inboxEnumId="NinUpdates" description="Activity on a Followed Record" typeString="info"
+            showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} on ${recordName}: ${summary}" linkTemplate=""/>
+
+    <!-- Notification: the other topics of the IronStone shell. No link templates: the app passes the link. Each title names
+        the message fields its sender puts in the message map, besides recordEntityName and recordId when it is on a
+        record. A topic that waits on a decision (an approval) is an app's, with the framework's approveServiceName and
+        refuseServiceName on its NotificationTopic; those services get recordEntityName, recordId, the message's
+        messageJson map and, for a refuse, reason. -->
+    <!-- a mention in a chat room, as org.moqui.chat.ChatServices send#Message and edit#Message send it: roomName, chatRoomId,
+        eventSeq, authorUserId, authorName and summary in the message, reason NrMention, the room (moqui.chat.ChatRoom) as
+        its record, the actor the author, and the caller's roomUrl as its link; in the Notifications inbox (it asks for the
+        user, so it is in the badge). No summary (a user who turned previews off, an end-to-end encrypted room, which has
+        no text on the server): the title is who mentioned the user where. -->
+    <moqui.security.user.NotificationTopic topic="ChatMention" inboxEnumId="NinNotifications" description="Mentioned in a Chat Room" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} mentioned you in ${roomName}${summary ? ': ' + summary : ''}" linkTemplate=""/>
+    <!-- a task, activity or event coming due or starting: workEffortId, workEffortName, whenText (the due or start time in
+        the user's words, such as "due today" or "at 2:30 PM") -->
+    <moqui.security.user.NotificationTopic topic="WorkEffortReminder" description="Task or Event Reminder" typeString="info"
+            showAlert="Y" alertNoAutoHide="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Reminder: ${workEffortName}, ${whenText}" linkTemplate=""/>
+    <!-- a work item of a project assigned to the user by someone else (mantle.work.TaskServices.notify#TaskAssigned):
+        workEffortId, workEffortName, rootWorkEffortId, projectName, assignedByName, the task as the record; in the
+        Notifications inbox. The app that shows work items sets the link (IronStone Projects: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="WorkItemAssigned" inboxEnumId="NinNotifications" description="Work Item Assigned to You" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${assignedByName} assigned you ${workEffortId}: ${workEffortName} (${projectName})"/>
+    <!-- a status update posted on a project the user is on (mantle.work.ProjectServices.post#ProjectUpdate): workEffortId,
+        workEffortName, healthEnumId, healthLabel, percentComplete, subject, authorName, communicationEventId, the project as
+        the record; in the Updates inbox. The app that shows projects sets the link (IronStone Projects: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="ProjectStatusUpdate" inboxEnumId="NinUpdates" description="Project Status Update" typeString="info"
+            showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${workEffortName} is ${healthLabel}: ${subject} (${authorName})"/>
+    <!-- a new request to triage (mantle.request.RequestServices.notify#RequestTriage, from the Request rule of
+        entity/Request.eecas.xml: a request submitted, or given a project): requestId, requestName, typeLabel, rootWorkEffortId,
+        projectName and projectSuffix (" (name)", both empty for one with no project), channelLabel (app, email, form), fromName,
+        the request as the record; to the
+        project's triage assignee, else its managers (for one with no project the organization's triage assignee); in the
+        Notifications inbox. The app that triages requests sets the link (IronStone Projects: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="RequestTriage" inboxEnumId="NinNotifications" description="New Request to Triage" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="New request ${requestId}: ${requestName}${projectSuffix}"/>
+    <!-- a request's status moved by its work (mantle.request.RequestServices.complete#RequestFromWork): requestId, requestName,
+        statusId, statusLabel, workEffortId (the item that moved it), the request as the record; to its followers and its
+        reporter's and assignee's users; in the Updates inbox -->
+    <moqui.security.user.NotificationTopic topic="RequestUpdate" inboxEnumId="NinUpdates" description="Request Update" typeString="info"
+            showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Request ${requestId} ${statusLabel}: ${requestName}"/>
+    <!-- weekly timesheets (mantle.work.TimesheetServices): timesheetId, partyId, personName, weekText, weekStart, hoursText, change,
+        actorName and reason, the timesheet as the record. A submitted week asks its approvers for a decision (TimesheetApproval, whose
+        approve and refuse services approve or return it; a return needs a reason); the person hears of a return or reopen
+        (TimesheetReturned) and of the approval (TimesheetApproved, Updates); TimesheetMissing reminds a person of a week not
+        submitted (weekText, hoursText, expectedText; send#MissingTimeReminders). The app that shows timesheets sets the links
+        (IronStone Projects: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="TimesheetApproval" inboxEnumId="NinNotifications" description="Timesheet to Approve" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.work.TimesheetServices.approve#TimesheetNotice" refuseServiceName="mantle.work.TimesheetServices.return#TimesheetNotice"
+            refuseReasonRequired="Y" titleTemplate="Approve ${personName}'s week of ${weekText}: ${hoursText} h"/>
+    <moqui.security.user.NotificationTopic topic="TimesheetReturned" inboxEnumId="NinNotifications" description="Timesheet Returned" typeString="warning"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Your week of ${weekText} was ${change} by ${actorName}: ${reason}"/>
+    <moqui.security.user.NotificationTopic topic="TimesheetApproved" inboxEnumId="NinUpdates" description="Timesheet Approved" typeString="success"
+            showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Your week of ${weekText} was approved by ${actorName} (${hoursText} h)"/>
+    <moqui.security.user.NotificationTopic topic="TimesheetMissing" inboxEnumId="NinNotifications" description="Missing Time Reminder" typeString="warning"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Your week of ${weekText} is not submitted: ${hoursText} of ${expectedText} h"/>
+    <!-- allocations of people to projects (mantle.work.ResourceServices): workEffortAllocationId, rootWorkEffortId, projectName,
+        whoText (the person, or the role of a placeholder), hoursText, periodText, requesterName, actorName, decision and reasonSuffix (": " and the reason, or empty), the
+        allocation as the record. A request asks the approvers (the holders of ALLOCATION_APPROVE) for a decision (AllocationRequest,
+        whose approve and refuse services approve or reject it; a rejection needs a reason); its requester and the person hear the
+        decision (AllocationDecision, Updates). The app that shows allocations sets the links (IronStone Projects: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="AllocationRequest" inboxEnumId="NinNotifications" description="Allocation to Approve" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.work.ResourceServices.approve#AllocationNotice" refuseServiceName="mantle.work.ResourceServices.reject#AllocationNotice"
+            refuseReasonRequired="Y" titleTemplate="Approve ${whoText} on ${projectName}: ${hoursText} a week, ${periodText}"/>
+    <moqui.security.user.NotificationTopic topic="AllocationDecision" inboxEnumId="NinUpdates" description="Allocation Decided" typeString="info"
+            showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${whoText} on ${projectName} ${decision} by ${actorName}${reasonSuffix}"/>
+    <!-- a milestone's gate (mantle.work.ProjectServices request#, approve#, refuse#MilestoneApproval): workEffortApprovalId, workEffortId,
+        milestoneName, rootWorkEffortId, projectName, approverName, requesterName, actorName, decision and reasonSuffix, the request
+        (WorkEffortApproval) as the record. A request asks the approver's users for a decision (MilestoneApproval, whose approve and refuse
+        services decide it; a refusal needs a reason); the one who asked hears the decision (MilestoneDecision, Updates). The app that
+        shows milestones sets the links (IronStone Projects: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="MilestoneApproval" inboxEnumId="NinNotifications" description="Milestone to Approve" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.work.ProjectServices.approve#MilestoneApprovalNotice" refuseServiceName="mantle.work.ProjectServices.refuse#MilestoneApprovalNotice"
+            refuseReasonRequired="Y" titleTemplate="Approve ${milestoneName} of ${projectName}"/>
+    <moqui.security.user.NotificationTopic topic="MilestoneDecision" inboxEnumId="NinUpdates" description="Milestone Approval Decided" typeString="info"
+            showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${milestoneName} of ${projectName} ${decision} by ${actorName}${reasonSuffix}"/>
+    <!-- the actions of the mail client's rules that make requests and work items (org.moqui.mail.EmailClientServices
+        run#EmailRules runs the service in optionValue for the action in enumCode; impl-projects.md F6) -->
+    <moqui.basic.Enumeration enumId="ErActCreateRequest" enumTypeId="EmailRuleAction" enumCode="createRequest" sequenceNum="1"
+            description="Make a request" optionValue="mantle.request.RequestServices.create#RequestFromEmail"/>
+    <moqui.basic.Enumeration enumId="ErActCreateWorkItem" enumTypeId="EmailRuleAction" enumCode="createWorkItem" sequenceNum="2"
+            description="Make a work item (a request for outside senders)" optionValue="mantle.request.RequestServices.create#WorkItemFromEmail"/>
+    <!-- a release's notes published (mantle.work.ProjectServices.publish#ReleaseNotes) to the followers of the release and of its
+        project: workEffortId, version, rootWorkEffortId, projectName, actorName, dateText, wikiPageId (the published page), the
+        release as the record; in the Updates inbox. The app that shows releases sets the link (IronStone Projects:
+        BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="ReleasePublished" inboxEnumId="NinUpdates" description="Release Notes Published" typeString="info"
+            showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${projectName} ${version} released: the notes (${actorName})"/>
+    <!-- merge requests and commit checks (mantle.work.GitServices.notify#MergeRequest and notify#CommitStatusFailed, by the
+        rules of service/WorkGit.secas.xml): mergeRequestId, mergeRequestNum, title, repositoryId, sourceRef, targetRef,
+        actorName and change, the merge request as the record; a check: repositoryId, commitId, shortId, summary, checkContext,
+        state, stateLabel, description, targetUrl. Review requests and failed checks in the Notifications inbox, the other
+        changes in Updates. The app that shows code sets the links (IronStone Projects: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="MergeRequestReview" inboxEnumId="NinNotifications" description="Merge Request Review Requested" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${actorName} asks for your review of !${mergeRequestNum} ${title} (${repositoryId})"/>
+    <moqui.security.user.NotificationTopic topic="MergeRequestUpdate" inboxEnumId="NinUpdates" description="Merge Request Update" typeString="info"
+            showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="!${mergeRequestNum} ${title}: ${actorName} ${change} (${repositoryId})"/>
+    <moqui.security.user.NotificationTopic topic="CommitStatusFailed" inboxEnumId="NinNotifications" description="Commit Check Failed" typeString="warning"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${checkContext} ${stateLabel} on ${shortId} of ${repositoryId}: ${summary}"/>
+    <!-- a page to review and the decision on it: the framework seeds both topics (moqui.resource.wiki.WikiPageReview in
+        framework/entity/ResourceEntities.xml), with the approval services of WikiPageReview (approveServiceName,
+        refuseServiceName, refuseReasonRequired) and the message fields (wikiPageReviewId, wikiPageId, wikiSpaceId, pagePath,
+        pageName, versionName, authorName, note, dueDate; for the decision reviewerName, decision, decisionText, decisionNote).
+        Mantle sets only the email template, so the framework's row wins whichever file loads first (a data load updates
+        only the fields an element has). -->
+    <moqui.security.user.NotificationTopic topic="WikiPageReview" emailTemplateId="NOTIFICATION"/>
+    <moqui.security.user.NotificationTopic topic="WikiPageReviewDecision" emailTemplateId="NOTIFICATION"/>
+    <!-- a file or folder shared with the user: fileName, location, authorUserId, authorName -->
+    <moqui.security.user.NotificationTopic topic="FileShare" description="File Shared with You" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} shared ${fileName} with you" linkTemplate=""/>
+    <!-- new mail in the Inbox (mail, internal messages and the mailbox posts delivered to the Inbox): fromName, subject,
+        communicationEventId or emailMessageId. An alert only: the Inbox count and the Inbox keep it, not the notification
+        list. -->
+    <moqui.security.user.NotificationTopic topic="NewMail" description="New Mail" typeString="info"
+            showAlert="Y" persistOnSend="N" receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="${fromName}: ${subject}" linkTemplate=""/>
+
+    <!-- an event invitation, new or updated (mantle.work.EventServices.send#EventInvitations): workEffortId, workEffortName,
+        organizerName, whenText (the time in the organizer's words), whereText, update (true for a changed event), cancelled,
+        removed (true for an attendee taken off the event, remove#EventAttendee), message -->
+    <moqui.security.user.NotificationTopic topic="EventInvitation" description="Event Invitation" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${removed ? organizerName + ' removed you from ' + workEffortName : (cancelled ? organizerName + ' cancelled ' + workEffortName : (update ? organizerName + ' updated ' + workEffortName : organizerName + ' invited you to ' + workEffortName))}, ${whenText}"
+            linkTemplate=""/>
+    <!-- an attendee's answer to the organizer (mantle.work.EventServices.respond#EventInvitation): workEffortId, workEffortName,
+        responderName, response (accept, tentative or decline), responseText (accepted, tentatively accepted, declined), message -->
+    <moqui.security.user.NotificationTopic topic="EventInvitationResponse" inboxEnumId="NinUpdates" description="Answer to an Event Invitation" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${responderName} ${responseText} ${workEffortName}${message ? ': ' + message : ''}" linkTemplate=""/>
+
+    <!-- Email: invitations to attendees outside (no user account), iMIP replies and reminders by email. The services pass
+        subject, fromAddress and fromName in bodyParameters, and the body. -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_CALENDAR_EMAIL" description="Calendar Invitation or Reminder" emailServerId="SYSTEM"
+            fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}" sendPartial="Y"/>
+    <!-- Email: the confirmation an unsubscribe waits for on a list that requires it (mantle.party.ConsentServices
+        send#UnsubscribeVerifyEmail, when the list's Unsubscribe Verify email names no template): from the list's
+        verifyEmailFrom, with the link of the page. -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_UNSUBSCRIBE_VERIFY" description="Unsubscribe Confirmation" emailServerId="SYSTEM"
+            fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+    <!-- Email to a project's client contacts (mantle.work.ProjectServices): a status update posted for the client
+        (send#ProjectUpdateEmail) and the estimate sent for the client's approval (send#EstimateEmail). From the project's
+        organization's address; the services pass subject, fromAddress and fromName in bodyParameters, and the body. -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_PROJECT_UPDATE" description="Project Status Update to the Client" emailServerId="SYSTEM"
+            fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}" sendPartial="Y"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_PROJECT_ESTIMATE" description="Project Estimate for the Client's Approval" emailServerId="SYSTEM"
+            fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}" sendPartial="Y"/>
+    <!-- Email of a customer invoice (mantle.account.InvoiceServices.send#Invoice) and statement (CollectionServices
+        send#Statements): from the organization's billing address, with the PDF attached; the services pass subject,
+        fromAddress and fromName in bodyParameters, and the body. -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_INVOICE_EMAIL" description="Customer Invoice" emailServerId="SYSTEM"
+            fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_STATEMENT_EMAIL" description="Customer Statement" emailServerId="SYSTEM"
+            fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+
+    <!-- A sales order's confirmation as placed (impl-customer-service P3, F29; mantle.order.OrderConfirmationServices): its
+        PDF stored once as an OrderContent of this type, which each resend attaches -->
+    <moqui.basic.Enumeration enumId="OctOrderConfirmation" description="Order confirmation as placed"
+            enumTypeId="OrderContentType"/>
+    <!-- An order change to decide (impl-customer-service P10, F44, F45, F46; mantle.order.OrderChangeServices): sent to the
+        approvers of its kind with requestId, orderId, sourceRevision (the proposal's revision), kindText, customerName,
+        organizationName and requestedByName, the change Request as the record; approve and refuse decide it at the message's
+        revision (decide#OrderChange), so a superseded proposal is refused naming the current one. The app that decides it
+        sets the link (IronStone Customer Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="OrderChangeApproval" inboxEnumId="NinNotifications"
+            description="Order change to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.OrderChangeServices.approve#OrderChangeMessage"
+            refuseServiceName="mantle.order.OrderChangeServices.refuse#OrderChangeMessage" refuseReasonRequired="Y"
+            titleTemplate="Approve ${kindText} of order ${orderId} for ${customerName} (${requestedByName})"/>
+    <!-- Sales P9 (impl-sales P9, F26; mantle.order.SalesApprovalServices): a quote's exception to decide, sent by
+        request#QuoteApproval to the holders of SALES_APPROVE of the seller who may decide it, with orderId, sourceRevision (the
+        quote's revision), quoteName, customerName, organizationName, ruleText (the kinds of its rules) and requestedByName, the
+        quote as the record; its title names the quote and never an amount. Approve and refuse decide it at the message's revision (decide#Quote). The app
+        that decides it sets the link (IronStone Sales: BossSetupSalesData.xml). -->
+    <moqui.security.user.NotificationTopic topic="SalesQuoteApproval" inboxEnumId="NinNotifications"
+            description="Quote to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.SalesApprovalServices.approve#QuoteMessage"
+            refuseServiceName="mantle.order.SalesApprovalServices.refuse#QuoteMessage" refuseReasonRequired="Y"
+            titleTemplate="Approve quote ${orderId} for ${customerName}: ${ruleText} (${requestedByName})"/>
+
+    <!-- Customer returns (impl-customer-service P9, CX-APPROVAL; mantle.order.ReturnPolicyServices): an exception a customer
+        return needs before authorization (outside the window, a reason or remedy the policy does not allow, goods with no order
+        line), to the holders of RETURN_EXCEPTION_APPROVE who work for its organization, on Purchasing's decision pattern
+        (F45, F46): the framework's approve#NotificationMessage and refuse#NotificationMessage call approve#ReturnException and
+        refuse#ReturnException as the user, which decide at the revision in the message (sourceRevision) and refuse a stale
+        one; a refusal needs a reason. The message holds returnId, sourceRevision, organizationPartyId, organizationName,
+        customerName, exceptionText, reason and requestedByName. A decision on a return (authorized, an exception approved or
+        refused) to its assignee (ReturnDecision: returnId, customerName, decisionText, decidedByName). The app that works
+        returns sets the links (IronStone Customer Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="ReturnExceptionApproval" inboxEnumId="NinNotifications"
+            description="Return exception to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.ReturnPolicyServices.approve#ReturnException"
+            refuseServiceName="mantle.order.ReturnPolicyServices.refuse#ReturnException" refuseReasonRequired="Y"
+            titleTemplate="Approve the exception of return ${returnId} for ${customerName}: ${exceptionText}"/>
+    <moqui.security.user.NotificationTopic topic="ReturnDecision" inboxEnumId="NinNotifications" description="Return decided"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Return ${returnId} for ${customerName}: ${decisionText} (${decidedByName})"/>
+
+    <!-- A warranty claim's repair finished (impl-customer-service P11, F67; mantle.request.WarrantyServices,
+        SupportWarranty.eecas.xml): AsMntCompleted on the AssetMaintenance linked to an RqtWarranty case, to the case's assignee,
+        else the agent who linked the repair: requestId, requestName, customerName, assetText, the case as the record. It
+        resolves nothing. The app that works cases sets the link (IronStone Customer Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="WarrantyRepairFinished" inboxEnumId="NinNotifications"
+            description="Warranty repair finished" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="The repair of ${assetText} on claim ${requestId} is finished: ${requestName} (${customerName})"/>
+</entity-facade-xml>

@@ -873,7 +873,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="get" noun="MaintenanceWorkProjection" allow-remote="false" read-only="true">
-        <description>My work orders, a projected CalDAV collection (MaintenanceStackData.xml's CalendarProjection MaintenanceMyWork;
+        <description>My work orders, a projected CalDAV collection (10-seed/Maintenance.xml's CalendarProjection MaintenanceMyWork;
             impl-people P12's kind): admitted is whether the user reads maintenance work (MAINTENANCE_VIEW or
             MAINTENANCE_ASSIGNED_VIEW); without checkOnly, the open work orders assigned to the user whose planned window meets start
             through end (epoch millis; 30 days back to 90 ahead when none), each as "Work order {id}: {name} · {target}" over its

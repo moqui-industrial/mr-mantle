@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- mantle.order.SalesQuoteIssueServices (Q, IronStone Sales design §12.1; design §5 OrderDetail's quote context and QuoteBatch,
     §13.2, §16; impl-sales P10): a quote's issue, its sends and reminders, the customer's response recorded by staff, withdraw,
-    revise and clone, over service/mantle/order/SalesQuoteIssues.js and the records of entity/SalesQuoteIssueEntities.xml. Each
+    revise and clone, over service/mantle/order/SalesQuoteIssues.js and the records of entity/sales/NeedAndOpportunityAndPolicyAndQuoteEntities.xml. Each
     checks SALES_QUOTE_EDIT on a quote the caller sees (SalesAccess.js requireQuote) and send also SALES_QUOTE_SEND; every write
     names the revision read and a send, response and batch carry an operation key. propose#Quote (with P10's issue checks) stays in
     SalesQuoteServices. None is remote. -->

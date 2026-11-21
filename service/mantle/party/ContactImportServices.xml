@@ -694,7 +694,7 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
     <!-- ========== The export target of contact books (org.moqui.admin.DataTransferServices; mr-boss impl-admin P16) ========== -->
-    <!-- The services of the export target contactBookVCard (data/PartyContactExportData.xml), called by the framework's
+    <!-- The services of the export target contactBookVCard (data/10-seed/PartyAndIdentity.xml), called by the framework's
         dispatch as the exporter, whatever grant the call runs under: each checks the caller's own permission on the book
         (check#ContactBookAccess: the owner of a personal book, or a share of a shared one), and a contact another user
         owns privately is never written. -->

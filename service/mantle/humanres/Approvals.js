@@ -3,7 +3,7 @@
 // call request, sourceChanged, summary and recordDecision here; IronStone People design §12 ApprovalPolicies, §13 Approvals,
 // PE-15; impl-people P5).
 //
-// The records (PeopleApprovalEntities.xml):
+// The records (entity/humanres/ApprovalAndChecklistAndExpenseEntities.xml):
 // - a rule is a dated PeopleApprovalPolicy row of an employer and a kind of approval (PeopleApprovalKind): a step (sequenceNum)
 //   decided by a role (department head, manager, named person, HR officer), with an alternate; a ParHrFallback row names the
 //   employer's HR fallback for the kind, a person who decides any step no one else may;

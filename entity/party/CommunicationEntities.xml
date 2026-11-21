@@ -1,0 +1,526 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- ========================================================= -->
+    <!-- mantle.party.communication -->
+    <!-- ========================================================= -->
+    <entity entity-name="CommunicationEvent" package="mantle.party.communication" short-alias="communicationEvents" cache="never">
+        <field name="communicationEventId" type="id" is-pk="true"/>
+        <field name="communicationEventTypeId" type="id"/>
+        <field name="contactMechTypeEnumId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+
+        <field name="parentCommEventId" type="id"/>
+        <field name="rootCommEventId" type="id"/>
+
+        <field name="fromContactMechId" type="id"/>
+        <field name="toContactMechId" type="id"/>
+        <field name="fromPartyId" type="id" enable-audit-log="update"/>
+        <field name="fromRoleTypeId" type="id"/>
+        <field name="toPartyId" type="id" enable-audit-log="update"/>
+        <field name="toRoleTypeId" type="id"/>
+
+        <field name="entryDate" type="date-time"/>
+        <field name="datetimeStarted" type="date-time"/>
+        <field name="datetimeEnded" type="date-time"/>
+
+        <field name="subject" type="text-long"/>
+        <field name="contentType" type="text-medium"/>
+        <field name="body" type="text-very-long"/>
+        <field name="note" type="text-long"/>
+
+        <field name="reasonEnumId" type="id"/>
+        <field name="contactListId" type="id"/>
+        <field name="emailMessageId" type="id"/>
+        <field name="editedDate" type="date-time"><description>When its author last changed the text of a note or comment
+            after posting it (mantle.party.CommunicationServices.update#RecordNote,
+            mantle.request.RequestServices.update#RequestComment); empty for one never changed. A timeline shows it as
+            edited.</description></field>
+
+        <relationship type="one" related="mantle.party.communication.CommunicationEventType" short-alias="type"/>
+        <relationship type="one" title="ContactMechType" related="moqui.basic.Enumeration" short-alias="contactMechType">
+            <key-map field-name="contactMechTypeEnumId"/></relationship>
+        <relationship type="one" title="CommunicationEvent" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one" title="Parent" related="mantle.party.communication.CommunicationEvent" short-alias="parent">
+            <key-map field-name="parentCommEventId" related="communicationEventId"/></relationship>
+        <relationship type="many" title="Child" related="mantle.party.communication.CommunicationEvent" short-alias="children">
+            <key-map field-name="communicationEventId" related="parentCommEventId"/></relationship>
+        <relationship type="one" title="Root" related="mantle.party.communication.CommunicationEvent" short-alias="root">
+            <key-map field-name="rootCommEventId" related="communicationEventId"/></relationship>
+
+        <relationship type="one" title="From" related="mantle.party.contact.ContactMech" short-alias="fromContactMech">
+            <key-map field-name="fromContactMechId"/></relationship>
+        <relationship type="one" title="To" related="mantle.party.contact.ContactMech" short-alias="toContactMech">
+            <key-map field-name="toContactMechId"/></relationship>
+        <relationship type="one" title="From" related="mantle.party.Party" short-alias="fromParty">
+            <key-map field-name="fromPartyId"/></relationship>
+        <relationship type="many" title="From" related="moqui.security.UserAccount" short-alias="fromUserAccounts">
+            <key-map field-name="fromPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="From" related="mantle.party.RoleType" short-alias="fromRole">
+            <key-map field-name="fromRoleTypeId"/></relationship>
+        <relationship type="one" title="To" related="mantle.party.Party" short-alias="toParty">
+            <key-map field-name="toPartyId"/></relationship>
+        <relationship type="many" title="From" related="moqui.security.UserAccount" short-alias="toUserAccounts">
+            <key-map field-name="toPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="To" related="mantle.party.RoleType" short-alias="toRole">
+            <key-map field-name="toRoleTypeId"/></relationship>
+        <relationship type="one" related="mantle.marketing.contact.ContactList" short-alias="contactList"/>
+        <relationship type="one" title="CommunicationEventReason" related="moqui.basic.Enumeration" short-alias="reason">
+            <key-map field-name="reasonEnumId"/></relationship>
+
+        <relationship type="many" related="mantle.party.communication.CommunicationEventContent" short-alias="contents">
+            <key-map field-name="communicationEventId"/></relationship>
+        <relationship type="many" related="mantle.party.communication.CommunicationEventParty" short-alias="parties">
+            <key-map field-name="communicationEventId"/></relationship>
+        <relationship type="many" related="mantle.party.communication.CommunicationEventProduct" short-alias="products">
+            <key-map field-name="communicationEventId"/></relationship>
+        <relationship type="many" related="mantle.party.communication.CommunicationEventPurpose" short-alias="purposes">
+            <key-map field-name="communicationEventId"/></relationship>
+        <relationship type="many" related="mantle.order.OrderCommunicationEvent" short-alias="orders">
+            <key-map field-name="communicationEventId"/></relationship>
+
+        <index name="COMMEVT_TP_ST_CET" unique="false"><index-field name="toPartyId"/><index-field name="statusId"/>
+            <index-field name="communicationEventTypeId"/></index>
+        <index name="COMMEVT_EMAIL_MSG" unique="false"><index-field name="emailMessageId"/></index>
+
+
+        <seed-data>
+            <!-- Communication Event Status -->
+            <moqui.basic.StatusType description="Communication Event" statusTypeId="CommunicationEvent"/>
+            <moqui.basic.StatusItem description="In Progress" sequenceNum="1" statusId="CeInProgress" statusTypeId="CommunicationEvent"/>
+            <moqui.basic.StatusItem description="Ready" sequenceNum="2" statusId="CeReady" statusTypeId="CommunicationEvent"/>
+            <moqui.basic.StatusItem description="Sent" sequenceNum="10" statusId="CeSent" statusTypeId="CommunicationEvent"/>
+            <moqui.basic.StatusItem description="Received" sequenceNum="11" statusId="CeReceived" statusTypeId="CommunicationEvent"/>
+            <moqui.basic.StatusItem description="Viewed" sequenceNum="12" statusId="CeViewed" statusTypeId="CommunicationEvent"/>
+            <moqui.basic.StatusItem description="Assigned" sequenceNum="13" statusId="CeAssigned" statusTypeId="CommunicationEvent"/>
+            <moqui.basic.StatusItem description="Resolved" sequenceNum="20" statusId="CeResolved" statusTypeId="CommunicationEvent"/>
+            <moqui.basic.StatusItem description="Referred" sequenceNum="21" statusId="CeReferred" statusTypeId="CommunicationEvent"/>
+            <moqui.basic.StatusItem description="Bounced" sequenceNum="50" statusId="CeBounced" statusTypeId="CommunicationEvent"/>
+            <moqui.basic.StatusItem description="Unknown Party" sequenceNum="98" statusId="CeUnknownParty" statusTypeId="CommunicationEvent"/><!-- unknown incoming email address -->
+            <moqui.basic.StatusItem description="Cancelled" sequenceNum="99" statusId="CeCancelled" statusTypeId="CommunicationEvent"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeInProgress" toStatusId="CeReady" transitionName="Entered"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeInProgress" toStatusId="CeReceived" transitionName="Receive"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeReady" toStatusId="CeSent" transitionName="Send"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeReady" toStatusId="CeReceived" transitionName="Receive"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeSent" toStatusId="CeReceived" transitionName="Receive"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeSent" toStatusId="CeViewed" transitionName="View"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeReceived" toStatusId="CeViewed" transitionName="View"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeReceived" toStatusId="CeAssigned" transitionName="Assigned"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeReceived" toStatusId="CeResolved" transitionName="Resolve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeReceived" toStatusId="CeReferred" transitionName="Refer"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeReceived" toStatusId="CeBounced" transitionName="Bounce"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeViewed" toStatusId="CeAssigned" transitionName="Assigned"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeViewed" toStatusId="CeReceived" transitionName="Un-view"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeViewed" toStatusId="CeResolved" transitionName="Resolve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeViewed" toStatusId="CeReferred" transitionName="Refer"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeViewed" toStatusId="CeBounced" transitionName="Bounce"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeAssigned" toStatusId="CeResolved" transitionName="Resolve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeAssigned" toStatusId="CeReferred" transitionName="Refer"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeUnknownParty" toStatusId="CeReceived" transitionName="Receive"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeUnknownParty" toStatusId="CeReady" transitionName="Correct (Ready)"/>
+
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeReady" toStatusId="CeCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeInProgress" toStatusId="CeCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeReceived" toStatusId="CeCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeViewed" toStatusId="CeCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeAssigned" toStatusId="CeCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeResolved" toStatusId="CeCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeReferred" toStatusId="CeCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CeUnknownParty" toStatusId="CeCancelled" transitionName="Cancel"/>
+
+            <!-- Communication Event Reason -->
+            <moqui.basic.EnumerationType description="Communication Event Reason" enumTypeId="CommunicationEventReason"/>
+        </seed-data>
+        <master>
+            <detail relationship="type"/><detail relationship="contactMechType"/><detail relationship="status"/>
+            <detail relationship="parent" use-master="default"/><detail relationship="root" use-master="default"/>
+            <detail relationship="children" use-master="default"/>
+            <detail relationship="fromContactMech"/><detail relationship="toContactMech"/>
+            <detail relationship="fromParty"/><detail relationship="fromRole"/>
+            <detail relationship="toParty"/><detail relationship="toRole"/>
+            <detail relationship="contactList"/><detail relationship="reason"/>
+
+            <detail relationship="contents"/>
+            <detail relationship="parties">
+                <detail relationship="party" use-master="basic"/>
+                <detail relationship="role"/>
+                <detail relationship="contactMech" use-master="default"/>
+                <detail relationship="status"/>
+            </detail>
+            <detail relationship="products"><detail relationship="product"/></detail>
+            <detail relationship="purposes"><detail relationship="purpose"/></detail>
+            <detail relationship="orders"/>
+        </master>
+    </entity>
+
+    <entity entity-name="CommunicationEventContent" package="mantle.party.communication" cache="never">
+        <field name="communicationEventContentId" type="id" is-pk="true"/>
+        <field name="communicationEventId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <relationship type="one" title="CommunicationContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Communication Content Type" enumTypeId="CommunicationContentType"/>
+            <moqui.basic.Enumeration description="Plain Text" enumId="CmctPlainText" enumTypeId="CommunicationContentType"/>
+            <moqui.basic.Enumeration description="HTML Text" enumId="CmctHtmlText" enumTypeId="CommunicationContentType"/>
+            <moqui.basic.Enumeration description="Attachment" enumId="CmctAttachment" enumTypeId="CommunicationContentType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="CommunicationEventParty" package="mantle.party.communication" cache="never">
+        <field name="communicationEventId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <field name="contactMechId" type="id"/>
+        <field name="statusId" type="id"/>
+        <!-- the recipient's own state of an internal message (to, cc or mailbox delivery role): one message to several
+            parties has a state per party; a party has one such row per message, its role by priority to, cc, mailbox -->
+        <field name="readDate" type="date-time"><description>Empty is unread</description></field>
+        <field name="isFlagged" type="text-indicator"/>
+        <field name="archivedDate" type="date-time"/>
+        <field name="snoozedThruDate" type="date-time"><description>Hidden from the Inbox until this date</description></field>
+        <relationship type="one" related="mantle.party.communication.CommunicationEvent" short-alias="communicationEvent"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one-nofk" related="mantle.party.Person" short-alias="person"/>
+        <relationship type="one" related="mantle.party.RoleType" short-alias="role"/>
+        <relationship type="one" related="mantle.party.contact.ContactMech" short-alias="contactMech"/>
+        <relationship type="one" title="CommunicationEventParty" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="many" related="moqui.security.UserAccount" short-alias="userAccounts">
+            <key-map field-name="partyId"/></relationship>
+        <!-- a party's unread rows, for the Inbox and its count -->
+        <index name="COMMEVTPTY_PTY_READ" unique="false"><index-field name="partyId"/><index-field name="readDate"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Communication Event Party" statusTypeId="CommunicationEventParty"/>
+            <moqui.basic.StatusItem description="Sent" sequenceNum="1" statusId="CepSent" statusTypeId="CommunicationEventParty"/>
+            <moqui.basic.StatusItem description="Received" sequenceNum="2" statusId="CepReceived" statusTypeId="CommunicationEventParty"/>
+            <moqui.basic.StatusItem description="Assigned" sequenceNum="5" statusId="CepAssigned" statusTypeId="CommunicationEventParty"/>
+            <moqui.basic.StatusItem description="Resolved" sequenceNum="6" statusId="CepResolved" statusTypeId="CommunicationEventParty"/>
+            <moqui.basic.StatusItem description="Referred" sequenceNum="7" statusId="CepReferred" statusTypeId="CommunicationEventParty"/>
+            <moqui.basic.StatusItem description="Closed" sequenceNum="10" statusId="CepClosed" statusTypeId="CommunicationEventParty"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CepSent" toStatusId="CepReceived" transitionName="Receive"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CepSent" toStatusId="CepClosed" transitionName="Close"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CepReceived" toStatusId="CepClosed" transitionName="Close"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CepReceived" toStatusId="CepAssigned" transitionName="Assign"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CepReceived" toStatusId="CepResolved" transitionName="Resolve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CepAssigned" toStatusId="CepResolved" transitionName="Resolve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CepAssigned" toStatusId="CepReferred" transitionName="Refer"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CepAssigned" toStatusId="CepClosed" transitionName="Close"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CepResolved" toStatusId="CepClosed" transitionName="Close"/>
+
+            <!-- the roles of an internal message's recipients, in priority order: a party named in To, in Cc (an @mention
+                too), and a party a mailbox post reached as a member or a participant of the thread -->
+            <mantle.party.RoleType description="Message To" roleTypeId="MessageTo"/>
+            <mantle.party.RoleType description="Message Cc" roleTypeId="MessageCc"/>
+            <mantle.party.RoleType description="Message Mailbox Delivery" roleTypeId="MessageMailbox"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="CommunicationEventPartyLabel" package="mantle.party.communication" cache="never">
+        <description>A label one party put on one internal message (CommunicationEvent). The label is an EmailLabel of that
+            party's Internal email account, so two people on the same message label it apart. A thread shows a label when
+            any of its messages has it for that party. Internal messages have no folders.</description>
+        <field name="communicationEventId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="emailLabelId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.party.communication.CommunicationEvent" short-alias="communicationEvent"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="moqui.basic.email.EmailLabel" short-alias="label"/>
+        <index name="COMMEVTPTY_LBL" unique="false"><index-field name="partyId"/><index-field name="emailLabelId"/></index>
+    </entity>
+
+    <entity entity-name="CommunicationEventProduct" package="mantle.party.communication" cache="never">
+        <field name="productId" type="id" is-pk="true"/>
+        <field name="communicationEventId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" related="mantle.party.communication.CommunicationEvent" short-alias="communicationEvent"/>
+    </entity>
+
+    <entity entity-name="CommunicationEventPurpose" package="mantle.party.communication">
+        <field name="communicationEventId" type="id" is-pk="true"/>
+        <field name="purposeEnumId" type="id" is-pk="true"/>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" related="mantle.party.communication.CommunicationEvent" short-alias="communicationEvent"/>
+        <relationship type="one" title="CommunicationPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId"/></relationship>
+        <seed-data>
+            <!-- Communication Purpose -->
+            <moqui.basic.EnumerationType description="Communication Purpose" enumTypeId="CommunicationPurpose"/>
+            <moqui.basic.Enumeration enumId="CpActivityRequest" description="Activity Request" enumTypeId="CommunicationPurpose"/>
+            <moqui.basic.Enumeration enumId="CpBilling" description="Billing" enumTypeId="CommunicationPurpose"/>
+            <moqui.basic.Enumeration enumId="CpComment" description="Comment" enumTypeId="CommunicationPurpose"/>
+            <moqui.basic.Enumeration enumId="CpConference" description="Conference" enumTypeId="CommunicationPurpose"/>
+            <moqui.basic.Enumeration enumId="CpCustomerService" description="Customer Service" enumTypeId="CommunicationPurpose"/>
+            <moqui.basic.Enumeration enumId="CpCustomerSupport" description="Customer Support" enumTypeId="CommunicationPurpose"/>
+            <moqui.basic.Enumeration enumId="CpMeeting" description="Meeting" enumTypeId="CommunicationPurpose"/>
+            <moqui.basic.Enumeration enumId="CpSalesInquiry" description="Sales Inquiry" enumTypeId="CommunicationPurpose"/>
+            <moqui.basic.Enumeration enumId="CpSalesFollowUp" description="Sales Follow-Up" enumTypeId="CommunicationPurpose"/>
+            <moqui.basic.Enumeration enumId="CpSeminar" description="Seminar" enumTypeId="CommunicationPurpose"/>
+            <moqui.basic.Enumeration enumId="CpShipments" description="Shipments" enumTypeId="CommunicationPurpose"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="CommunicationEventGitAnchor" package="mantle.party.communication" cache="never">
+        <description>The line of a merge request's diff a review comment is on (MR Moqui, no Java counterpart): the comment is a
+            CommunicationEvent of type Comment filed on the merge request (CommunicationEventRecord with recordEntityName
+            moqui.resource.GitMergeRequest), its replies children of it (parentCommEventId, rootCommEventId); the first comment
+            of a thread holds the anchor and its status CeResolved when the thread is resolved
+            (mantle.work.GitServices.store#ReviewAnchor, resolve#ReviewThread). commitId is the source head the line was read
+            at; outdated is Y once a later head changed the line (refresh#ReviewAnchors).</description>
+        <field name="communicationEventId" type="id" is-pk="true"/>
+        <field name="mergeRequestId" type="id"/>
+        <field name="repositoryId" type="id"/>
+        <field name="commitId" type="text-short"/>
+        <field name="path" type="text-medium"/>
+        <field name="oldLine" type="number-integer"><description>The line in the target side; empty for an added line</description></field>
+        <field name="newLine" type="number-integer"><description>The line in the source side; empty for a deleted line</description></field>
+        <field name="lineText" type="text-medium"><description>The line as it was, for an outdated thread</description></field>
+        <field name="outdated" type="text-indicator"/>
+        <relationship type="one" related="mantle.party.communication.CommunicationEvent" short-alias="communicationEvent"/>
+        <relationship type="one" related="moqui.resource.GitMergeRequest" short-alias="mergeRequest"/>
+        <index name="COMMEVT_GIT_ANCHOR_MR" unique="false"><index-field name="mergeRequestId"/></index>
+    </entity>
+
+    <entity entity-name="CommunicationEventRecord" package="mantle.party.communication" cache="never">
+        <description>A communication event filed on any record, by the record's full entity name and the value of its single
+            primary key field, for a record type without a join of its own. The own joins (OrderCommunicationEvent,
+            RequestCommEvent, WorkEffortCommEvent, WikiPageCommunicationEvent) stay, and a party's link is the event's from
+            and to party and its CommunicationEventParty rows; mantle.party.CommunicationServices.link#CommunicationEventRecord
+            chooses.</description>
+        <field name="communicationEventId" type="id" is-pk="true"/>
+        <field name="recordEntityName" type="text-medium" is-pk="true"/>
+        <field name="recordId" type="id" is-pk="true"/>
+        <field name="linkedByUserId" type="id"/>
+        <field name="linkedDate" type="date-time"/>
+        <relationship type="one" related="mantle.party.communication.CommunicationEvent" short-alias="communicationEvent"/>
+        <relationship type="one" title="LinkedBy" related="moqui.security.UserAccount" short-alias="linkedByUser">
+            <key-map field-name="linkedByUserId" related="userId"/></relationship>
+        <index name="COMMEVT_REC_RECORD" unique="false"><index-field name="recordEntityName"/><index-field name="recordId"/></index>
+        <seed-data>
+            <!-- services that add entries to a record's timeline (mantle.party.CommunicationServices.get#RecordTimeline) -->
+            <moqui.basic.Enumeration description="Record Timeline Source" enumId="RecordTimelineSource" enumTypeId="ServiceRegisterType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="EmailMessageRecord" package="mantle.party.communication" cache="never">
+        <description>A record a mail client message (moqui.basic.email.EmailMessage) is to be filed on once it is sent: the
+            Compose "File on" chip of a draft, a scheduled send or one held for undo or waiting in the Outbox after a failed
+            send. mantle.party.CommunicationServices.send#EmailDraft writes it after checking the user sees the record;
+            when the message reaches ES_SENT, file#SentEmail files it (link#CommunicationEventRecord with the
+            emailMessageId) and deletes the row. No foreign key to the message, so the mail client deletes a draft freely;
+            the message's delete ECA removes its rows.</description>
+        <field name="emailMessageId" type="id" is-pk="true"/>
+        <field name="recordEntityName" type="text-medium" is-pk="true"/>
+        <field name="recordId" type="id" is-pk="true"/>
+        <field name="linkedByUserId" type="id"/>
+        <field name="linkedDate" type="date-time"/>
+        <field name="notifyFollowers" type="text-indicator"/>
+        <field name="recordUrl" type="text-medium"><description>The record's screen, for the follower notification's link</description></field>
+        <relationship type="one-nofk" related="moqui.basic.email.EmailMessage" short-alias="emailMessage"/>
+        <relationship type="one-nofk" title="LinkedBy" related="moqui.security.UserAccount" short-alias="linkedByUser">
+            <key-map field-name="linkedByUserId" related="userId"/></relationship>
+        <index name="EMAIL_MSG_REC_RECORD" unique="false"><index-field name="recordEntityName"/><index-field name="recordId"/></index>
+    </entity>
+
+    <entity entity-name="CommunicationEventType" package="mantle.party.communication">
+        <field name="communicationEventTypeId" type="id" is-pk="true"/>
+        <field name="parentTypeId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <field name="contactMechTypeEnumId" type="id"/>
+        <relationship type="one" title="Parent" related="mantle.party.communication.CommunicationEventType">
+            <key-map field-name="parentTypeId" related="communicationEventTypeId"/></relationship>
+        <relationship type="one" title="ContactMechType" related="moqui.basic.Enumeration">
+            <key-map field-name="contactMechTypeEnumId"/></relationship>
+        <seed-data>
+            <!--  - mantle.party.contact (partial data moved up to satisfy dependency) -->
+            <!-- Contact Mechanism Type -->
+            <moqui.basic.EnumerationType description="Contact Mechanism Type" enumTypeId="ContactMechType"/>
+            <moqui.basic.Enumeration enumId="CmtPostalAddress" description="Postal Address" enumTypeId="ContactMechType"/>
+            <moqui.basic.Enumeration enumId="CmtTelecomNumber" description="Phone Number" enumTypeId="ContactMechType"/>
+            <moqui.basic.Enumeration enumId="CmtElectronicAddress" description="Electronic Address" enumTypeId="ContactMechType"/>
+            <moqui.basic.Enumeration enumId="CmtEmailAddress" description="Email Address" parentEnumId="CmtElectronicAddress" enumTypeId="ContactMechType"/>
+            <moqui.basic.Enumeration enumId="CmtIpAddress" description="Internet IP Address" parentEnumId="CmtElectronicAddress" enumTypeId="ContactMechType"/>
+            <moqui.basic.Enumeration enumId="CmtDomainName" description="Internet Domain Name" parentEnumId="CmtElectronicAddress" enumTypeId="ContactMechType"/>
+            <moqui.basic.Enumeration enumId="CmtWebAddress" description="Web URL/Address" parentEnumId="CmtElectronicAddress" enumTypeId="ContactMechType"/>
+            <moqui.basic.Enumeration enumId="CmtWebForm" description="Web Form" parentEnumId="CmtElectronicAddress" enumTypeId="ContactMechType"/>
+            <moqui.basic.Enumeration enumId="CmtCertifiedEmailAddress" description="Certified Email Address" parentEnumId="CmtElectronicAddress" enumTypeId="ContactMechType"/>
+
+            <!-- NOTE: this is not an Enumeration because we need to track the contactMechTypeEnumId as applicable -->
+            <CommunicationEventType communicationEventTypeId="Email" description="Email" contactMechTypeEnumId="CmtEmailAddress"/>
+            <CommunicationEventType communicationEventTypeId="FaceToFace" description="Face-To-Face"/>
+            <CommunicationEventType communicationEventTypeId="Fax" description="Fax" contactMechTypeEnumId="CmtTelecomNumber"/>
+            <CommunicationEventType communicationEventTypeId="Letter" description="Letter" contactMechTypeEnumId="CmtPostalAddress"/>
+            <CommunicationEventType communicationEventTypeId="Phone" description="Phone" contactMechTypeEnumId="CmtTelecomNumber"/>
+            <CommunicationEventType communicationEventTypeId="WebSite" description="Web Site" contactMechTypeEnumId="CmtWebAddress"/>
+            <CommunicationEventType communicationEventTypeId="Comment" description="Comment"/>
+            <CommunicationEventType communicationEventTypeId="Message" description="Message"/>
+            <CommunicationEventType communicationEventTypeId="AutoEmail" description="Auto Email" contactMechTypeEnumId="CmtEmailAddress"/>
+            <!-- a message of a chat room (the framework's moqui.chat store) filed on a record or turned into a task, request or
+                event (mantle.party.CommunicationServices.findOrCreate#ChatCommunicationEvent) -->
+            <CommunicationEventType communicationEventTypeId="Chat" description="Chat Message"/>
+            <!-- a project's status update (mantle.work.effort.WorkEffortUpdate) -->
+            <CommunicationEventType communicationEventTypeId="StatusUpdate" description="Status Update"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="RecordFollower" package="mantle.party.communication" cache="never">
+        <description>A user following a record (its full entity name and single primary key value), and which kinds of
+            activity on it notify the user: messages, notes, activities and changes. Unfollowing deletes the row.</description>
+        <field name="recordEntityName" type="text-medium" is-pk="true"/>
+        <field name="recordId" type="id" is-pk="true"/>
+        <field name="userId" type="id" is-pk="true"/>
+        <field name="notifyMessages" type="text-indicator" default="'Y'"/>
+        <field name="notifyNotes" type="text-indicator" default="'Y'"/>
+        <field name="notifyActivities" type="text-indicator" default="'Y'"/>
+        <field name="notifyChanges" type="text-indicator" default="'N'"/>
+        <field name="fromDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <relationship type="one" related="moqui.security.UserAccount" short-alias="user"/>
+        <index name="RECORD_FOLLOWER_USER" unique="false"><index-field name="userId"/></index>
+    </entity>
+
+    <entity entity-name="ConfidentialRecordType" package="mantle.party.communication" cache="true">
+        <description>A record type whose note and message notices (CommunicationServices notify#RecordMention, notify#RecordFollowers)
+            go to the users they are sent to alone (directOnly: a subscription to every message of ChatterMention or RecordFollow,
+            set in Tools, receives none), since they name the record and quote the note. Seeded by the owner's component beside
+            its entity (IronStone People's employment, application and qualification; the user's call of Nov 12, 2026, People
+            follow-up 1); a confidential case, which is a Request of its own kind, hands its notices to PeopleCaseUpdate instead.
+            disabled Y leaves it out.</description>
+        <field name="recordEntityName" type="text-medium" is-pk="true"><description>The full entity name</description></field>
+        <field name="ownerText" type="text-medium"><description>Whose record type it is, for a reader</description></field>
+        <field name="disabled" type="text-indicator"/>
+    </entity>
+
+    <entity entity-name="RecordLinkType" package="mantle.party.communication" cache="true">
+        <description>A record type the record link services take (CommunicationServices get#RecordLinkInfo; SEC-BOS-87): the record
+            panels, cards, notes, messages, activities, record rooms and record folders of a record of any other entity are refused.
+            Registered by the component that hosts the record, as data: Mantle the types its joins and rules cover; an app the
+            records its screens show (mr-boss data/BossSetupRecordTypesData.xml). Beside get#RecordLinkInfo's own rules for its types and
+            the user's entity filters, a registration names how a record of it is seen, the first that is set: visibleService, a
+            service implementing mantle.party.CommunicationServices.check#RecordTypeVisible (recordEntityName, recordId; answers
+            recordVisible), called with authorization disabled, which applies the host app's own rule; parentEntityName with
+            parentField, the record seen as the record its field names is (another registered type; with that field empty, by
+            organizationField when it is set too, else a system administrator's); organizationField, the
+            field holding the record's organization, which must be one of the user's (every one for a system administrator; a
+            record with none is a system administrator's). These apply with authorization on, as get#RecordLinkInfo's rules for
+            a user do. A registration with none of these is seen by a system administrator alone (and logged as an error when
+            loaded), unless it says why it needs none: codeRule Y, which holds only for a type get#RecordLinkInfo rules itself (Mantle's
+            own rows, the fixed list of RecordLinkTypes.js codeRuled; another row claiming it is logged and refused), or
+            publicRead Y, public content seen by any user under the entity filters alone (no row uses it now). disabled Y leaves it
+            out.</description>
+        <field name="recordEntityName" type="text-medium" is-pk="true"><description>The full entity name</description></field>
+        <field name="ownerText" type="text-medium"><description>Whose record type it is, for a reader</description></field>
+        <field name="visibleService" type="text-medium"/>
+        <field name="parentEntityName" type="text-medium"/>
+        <field name="parentField" type="text-short"/>
+        <field name="organizationField" type="text-short"/>
+        <field name="codeRule" type="text-indicator"><description>Y: get#RecordLinkInfo's own rules and the entity filters decide
+            (Mantle's registrations)</description></field>
+        <field name="publicRead" type="text-indicator"><description>Y: public content, seen by any user under the entity filters
+            alone</description></field>
+        <field name="disabled" type="text-indicator"/>
+        <seed-data>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.order.OrderHeader" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.request.Request" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.effort.WorkEffort" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="moqui.resource.wiki.WikiPage" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.sales.opportunity.SalesOpportunity" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.party.Party" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.facility.Facility" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.ledger.transaction.AcctgTrans" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.bom.ProductBom" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.party.agreement.Agreement" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.maintenance.AssetMaintenance" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.party.communication.CommunicationEvent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.invoice.Invoice" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.payment.Payment" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.method.PaymentMethod" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.Product" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.category.ProductCategory" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.shipment.Shipment" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.Asset" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.quality.QualityInspection" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.order.return.ReturnHeader" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.employment.Employment" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.employment.EmploymentApplication" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.ability.PartyQualification" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.ability.PerformanceReview" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.payroll.Payslip" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.marketing.campaign.MarketingCampaign" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.marketing.campaign.CampaignSend" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.registration.EventRegistration" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="moqui.resource.GitMergeRequest" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="moqui.resource.GitRepository" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.time.Timesheet" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="moqui.security.UserAccount" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="moqui.security.UserGroup" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="moqui.entity.EntityAuditLog" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.ledger.transaction.AcctgTransContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.invoice.InvoiceContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.payment.PaymentContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.method.PaymentMethodContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.AssetContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.order.return.ReturnContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.quality.QualityInspectionContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.sales.opportunity.SalesOpportunityContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.marketing.campaign.CampaignSendContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.registration.EventRegistrationContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.order.OrderContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.request.RequestContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.employment.EmploymentContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.employment.EmploymentApplicationContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.ability.PartyQualificationContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.ability.PerformanceReviewContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.payroll.PayslipContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.feature.ProductFeature" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.feature.ProductFeatureGroup" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ProductIdentifierPolicy" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ProductOtherIdentification" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ProductCatalogOperation" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ProductContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.category.ProductCategoryContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ContentEditConflict" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.receipt.AssetReceipt" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.issuance.AssetIssuance" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.AssetDetail" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.AssetBookEvent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.AssetRevaluationPreview" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.ledger.transaction.PostingOperation" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.cost.ProductStandardCost" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.cost.ProductStandardCostComponent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.cost.ProductCostCalculation" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.bom.ProductBomItem" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.bom.ProductBomContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.method.MethodReleaseDecision" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.production.WorkCenter" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.production.WorkCenterRate" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.production.ProductionDowntime" ownerText="Mantle: a production stop, a maintenance request's link (ProductionDowntime.js)" organizationField="organizationPartyId"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="WikiPageCommunicationEvent" package="mantle.party.communication" cache="never">
+        <field name="wikiPageId" type="id" is-pk="true"/>
+        <field name="communicationEventId" type="id" is-pk="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <relationship type="one" related="moqui.resource.wiki.WikiPage" short-alias="page"/>
+        <relationship type="one" related="mantle.party.communication.CommunicationEvent" short-alias="communicationEvent"/>
+    </entity>
+</entities>

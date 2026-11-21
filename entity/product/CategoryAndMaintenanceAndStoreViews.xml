@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <view-entity entity-name="ProductCategoryContentAndOwner" package="mantle.product.category">
+        <description>Category content with its master owner for scoped content queries.</description>
+        <member-entity entity-alias="CNT" entity-name="mantle.product.category.ProductCategoryContent"/>
+        <member-entity entity-alias="CAT" entity-name="mantle.product.category.ProductCategory" join-from-alias="CNT">
+            <key-map field-name="productCategoryId"/>
+        </member-entity>
+        <alias-all entity-alias="CNT"/>
+        <alias entity-alias="CAT" name="ownerPartyId"/>
+    </view-entity>
+
+    <!-- ========================================================= -->
+    <!-- mantle.product.category -->
+    <!-- ========================================================= -->
+    <view-entity entity-name="ProductCategoryAndType" package="mantle.product.category">
+        <member-entity entity-alias="PCAT" entity-name="mantle.product.category.ProductCategory"/>
+        <member-entity entity-alias="PCTE" entity-name="moqui.basic.Enumeration" join-from-alias="PCAT">
+            <key-map field-name="productCategoryTypeEnumId" related="enumId"/></member-entity>
+        <alias-all entity-alias="PCAT"/>
+        <alias name="typeDescription" entity-alias="PCTE" field="description"/>
+    </view-entity>
+
+    <view-entity entity-name="ProductCategoryAndMember" package="mantle.product.category">
+        <member-entity entity-alias="PCM" entity-name="mantle.product.category.ProductCategoryMember"/>
+        <member-entity entity-alias="PCAT" entity-name="mantle.product.category.ProductCategory" join-from-alias="PCM">
+            <key-map field-name="productCategoryId"/></member-entity>
+        <alias-all entity-alias="PCM"><exclude field="comments"/></alias-all>
+        <alias-all entity-alias="PCAT"/>
+    </view-entity>
+
+    <view-entity entity-name="ProductCategoryMemberProduct" package="mantle.product.category">
+        <member-entity entity-alias="PCM" entity-name="mantle.product.category.ProductCategoryMember"/>
+        <member-entity entity-alias="PROD" entity-name="mantle.product.Product" join-from-alias="PCM">
+            <key-map field-name="productId"/></member-entity>
+        <alias-all entity-alias="PCM"><exclude field="comments"/></alias-all>
+        <alias-all entity-alias="PROD"><exclude field="productId"/></alias-all>
+    </view-entity>
+
+    <view-entity entity-name="ProductCategoryMemberProductFeature" package="mantle.product.category">
+        <member-entity entity-alias="PCM" entity-name="mantle.product.category.ProductCategoryMember"/>
+        <member-entity entity-alias="PROD" entity-name="mantle.product.Product" join-from-alias="PCM">
+            <key-map field-name="productId"/></member-entity>
+        <member-entity entity-alias="PFA" entity-name="mantle.product.feature.ProductFeatureAppl" join-from-alias="PCM">
+            <key-map field-name="productId"/></member-entity>
+        <alias-all entity-alias="PCM"><exclude field="comments"/></alias-all>
+        <alias-all entity-alias="PROD"><exclude field="productId"/></alias-all>
+        <alias-all entity-alias="PFA"><exclude field="fromDate"/><exclude field="thruDate"/><exclude field="sequenceNum"/></alias-all>
+        <alias name="featureFromDate" entity-alias="PFA" field="fromDate"/>
+        <alias name="featureThruDate" entity-alias="PFA" field="thruDate"/>
+    </view-entity>
+
+    <view-entity entity-name="ProductCategoryChildren" package="mantle.product.category">
+        <member-entity entity-alias="PCR" entity-name="mantle.product.category.ProductCategoryRollup"/>
+        <member-entity entity-alias="PCAT" entity-name="mantle.product.category.ProductCategory" join-from-alias="PCR">
+            <key-map field-name="productCategoryId"/></member-entity>
+        <alias-all entity-alias="PCR"/>
+        <alias-all entity-alias="PCAT"/>
+        <alias name="childProductCategoryId" entity-alias="PCR" field="productCategoryId"/>
+    </view-entity>
+
+    <view-entity entity-name="ProductCategoryParents" package="mantle.product.category">
+        <member-entity entity-alias="PCR" entity-name="mantle.product.category.ProductCategoryRollup"/>
+        <member-entity entity-alias="PCAT" entity-name="mantle.product.category.ProductCategory" join-from-alias="PCR">
+            <key-map field-name="parentProductCategoryId" related="productCategoryId"/></member-entity>
+        <alias-all entity-alias="PCR"/>
+        <alias-all entity-alias="PCAT"/>
+        <alias name="childProductCategoryId" entity-alias="PCR" field="productCategoryId"/>
+    </view-entity>
+
+    <!-- ========================================================= -->
+    <!-- mantle.product.maintenance -->
+    <!-- ========================================================= -->
+    <view-entity entity-name="ProductMaintenanceDetail" package="mantle.product.maintenance">
+        <member-entity entity-alias="PDM" entity-name="mantle.product.maintenance.ProductMaintenance"/>
+        <member-entity entity-alias="UOM" entity-name="moqui.basic.Uom" join-from-alias="PDM" join-optional="true">
+            <key-map field-name="intervalUomId"/></member-entity>
+        <member-entity entity-alias="PMTR" entity-name="mantle.product.maintenance.ProductMeter" join-from-alias="PDM" join-optional="true">
+            <key-map field-name="intervalProductMeterId"/></member-entity>
+        <member-entity entity-alias="PMUOM" entity-name="moqui.basic.Uom" join-from-alias="PMTR" join-optional="true">
+            <key-map field-name="meterUomId"/></member-entity>
+        <member-entity entity-alias="MTENM" entity-name="moqui.basic.Enumeration" join-from-alias="PDM" join-optional="true">
+            <key-map field-name="maintenanceTypeEnumId"/></member-entity>
+        <alias-all entity-alias="PDM"/>
+        <alias name="uomDescription" entity-alias="UOM" field="description"/>
+        <alias name="meterUomDescription" entity-alias="PMUOM" field="description"/>
+        <alias name="maintTypeDescription" entity-alias="MTENM" field="description"/>
+    </view-entity>
+
+    <view-entity entity-name="ProductMeterAndUom" package="mantle.product.maintenance">
+        <member-entity entity-alias="PDM" entity-name="mantle.product.maintenance.ProductMeter"/>
+        <member-entity entity-alias="UOM" entity-name="moqui.basic.Uom" join-from-alias="PDM">
+            <key-map field-name="meterUomId"/></member-entity>
+        <alias-all entity-alias="PDM"/>
+        <alias-all entity-alias="UOM"/>
+    </view-entity>
+
+    <view-entity entity-name="AssetAndPartyDetail" package="mantle.product.maintenance">
+        <member-entity entity-alias="AST" entity-name="mantle.product.asset.Asset"/>
+        <member-entity entity-alias="ASTP" entity-name="mantle.product.asset.AssetPartyAssignment" join-from-alias="AST">
+            <key-map field-name="assetId"/></member-entity>
+        <member-entity entity-alias="PTY" entity-name="mantle.party.Party" join-from-alias="ASTP">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="ORG" entity-name="mantle.party.Organization" join-from-alias="ASTP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="ASTP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="USRACT" entity-name="moqui.security.UserAccount" join-from-alias="ASTP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <alias-all entity-alias="ASTP"/>
+        <alias-all entity-alias="AST"><exclude field="statusId"/><exclude field="comments"/></alias-all>
+        <alias-all entity-alias="PTY"><exclude field="statusId"/><exclude field="ownerPartyId"/><exclude field="comments"/></alias-all>
+        <alias-all entity-alias="PER"/>
+        <alias-all entity-alias="ORG"/>
+        <alias name="username" entity-alias="USRACT"/>
+        <alias name="partyOwnerPartyId" entity-alias="PTY" field="ownerPartyId"/>
+    </view-entity>
+
+    <!-- ========================================================= -->
+    <!-- mantle.product.store -->
+    <!-- ========================================================= -->
+    <view-entity entity-name="ProductStoreShipOptionDetail" package="mantle.product.store">
+        <member-entity entity-alias="PSSO" entity-name="mantle.product.store.ProductStoreShipOption"/>
+        <member-entity entity-alias="CSM" entity-name="mantle.shipment.carrier.CarrierShipmentMethod" join-from-alias="PSSO">
+            <key-map field-name="carrierPartyId"/><key-map field-name="shipmentMethodEnumId"/></member-entity>
+        <member-relationship entity-alias="CPTY" join-from-alias="CSM" relationship="carrierParty"/>
+        <member-relationship entity-alias="SME" join-from-alias="CSM" relationship="shipmentMethodEnum"/>
+        <alias-all entity-alias="PSSO"/>
+        <alias-all entity-alias="CSM"><exclude field="sequenceNum"/></alias-all>
+        <alias name="carrierPartyPartyId" entity-alias="CPTY" field="partyId"/>
+        <alias name="carrierPseudoId" entity-alias="CPTY" field="pseudoId"/>
+        <alias name="carrierOwnerPartyId" entity-alias="CPTY" field="ownerPartyId"/>
+        <alias name="carrierPrivateOwnerUserId" entity-alias="CPTY" field="privateOwnerUserId"/>
+        <alias name="shipmentMethodEnumEnumId" entity-alias="SME" field="enumId"/>
+        <alias name="shipmentMethodDescription" entity-alias="SME" field="description"/>
+    </view-entity>
+
+    <view-entity entity-name="ProductStoreSettingLookup" package="mantle.product.store">
+        <member-entity entity-alias="PSS" entity-name="mantle.product.store.ProductStoreSetting"/>
+        <member-entity entity-alias="OHDR" entity-name="mantle.order.OrderHeader" join-from-alias="PSS" join-optional="true">
+            <key-map field-name="productStoreId"/></member-entity>
+        <member-entity entity-alias="SIS" entity-name="mantle.shipment.ShipmentItemSource" join-from-alias="OHDR" join-optional="true">
+            <key-map field-name="orderId"/></member-entity>
+        <alias-all entity-alias="PSS"/>
+        <alias name="orderId" entity-alias="OHDR"/>
+        <alias name="shipmentId" entity-alias="SIS"/>
+    </view-entity>
+
+    <view-entity entity-name="ProductStorePromoProductDetail" package="mantle.product.store">
+        <member-entity entity-alias="PSPP" entity-name="mantle.product.store.ProductStorePromoProduct"/>
+        <member-relationship entity-alias="PROD" join-from-alias="PSPP" relationship="product"/>
+        <alias-all entity-alias="PSPP"/>
+        <alias-all entity-alias="PROD"/>
+    </view-entity>
+
+    <view-entity entity-name="OrderPromoCodeDetail" package="mantle.product.store">
+        <member-entity entity-alias="OPC" entity-name="mantle.order.OrderPromoCode"/>
+        <member-relationship entity-alias="PSPC" join-from-alias="OPC" relationship="storePromoCode"/>
+        <member-relationship entity-alias="PSP" join-from-alias="PSPC" relationship="storePromotion"/>
+        <alias name="orderId" entity-alias="OPC"/>
+        <alias name="promoCodeId" entity-alias="OPC"/>
+        <alias name="promoCode" entity-alias="PSPC"/>
+        <alias name="storePromotionId" entity-alias="PSPC"/>
+        <alias name="fromDate" entity-alias="PSPC"/>
+        <alias name="thruDate" entity-alias="PSPC"/>
+        <alias name="promoFromDate" field="fromDate" entity-alias="PSP"/>
+        <alias name="promoThruDate" field="thruDate" entity-alias="PSP"/>
+        <alias name="itemDescription" entity-alias="PSP"/>
+        <alias name="productStoreId" entity-alias="PSP"/>
+    </view-entity>
+
+    <view-entity entity-name="PartyPromoCodeDetail" package="mantle.product.store">
+        <member-entity entity-alias="PSPCP" entity-name="mantle.product.store.ProductStorePromoCodeParty"/>
+        <member-relationship entity-alias="PSPC" join-from-alias="PSPCP" relationship="storePromoCode"/>
+        <member-relationship entity-alias="PSP" join-from-alias="PSPC" relationship="storePromotion"/>
+        <alias name="partyId" entity-alias="PSPCP"/>
+        <alias name="promoCodeId" entity-alias="PSPCP"/>
+        <alias name="promoCode" entity-alias="PSPC"/>
+        <alias name="storePromotionId" entity-alias="PSPC"/>
+        <alias name="fromDate" entity-alias="PSPC"/>
+        <alias name="thruDate" entity-alias="PSPC"/>
+        <alias name="promoFromDate" field="fromDate" entity-alias="PSP"/>
+        <alias name="promoThruDate" field="thruDate" entity-alias="PSP"/>
+        <alias name="itemDescription" entity-alias="PSP"/>
+        <alias name="productStoreId" entity-alias="PSP"/>
+    </view-entity>
+</entities>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- An organization's page space for its storeless landing pages (the site page services' marketing mount, F23; as a store's
+        ProductStoreWikiSpace PstFull is for its Shop pages): a wiki space with restrictUpdate that only the site page services write,
+        made when the organization's first landing page is. Dated; the newest current row is the space. -->
+    <entity entity-name="MarketingPageSpace" package="mantle.marketing.content" cache="never">
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="wikiSpaceId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party"><key-map field-name="organizationPartyId"
+                related="partyId"/></relationship>
+        <relationship type="one" related="moqui.resource.wiki.WikiSpace"/>
+    </entity>
+</entities>

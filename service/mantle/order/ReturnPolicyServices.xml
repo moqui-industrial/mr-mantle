@@ -13,7 +13,7 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <!-- Customer return policies and customer returns (impl-customer-service P9, CS-RETURN-POLICY, CX-RETURNS, CX-APPROVAL; design-
-    customer-service §5, §9 ReturnPolicies; entity/ReturnPolicyEntities.xml; ReturnPolicies.js has the rules): the dated
+    customer-service §5, §9 ReturnPolicies; entity/order/ReturnEntities.xml; ReturnPolicies.js has the rules): the dated
     policies and reason rows, the eligibility and policy evaluation of a sale's lines (under a lock per source order item:
     shipped and invoiced less every return not cancelled, drafts included, F21), a customer's return entered by an agent, its
     authorization over Mantle's approve#Return (no settlement; immediate responses only with the policy and the settlement
