@@ -431,7 +431,7 @@ along with this software (see the LICENSE.md file). If not, see
     </entity>
 
 <!-- Putaway (design-warehouse §17 WH-PUTAWAY; impl-warehouse P9): the putaway rules mantle.facility.PutawayServices
-    resolves destinations by, and the storage type of a product and of a location (StorageType, data/PutawayData.xml). A
+    resolves destinations by, and the storage type of a product and of a location (StorageType, data/10-seed/InventoryAndQuality.xml). A
     product's ProductFacilityLocation stays its default location; a rule adds destinations for the stock it applies to. -->
     <entity entity-name="PutawayRule" package="mantle.facility" cache="never">
         <description>Where stock of a facility is put away (design-warehouse PutawayRules RuleList): one dated row per rule.

@@ -204,7 +204,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="get" noun="CampaignCalendar" allow-remote="false" read-only="true">
-        <description>The "Campaign calendar", a projected CalDAV collection (MarketingSeedData.xml's CalendarProjection
+        <description>The "Campaign calendar", a projected CalDAV collection (10-seed/MarketingAndCommerce.xml's CalendarProjection
             MarketingCampaigns; the projected kind of mantle.work.CalendarDavServices, read only: a device write is refused): admitted
             for a holder of MARKETING_VIEW; without checkOnly the items of get#CalendarItems for the organizations of the caller's
             scope from start through end (epoch millis; 30 days back to 180 ahead when none) as the ICalendar tool's event maps, each

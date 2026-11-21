@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<entity-facade-xml type="seed">
-    <moqui.basic.Enumeration enumId="GatInventoryRevaluation" enumTypeId="GlAccountType" description="Inventory revaluation offset"/>
-    <moqui.basic.Enumeration enumId="AttInventoryRevaluation" enumTypeId="AcctgTransType" description="Inventory revaluation"/>
-    <moqui.basic.EnumerationType enumTypeId="AssetBookEventType" description="Asset book event type"/>
-    <moqui.basic.Enumeration enumId="AbeInventoryRevaluation" enumTypeId="AssetBookEventType" description="Inventory revaluation"/>
-</entity-facade-xml>

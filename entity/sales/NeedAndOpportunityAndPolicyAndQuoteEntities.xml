@@ -64,7 +64,7 @@ along with this software (see the LICENSE.md file). If not, see
             SalesOpportunityParty row, kept equal to it by the opportunity services (P4), so the organization filters
             (MANTLE_USER_ORG_SOPP, MANTLE_ACTIVE_ORG_SOPP) can bound what an app root's user reads -->
         <field name="organizationPartyId" type="id" enable-audit-log="true"/>
-        <!-- the outcome (impl-sales P2): SalesOppOpen, SalesOppWon or SalesOppLost (data/SalesCrmSeedData.xml); empty is open. A
+        <!-- the outcome (impl-sales P2): SalesOppOpen, SalesOppWon or SalesOppLost (data/10-seed/Sales.xml); empty is open. A
             retired stage's open deals are those not Won or Lost (OpportunityServices store#Stage); the lifecycle is P4's -->
         <field name="statusId" type="id" enable-audit-log="true"/>
         <!-- impl-sales P4 (design-sales §3 OpportunityDetail, SAL-CRM): the pipeline the deal moves through (its stage one of the
@@ -153,7 +153,7 @@ along with this software (see the LICENSE.md file). If not, see
     </entity>
 
     <!-- impl-sales P2 (design-sales §9 Stages): a pipeline scopes its stages. organizationPartyId empty is the instance's
-        shared pipeline, offered to every organization (the seeded default, data/SalesData.xml), changed only by a reader of
+        shared pipeline, offered to every organization (the seeded default, data/15-seed-initial/MarketingAndSales.xml), changed only by a reader of
         every organization; defaultFlag Y is its organization's default (one in effect at a time). An optional team narrows it
         to that team's opportunities. Dated: a pipeline is ended, never deleted (OpportunityServices store#Pipeline). -->
     <entity entity-name="SalesPipeline" package="mantle.sales.opportunity">

@@ -19,7 +19,7 @@ along with this software (see the LICENSE.md file). If not, see
     obligations follow; refused until the group is live and Accounting's payroll-origin projection is in place). Each batch is
     previewed, reconciled and executed; a file replayed answers its batch. Read with PAYROLL_VIEW; an export needs PAYROLL_EDIT too,
     an import PEOPLE_IMPORT, PAYROLL_VIEW and PAYROLL_EDIT; another employer's batch is a missing one. The registrations of the
-    framework's data transfer (data/PeoplePayrollExchangeSetupData.xml) name find#ExchangeRuns, find#ExportScopes and
+    framework's data transfer (data/10-seed/PeopleAndPayroll.xml) name find#ExchangeRuns, find#ExportScopes and
     export#InputsTransfer. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
     <service verb="preview" noun="Batch" allow-remote="false">
@@ -175,7 +175,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <!-- the payroll exchange's contracts for the framework's org.moqui.admin.DataTransferServices (the targets payrollExchange and
-        payrollExchangeInputs, data/PeoplePayrollExchangeSetupData.xml) -->
+        payrollExchangeInputs, data/10-seed/PeopleAndPayroll.xml) -->
     <service verb="find" noun="ExchangeRuns" allow-remote="false">
         <implements service="org.moqui.admin.DataTransferServices.find#TargetRuns"/>
         <description>The payroll history and results imports of the employers a payroll reader reads (PAYROLL_VIEW and People's

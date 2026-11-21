@@ -360,7 +360,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <!-- ===== expiry reminders (the daily ServiceJob send_QualificationExpiryReminders, PeopleDevelopmentSetupData.xml) ===== -->
+    <!-- ===== expiry reminders (the daily ServiceJob send_QualificationExpiryReminders, 15-seed-initial/People.xml) ===== -->
     <service verb="send" noun="ExpiryReminders" allow-remote="false" authenticate="anonymous-all" transaction-timeout="1800">
         <description>Each verified qualification expiring within thirty days and not renewed by a later verified one, whose person
             was not yet reminded of that expiry, reminded once (the QualificationExpiring topic, to the person's own accounts: its

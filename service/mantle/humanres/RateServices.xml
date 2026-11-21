@@ -200,7 +200,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="migrate" noun="ProductionCostRates" allow-remote="false">
         <description>Moves the rows of Manufacturing's own costing purpose before People P10 (RaprProductionCost) to the one labor
             costing purpose RaprCost and removes the old value; nothing to do once done, or on a new database (a data load calls
-            it: data/ProductionShopFloorData.xml). Each row on its own: a failure is logged and the rest are moved.</description>
+            it: data/10-seed/Production.xml). Each row on its own: a failure is logged and the rest are moved.</description>
         <out-parameters>
             <parameter name="movedCount" type="Integer"/>
             <parameter name="failedCount" type="Integer"/>

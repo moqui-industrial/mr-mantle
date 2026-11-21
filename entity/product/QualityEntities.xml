@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     whose characteristics are effective-dated rows (a published item is never edited in place: a change ends it and starts
     a new row, its key fields audit-logged), source-linked inspections that read their template's items as of their
     creation, readings, the dispositions that move held stock (a posting each, with its own identity) and the inspection's
-    files. Written only through mantle.product.QualityServices; the seed data is in data/QualityData.xml. -->
+    files. Written only through mantle.product.QualityServices; the seed data is in data/10-seed/InventoryAndQuality.xml. -->
     <entity entity-name="InspectionTemplate" package="mantle.product.quality">
         <description>Reusable checks of an organization: the context they apply to (receipt, return, outgoing, production),
             the applicability (a product, a category, a facility; none for any), the sample policy and the state (draft,

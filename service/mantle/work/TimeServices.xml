@@ -2210,7 +2210,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="get" noun="TimeEntryTimeline">
-        <description>A RecordTimelineSource (ServiceRegister of data/MantleSetupData.xml; mantle.party.CommunicationServices
+        <description>A RecordTimelineSource (ServiceRegister of data/15-seed-initial/Access.xml; mantle.party.CommunicationServices
             get#RecordTimeline): the time logged on a work effort, as entries of kind time, newest first, each {date (when the
             work ended), entryKey (the timeEntryId), authorPartyId (who logged it), title, body (the comment), hours, workTypeEnumId,
             workTypeLabel, billable, fromDate, thruDate, timeEntryId}. No rates. A running timer is left out, and so is every

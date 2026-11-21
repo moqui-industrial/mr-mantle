@@ -13,7 +13,7 @@
 // marked (PayrollObligations.js), and entity ECA rules (entity/PayrollOrigin.eecas.xml) mark a payroll payment, a payment applied to
 // a marked invoice or to or from a marked payment, and a transaction of a marked invoice or payment (the payment's transactions
 // made before the application too). A mark is never taken off. Payments and transactions of PtPayrollPayment made before the mark
-// are marked by migrate#PayrollOriginMarks on a data load (data/ZaaGlAccountsUpdateData.xml).
+// are marked by migrate#PayrollOriginMarks on a data load (data/10-seed/UpgradePayrollPosting.xml).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, denied} = lib
 
@@ -145,7 +145,7 @@ function markApplication(application) {
     if (application.paymentApplicationId) markRows(TRANSACTION, {paymentApplicationId: application.paymentApplicationId})
 }
 
-// ===== migrate#PayrollOrigin (data/ZaaGlAccountsUpdateData.xml) =====
+// ===== migrate#PayrollOrigin (data/10-seed/UpgradePayrollPosting.xml) =====
 // An existing database's payroll posting mappings added where missing (DefaultSettings and each organization with its own), and
 // payroll payments made before the mark marked; each organization on its own (failure tolerant). Nothing to do once done.
 function migrate() {

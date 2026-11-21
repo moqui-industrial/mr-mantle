@@ -1,5 +1,5 @@
 // The quote dataset (impl-sales P20, §4 Nov 14 the user's call; design-sales §1.4 CX-OPS-REPORTS L6, §16; report/mantle-sales-quotes.json,
-// the MantleSalesQuote document of data/SalesPipelineReportData.xml, SalesWorkspaceServices get#QuoteRowFilter): its row filter is
+// the MantleSalesQuote document of data/15-seed-initial/SalesDocumentsAndReports.xml, SalesWorkspaceServices get#QuoteRowFilter): its row filter is
 // Sales' quote scope, as the quote lists read it, so a representative's rows are their organization's quotes assigned to them or their
 // team, a manager's (SALES_TEAM_VIEW) the organization's, never another organization's, a template or a placed quote; a user who reads
 // nothing of Sales gets none and another user's filter is refused. The document is a Sales quote's part only (never a template), with

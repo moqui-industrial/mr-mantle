@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed-initial">
+    <!-- Case feedback (impl-customer-service P13, CS-FEEDBACK, CS-JOBS; mantle.request.CaseFeedbackServices): the invitation
+        email, from the organization's address, its subject and body made by the service (subject, fromAddress and fromName
+        in bodyParameters) with the Support app's Feedback link -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_CASE_FEEDBACK_EMAIL" description="Case feedback invitation"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses=""
+            subject="${subject}"/>
+    <!-- every fifteen minutes, a bounded batch of the invitations due and the reminders due, each in its own transaction, a
+        failing one logged by its id and the rest going on; idempotent by invitation -->
+    <moqui.service.job.ServiceJob jobName="send_CaseFeedbackInvitations" description="Send case feedback invitations and reminders"
+            serviceName="mantle.request.CaseFeedbackServices.send#Invitations" cronExpression="0 0/15 * * * ?" paused="N"
+            errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <!-- a low score's follow-up, to the follow-up team's managers (followUpId, formResponseId, requestId, requestName,
+        customerName, scoreText; the case as the record; never the comment). The app that works cases sets the link (IronStone
+        Customer Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="CaseFeedbackFollowUp" inboxEnumId="NinNotifications" description="Low Feedback Score to Follow Up"
+            typeString="warning" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${customerName} rated case ${requestId} ${scoreText}: ${requestName}"/>
+
+    <!-- Marketing P17 (impl-marketing P17; design-marketing §15.3 Registration expiry/waitlist, Event communications): the registration
+        jobs, their registrations for Admin's Jobs and their recoveries, seed-initial so a deployment's schedule and pause are kept. -->
+    <!-- Registration expiry and waitlist (design §15.3): the payment attempts due for a lookup applied (a success while held places
+        the order, a success after the hold ended is left for review and takes no seat), failed placements and waiting refunds
+        tried again, ended holds expired once and each offer's waitlist offered in order with a hold of its own. -->
+    <moqui.service.job.ServiceJob jobName="run_EventRegistrations" description="Expire registration holds, offer waitlist places and reconcile their payments"
+            serviceName="mantle.work.EventRegistrationServices.run#RegistrationHolds" cronExpression="0 0/2 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <moqui.server.JobRegistration jobName="run_EventRegistrations" ownerApp="Marketing" title="Event registration holds"
+            description="Applies the payment results of event registrations (placing the ticket order, or leaving a payment that came after its hold for review), expires the holds that ended and offers freed places to the waitlist in order, and hands waiting refunds to the payment services"
+            managePermission="MARKETING_EVENT_MANAGE" scheduleEditable="Y" minIntervalMinutes="1" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="MARKETING_EVENT_MANAGE" sequenceNum="76"/>
+    <moqui.server.RecoveryDescriptor descriptorKey="eventRegistrations" title="Event registration holds and payments" ownerApp="Marketing"
+            targetKind="ServiceJob" targetKey="run_EventRegistrations" retryMode="native" managePermission="MARKETING_EVENT_MANAGE"
+            idempotencyNote="A hold expires once (its state changes once under the offer's lock), a payment is looked up by its attempt and never sent again, an order is placed once (its status says so) and a refund carries the registration's operation key, so a run again changes only what is still due."
+            sequenceNum="76"/>
+    <!-- Event communications (design §15.3): each offer's notices due now queued once per registration, schedule and trigger on the
+        delivery ledger. -->
+    <moqui.service.job.ServiceJob jobName="run_EventRegistrationNotices" description="Queue event registration notices that are due"
+            serviceName="mantle.work.EventRegistrationServices.run#RegistrationNotices" cronExpression="0 0/15 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <moqui.server.JobRegistration jobName="run_EventRegistrationNotices" ownerApp="Marketing" title="Event notices"
+            description="Queues each event offer's scheduled notices that are due (before the start, after the end, when the occurrence moves) on the delivery ledger, once per registration and notice; promotional ones only with the recipient's consent"
+            managePermission="MARKETING_EVENT_MANAGE" scheduleEditable="Y" minIntervalMinutes="5" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="MARKETING_EVENT_MANAGE" sequenceNum="77"/>
+    <moqui.server.RecoveryDescriptor descriptorKey="eventRegistrationNotices" title="Event notices" ownerApp="Marketing"
+            targetKind="ServiceJob" targetKey="run_EventRegistrationNotices" retryMode="native" managePermission="MARKETING_EVENT_MANAGE"
+            idempotencyNote="Each notice is one ledger delivery per registration, schedule and trigger (its event key), which the ledger answers again for a repeat, so a run again queues nothing twice."
+            sequenceNum="77"/>
+
+    <!-- No site or category is published by setup. Workers have no public HTTP routes. -->
+  <moqui.service.job.ServiceJob jobName="pass_dispatch_outbox" description="Prepare and deliver authorized forum notifications" serviceName="mantle.forum.DeliveryWorkerServices.dispatch#Outbox" cronExpression="0 * * * * ?" paused="N" errorHistoryOnly="Y"/>
+  <moqui.service.job.ServiceJob jobName="pass_convert_mailboxes" description="Checkpointed disabled-category metadata conversion" serviceName="mantle.forum.BootstrapServices.dispatch#Conversions" cronExpression="0 * * * * ?" paused="N" errorHistoryOnly="Y"/>
+  <moqui.service.job.ServiceJob jobName="pass_cleanup_staged_media" description="Remove expired unreferenced forum uploads" serviceName="mantle.forum.MediaWorkerServices.cleanup#StagedAttachments" cronExpression="0 0 * * * ?" paused="N" errorHistoryOnly="Y"/>
+  <moqui.service.job.ServiceJob jobName="pass_convert_tracking_modes" description="Checkpoint public and internal read-state transitions" serviceName="mantle.forum.TrackingServices.dispatch#Conversions" cronExpression="0 * * * * ?" paused="N" errorHistoryOnly="Y"/>
+  <moqui.service.job.ServiceJob jobName="pass_cleanup_cursors" description="Remove expired opaque forum cursors and email opt-out tokens" serviceName="mantle.forum.OperationServices.cleanup#Cursors" cronExpression="0 * * * * ?" paused="N" errorHistoryOnly="Y"/>
+  <moqui.service.job.ServiceJob jobName="pass_remind_bookmarks" description="Turn due bookmark reminders into in-app notices" serviceName="mantle.forum.ForumServices.remind#Bookmarks" cronExpression="0 * * * * ?" paused="N" errorHistoryOnly="Y"/>
+  <moqui.service.job.ServiceJob jobName="pass_recompute_trust" description="Promote members who meet their site's trust thresholds" serviceName="mantle.forum.ModerationWorkerServices.recompute#Trust" cronExpression="0 */10 * * * ?" paused="N" errorHistoryOnly="Y"/>
+  <moqui.service.job.ServiceJob jobName="pass_fire_topic_timers" description="Apply due topic timers after rechecking scope" serviceName="mantle.forum.ModerationWorkerServices.fire#TopicTimers" cronExpression="0 * * * * ?" paused="N" errorHistoryOnly="Y"/>
+  <moqui.service.job.ServiceJob jobName="pass_classify_posts" description="Send queued posts to the configured classifier for review" serviceName="mantle.forum.ModerationWorkerServices.classify#Posts" cronExpression="0 * * * * ?" paused="N" errorHistoryOnly="Y"/>
+  <moqui.service.job.ServiceJob jobName="pass_dispatch_operations" description="Advance forum operation runs: rebuilds, retries, retention, exports and erasure" serviceName="mantle.forum.OperationServices.dispatch#Jobs" cronExpression="0 * * * * ?" paused="N" errorHistoryOnly="Y"/>
+  <moqui.service.job.ServiceJob jobName="pass_send_digests" description="Prepare due forum digests from currently accessible topics" serviceName="mantle.forum.DeliveryWorkerServices.send#Digests" cronExpression="0 0 * * * ?" paused="N" errorHistoryOnly="Y"/>
+  <moqui.service.job.ServiceJob jobName="pass_expire_held_mail" description="Drop mail held for a sender who is no account that nobody claimed in 30 days" serviceName="mantle.forum.DeliveryServices.expire#HeldMail" cronExpression="0 20 3 * * ?" paused="N" errorHistoryOnly="Y"/>
+  <!-- The forum's delivery worker as an owner of mail send outcomes (the framework's moqui.server.MailOutcomeOwner; mr-boss
+    impl-admin P12 R1): it tries a failed notice again itself, so the mail queue sends none of a site's notice template again -->
+  <moqui.server.MailOutcomeOwner ownerKey="forumDeliveries" title="Forum notices" sequenceNum="20"
+      description="Forum notifications and digests, which the forum's delivery worker tries again on its own"
+      ownerService="mantle.forum.DeliveryWorkerServices.find#MailOutcomeOwners"/>
+
+    <!-- Comms' templates, sending profiles and bounce intake (impl-marketing P6, F13, F14, F18, F76; design-marketing §5, §12, §15.1,
+        §15.3; mantle.party.MessageServices): the ledger's template source, whose build renders a template's content in effect; the
+        bounce intake's poll job, its registration with Admin (a job with its operation) and its registered recovery (a run outside its
+        schedule reads again the reports a run could not: each message is read once, so a run again changes nothing it applied). -->
+    <moqui.basic.Enumeration enumId="MdsrcMessageTemplate" description="Message template" sequenceNum="30" enumTypeId="MessageDeliverySource"
+            enumCode="mantle.party.MessageServices.build#TemplateDelivery"/>
+
+    <moqui.service.job.ServiceJob jobName="run_DeliveryReports" description="Read the bounce accounts' delivery and abuse reports"
+            serviceName="mantle.party.MessageServices.run#DeliveryReports" cronExpression="0 0/10 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <moqui.server.JobRegistration jobName="run_DeliveryReports" ownerApp="Comms" title="Read delivery and abuse reports"
+            description="Reads the reports the bounce accounts received and the edge relay's bounces that were not read when they came, each once: a hard bounce or a complaint suppresses the address"
+            managePermission="MESSAGE_SENDING_CONFIGURE" scheduleEditable="Y" minIntervalMinutes="5" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="MESSAGE_SENDING_CONFIGURE" sequenceNum="70"/>
+    <moqui.server.RecoveryDescriptor descriptorKey="messageDeliveryReports" title="Delivery and abuse reports" ownerApp="Comms"
+            targetKind="ServiceJob" targetKey="run_DeliveryReports" retryMode="native" managePermission="MESSAGE_SENDING_CONFIGURE"
+            idempotencyNote="Each report is read once (one record a message) and each fact of a delivery is kept once, so a run again reads only what was not read or failed, and suppresses an address once."
+            sequenceNum="70"/>
+</entity-facade-xml>

@@ -234,7 +234,7 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="RqtPrivacy" description="Privacy" enumTypeId="RequestType"/>
 
             <!-- the case workflows (CaseStatusMapping, CaseTransition); the default one's rows are seeded in
-                MantleSetupData.xml -->
+                15-seed-initial/SupportCases.xml -->
             <moqui.basic.EnumerationType description="Case Workflow" enumTypeId="CaseWorkflow"/>
             <moqui.basic.Enumeration enumId="CwfDefault" description="Default case workflow" enumTypeId="CaseWorkflow"/>
             <!-- the status categories a mapping gives a status (design StatusCategories) -->

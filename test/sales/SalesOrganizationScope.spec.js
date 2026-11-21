@@ -1,5 +1,5 @@
 // Sales' organization scope (impl-sales P1, §2; design-sales §1.1, X12): the organization filters of SalesOpportunity,
-// SalesForecast and Agreement (MANTLE_USER_ORG_SOPP, _SFC, _AGR and their MANTLE_ACTIVE_ORG twins, data/MantleSetupData.xml)
+// SalesForecast and Agreement (MANTLE_USER_ORG_SOPP, _SFC, _AGR and their MANTLE_ACTIVE_ORG twins, data/15-seed-initial/OrganizationFilters.xml)
 // leave another organization's opportunity, forecast and agreement out of a find under an app's ordinary grant
 // (MANTLE_USER_ORG), and an administrator's grant (MANTLE_ACTIVE_ORG) finds every organization's until one is active and then
 // that one's only; and SalesAccess.js gives a Sales reader their own organizations, a write permission alone none, and refuses

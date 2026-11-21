@@ -1161,7 +1161,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <!-- mr-boss impl-admin P15 (design-admin §11.1): the opening open items import's result contract for the framework's
-        org.moqui.admin.DataTransferServices (the target openingOpenItems, data/AccountingSetupData.xml) -->
+        org.moqui.admin.DataTransferServices (the target openingOpenItems, data/10-seed/Accounting.xml) -->
     <service verb="find" noun="OpenItemImportRuns" allow-remote="false">
         <description>The last import of opening open items of each organization the caller administers in Accounting
             (finance administration, as import#OpenItems): the setup run keeps the latest result only, so an

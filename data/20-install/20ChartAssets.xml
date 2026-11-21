@@ -1,0 +1,275 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="install">
+    <!-- =============================================== -->
+    <!-- ========== Default Chart of Accounts ========== -->
+    <!-- =============================================== -->
+
+    <!-- This chart of accounts is based (loosely) on the ABA Standard Chart of Accounts:
+        https://www.bookweb.org/standard-chart-accounts -->
+
+    <!-- NOTE: GlAccount.accountCode defaults to glAccountId, so not set on records in this file -->
+
+    <!-- 100000 ASSET -->
+    <mantle.ledger.account.GlAccount accountName="Asset Root" description="" glAccountClassEnumId="ASSET"
+        glAccountId="100000000" glAccountTypeEnumId="" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="" disallowPosting="Y"/>
+
+    <!-- 110000 ASSET - CASH ON HAND -->
+    <mantle.ledger.account.GlAccount accountName="Cash and Equivalent Asset" description="" glAccountClassEnumId="CASH_EQUIVALENT"
+        glAccountId="110000000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="100000000"/>
+    <mantle.ledger.account.GlAccount accountName="Cash on Hand" description="" glAccountClassEnumId="CASH_EQUIVALENT"
+        glAccountId="111000000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="110000000"/>
+    <mantle.ledger.account.GlAccount accountName="General Checking Account" description="" glAccountClassEnumId="CASH_EQUIVALENT"
+        glAccountId="111100000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="111000000"/>
+    <mantle.ledger.account.GlAccount accountName="Payroll Checking Account" description="" glAccountClassEnumId="CASH_EQUIVALENT"
+        glAccountId="111200000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="111000000"/>
+    <mantle.ledger.account.GlAccount accountName="Other Checking Account" description="" glAccountClassEnumId="CASH_EQUIVALENT"
+        glAccountId="111300000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="111000000"/>
+    <mantle.ledger.account.GlAccount accountName="Money Market" description="" glAccountClassEnumId="CASH_EQUIVALENT"
+        glAccountId="111400000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="111000000"/>
+    <mantle.ledger.account.GlAccount accountName="Certificates of Deposit" description="" glAccountClassEnumId="CASH_EQUIVALENT"
+        glAccountId="111500000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="111000000"/>
+    <mantle.ledger.account.GlAccount accountName="Savings Accounts" description="" glAccountClassEnumId="CASH_EQUIVALENT"
+        glAccountId="111600000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="111000000"/>
+    <mantle.ledger.account.GlAccount accountName="Cash in Registers" description="" glAccountClassEnumId="CASH_EQUIVALENT"
+        glAccountId="111700000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="111000000"/>
+    <mantle.ledger.account.GlAccount accountName="Cash for Out of Store Events" description="" glAccountClassEnumId="CASH_EQUIVALENT"
+        glAccountId="111800000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="111000000"/>
+    <mantle.ledger.account.GlAccount accountName="Petty Cash" description="" glAccountClassEnumId="CASH_EQUIVALENT"
+        glAccountId="111900000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="111000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Undeposited Receipts" description="" glAccountClassEnumId="CASH_EQUIVALENT"
+        glAccountId="112000000" glAccountTypeEnumId="GatUndepositedReceipts" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="110000000"/>
+
+    <!-- 120000 ASSET - ACCOUNTS RECEIVABLE -->
+    <mantle.ledger.account.GlAccount accountName="Current Receivable" description="" glAccountClassEnumId="CURRENT_ASSET"
+        glAccountId="120000000" glAccountTypeEnumId="GatAccountsReceivable" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="100000000" disallowPosting="Y"/>
+
+    <mantle.ledger.account.GlAccount accountName="Accounts Receivable" description="" glAccountClassEnumId="ACCOUNTS_RECEIVABLE"
+        glAccountId="121000000" glAccountTypeEnumId="GatAccountsReceivable" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="120000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Accounts Receivable - Trade" description="" glAccountClassEnumId="ACCOUNTS_RECEIVABLE"
+        glAccountId="121100000" glAccountTypeEnumId="GatAccountsReceivable" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="121000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accounts Receivable - Non-Sufficient Funds Returned Checks" description="" glAccountClassEnumId="ACCOUNTS_RECEIVABLE"
+        glAccountId="121200000" glAccountTypeEnumId="GatAccountsReceivable" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="121000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accounts Receivable - Interest Receivable" description="" glAccountClassEnumId="ACCOUNTS_RECEIVABLE"
+        glAccountId="121500000" glAccountTypeEnumId="GatInterestIncomeRec" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="121000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accounts Receivable - Discount on Interest Receivable" description="" glAccountClassEnumId="ALLOWANCE_BAD_DEBT"
+        glAccountId="121600000" glAccountTypeEnumId="GatAccRecBadRec" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="121000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accounts Receivable - Allowance for Bad Debts" description="" glAccountClassEnumId="ALLOWANCE_BAD_DEBT"
+        glAccountId="121900000" glAccountTypeEnumId="GatAccRecBadRec" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="121000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="In Transit from Credit Card Processors" description="" glAccountClassEnumId="CASH_EQUIVALENT"
+        glAccountId="122000000" glAccountTypeEnumId="GatMerchantSettlement" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="120000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accounts Receivable Credit Cards - Allowance for Bad Debts" description="" glAccountClassEnumId="ALLOWANCE_BAD_DEBT"
+        glAccountId="122900000" glAccountTypeEnumId="GatAccRecBadRec" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="122000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Vendor Advertising Allowances Receivable" description="" glAccountClassEnumId="ACCOUNTS_RECEIVABLE"
+        glAccountId="123000000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="120000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Loans Receivable" description="" glAccountClassEnumId="LOANS_RECEIVABLE"
+        glAccountId="124000000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="120000000"/>
+    <mantle.ledger.account.GlAccount accountName="Loans Receivable - Employees" description="" glAccountClassEnumId="LOANS_RECEIVABLE"
+        glAccountId="124100000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="124000000"/>
+    <mantle.ledger.account.GlAccount accountName="Loans Receivable - Owners" description="" glAccountClassEnumId="LOANS_RECEIVABLE"
+        glAccountId="124200000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="124000000"/>
+    <mantle.ledger.account.GlAccount accountName="Loans Receivable - Others" description="" glAccountClassEnumId="LOANS_RECEIVABLE"
+        glAccountId="124300000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="124000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Receivable from Inventory Transferred Out" description="" glAccountClassEnumId="ACCOUNTS_RECEIVABLE"
+        glAccountId="125000000" glAccountTypeEnumId="GatRecInventoryTranOut" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="120000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Accounts Receivable - Unapplied Payments" description="" glAccountClassEnumId="UNEARNED_REVENUE"
+        glAccountId="126000000" glAccountTypeEnumId="GatAccReceivableUnapplied" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="120000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Accounts Receivable Miscellaneous" description="" glAccountClassEnumId="ACCOUNTS_RECEIVABLE"
+        glAccountId="129000000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="120000000"/>
+
+    <!-- 130000 ASSET - FIXED ASSETS -->
+    <mantle.ledger.account.GlAccount accountName="Fixed Assets" description="" glAccountClassEnumId="LONG_TERM_ASSET"
+        glAccountId="130000000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="100000000"/>
+
+    <!-- 131000 ASSET - EQUIPMENT -->
+    <!-- previous version change note (after 1.0.1): 17* to 131* -->
+    <mantle.ledger.account.GlAccount accountName="Equipment" description="" glAccountClassEnumId="EQUIPMENT"
+        glAccountId="131000000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtFinishedGood" parentGlAccountId="130000000" disallowPosting="Y"/>
+    <mantle.ledger.account.GlAccount accountName="Office Equipment - Furniture - Fixtures" description="" glAccountClassEnumId="EQUIPMENT"
+        glAccountId="131100000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtFinishedGood" parentGlAccountId="131000000"/>
+    <mantle.ledger.account.GlAccount accountName="Data Processing Equipment" description="" glAccountClassEnumId="EQUIPMENT"
+        glAccountId="131200000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtFinishedGood" parentGlAccountId="131000000"/>
+    <mantle.ledger.account.GlAccount accountName="Data Processing Software" description="" glAccountClassEnumId="EQUIPMENT"
+        glAccountId="131300000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtFinishedGood" parentGlAccountId="131000000"/>
+    <mantle.ledger.account.GlAccount accountName="Vehicles" description="" glAccountClassEnumId="EQUIPMENT"
+        glAccountId="131400000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtFinishedGood" parentGlAccountId="131000000"/>
+    <mantle.ledger.account.GlAccount accountName="Plant Equipment" description="" glAccountClassEnumId="EQUIPMENT"
+        glAccountId="131500000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtFinishedGood" parentGlAccountId="131000000"/>
+
+    <!-- 132000 ASSET - LAND AND BUILDING -->
+    <!-- previous version change note (after 1.0.1): 16* to 132* -->
+    <mantle.ledger.account.GlAccount accountName="Land and Building" description="" glAccountClassEnumId="LAND_BUILDING"
+        glAccountId="132000000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="130000000" disallowPosting="Y"/>
+    <mantle.ledger.account.GlAccount accountName="Land" description="" glAccountClassEnumId="LAND_BUILDING"
+        glAccountId="132100000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="132000000"/>
+    <mantle.ledger.account.GlAccount accountName="Building" description="" glAccountClassEnumId="LAND_BUILDING"
+        glAccountId="132200000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="132000000"/>
+    <mantle.ledger.account.GlAccount accountName="Land Improvements" description="" glAccountClassEnumId="LAND_BUILDING"
+        glAccountId="132300000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="132000000"/>
+    <mantle.ledger.account.GlAccount accountName="Building Improvements" description="" glAccountClassEnumId="LAND_BUILDING"
+        glAccountId="132400000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="132000000"/>
+    <mantle.ledger.account.GlAccount accountName="Leasehold Improvements" description="" glAccountClassEnumId="LAND_BUILDING"
+        glAccountId="132500000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="132000000"/>
+    <mantle.ledger.account.GlAccount accountName="Investment Real Estate" description="" glAccountClassEnumId="LAND_BUILDING"
+        glAccountId="132800000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="132000000"/>
+
+    <!-- 133000 ASSET - INTANGIBLE -->
+    <!-- previous version change note (after 1.0.1): 191* to 133* -->
+    <mantle.ledger.account.GlAccount accountName="Intangible Assets" description="" glAccountClassEnumId="INTANGIBLE_ASSET"
+        glAccountId="133000000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="130000000"/>
+    <mantle.ledger.account.GlAccount accountName="Covenant Not To Compete-Previous Owner" description="" glAccountClassEnumId="INTANGIBLE_ASSET"
+        glAccountId="133100000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="133000000"/>
+    <mantle.ledger.account.GlAccount accountName="Goodwill" description="" glAccountClassEnumId="INTANGIBLE_ASSET"
+        glAccountId="133200000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="133000000"/>
+    <mantle.ledger.account.GlAccount accountName="Customer Lists" description="" glAccountClassEnumId="INTANGIBLE_ASSET"
+        glAccountId="133300000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="133000000"/>
+    <mantle.ledger.account.GlAccount accountName="Intellectual Property Assets" description="" glAccountClassEnumId="INTANGIBLE_ASSET"
+        glAccountId="133400000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="133000000"/>
+    <mantle.ledger.account.GlAccount accountName="Other Intangible Assets" description="" glAccountClassEnumId="INTANGIBLE_ASSET"
+        glAccountId="133800000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="133000000"/>
+
+    <!-- 134000 ASSET - FIXED OTHER -->
+    <!-- previous version change note (after 1.0.1): 195000000 => 134500000, 195100000 => 134600000, 198000000 => 134900000 -->
+    <mantle.ledger.account.GlAccount accountName="Other Fixed Assets" description="" glAccountClassEnumId="OTHER_ASSET"
+        glAccountId="134000000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="130000000" disallowPosting="Y"/>
+    <mantle.ledger.account.GlAccount accountName="Cash Surrender Value of Life Insurance" description="" glAccountClassEnumId="OTHER_ASSET"
+        glAccountId="134100000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="134000000"/>
+    <mantle.ledger.account.GlAccount accountName="Biological Assets" description="" glAccountClassEnumId="OTHER_ASSET"
+        glAccountId="134500000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtFinishedGood" parentGlAccountId="134000000"/>
+    <mantle.ledger.account.GlAccount accountName="Bearer Biological Assets" description="" glAccountClassEnumId="OTHER_ASSET"
+        glAccountId="134600000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtFinishedGood" parentGlAccountId="134000000"/>
+    <mantle.ledger.account.GlAccount accountName="Other Assets" description="" glAccountClassEnumId="OTHER_ASSET"
+        glAccountId="134900000" glAccountTypeEnumId="GatFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="134000000"/>
+
+    <!-- 138000 ASSET - ACCUMULATED AMORTIZATION -->
+    <mantle.ledger.account.GlAccount accountName="Accumulated Amortization" description="" glAccountClassEnumId="ACCUM_AMORTIZATION"
+        glAccountId="138000000" glAccountTypeEnumId="" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="130000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Amortization - Intellectual Property" description="" glAccountClassEnumId="ACCUM_AMORTIZATION"
+        glAccountId="138400000" glAccountTypeEnumId="" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="138000000"/>
+
+    <!-- 139000 ASSET - FIXED ASSETS UNRECEIVED -->
+    <!-- previous version change note (after 1.0.1): 179000000 => 139100000, 169000000 => 139200000, 199000000 => 139300000 -->
+    <mantle.ledger.account.GlAccount accountName="Fixed Assets Unreceived" description="" glAccountClassEnumId="LONG_TERM_ASSET"
+        glAccountId="139000000" glAccountTypeEnumId="GatUnreceivedFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="130000000"/>
+    <mantle.ledger.account.GlAccount accountName="Equipment Unreceived" description="" glAccountClassEnumId="EQUIPMENT"
+        glAccountId="139100000" glAccountTypeEnumId="GatUnreceivedFixedAsset" glResourceTypeEnumId="GlrtFinishedGood" parentGlAccountId="139000000"/>
+    <mantle.ledger.account.GlAccount accountName="Land and Building Unreceived" description="" glAccountClassEnumId="LAND_BUILDING"
+        glAccountId="139200000" glAccountTypeEnumId="GatUnreceivedFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="139000000"/>
+    <mantle.ledger.account.GlAccount accountName="Other Assets Unreceived" description="" glAccountClassEnumId="OTHER_ASSET"
+        glAccountId="139300000" glAccountTypeEnumId="GatUnreceivedFixedAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="139000000"/>
+
+
+    <!-- 140000 ASSET - INVENTORY -->
+    <mantle.ledger.account.GlAccount accountName="Inventory" description="" glAccountClassEnumId="INVENTORY_ASSET"
+        glAccountId="140000000" glAccountTypeEnumId="GatInventory" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="100000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Inventory on Hand" description="" glAccountClassEnumId="INVENTORY_ASSET"
+        glAccountId="141000000" glAccountTypeEnumId="GatInventory" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="140000000"/>
+    <mantle.ledger.account.GlAccount accountName="Raw Materials Inventory" description="" glAccountClassEnumId="INVENTORY_ASSET"
+        glAccountId="141100000" glAccountTypeEnumId="GatInventory" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="141000000"/>
+    <mantle.ledger.account.GlAccount accountName="Work in Progress Inventory" description="" glAccountClassEnumId="INVENTORY_ASSET"
+        glAccountId="141200000" glAccountTypeEnumId="GatWipInventory" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="141000000"/>
+    <mantle.ledger.account.GlAccount accountName="Finished Good Inventory" description="" glAccountClassEnumId="INVENTORY_ASSET"
+        glAccountId="141300000" glAccountTypeEnumId="GatInventory" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="141000000"/>
+    <mantle.ledger.account.GlAccount accountName="Packaging Components Inventory" description="" glAccountClassEnumId="INVENTORY_ASSET"
+        glAccountId="141400000" glAccountTypeEnumId="GatInventory" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="141000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Inventory in Transit" description="" glAccountClassEnumId="INVENTORY_ASSET"
+        glAccountId="142000000" glAccountTypeEnumId="GatInventory" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="140000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Prepaid Inventory" description="" glAccountClassEnumId="PREPAID_INVENTORY"
+        glAccountId="147000000" glAccountTypeEnumId="GatPrepaidInventory" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="140000000"/>
+    <mantle.ledger.account.GlAccount accountName="Inventory - Average Cost Valuation Adjustment" description="" glAccountClassEnumId="INVENTORY_ASSET"
+        glAccountId="148000000" glAccountTypeEnumId="GatInvAdjAvgCost" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="140000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Unreceived/Unbilled Inventory" description="" glAccountClassEnumId="INVENTORY_ASSET"
+        glAccountId="149000000" glAccountTypeEnumId="GatUnreceivedInventory" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="140000000"/>
+    <mantle.ledger.account.GlAccount accountName="Raw Material and Sub-Assembly Unreceived/Unbilled" description="" glAccountClassEnumId="INVENTORY_ASSET"
+        glAccountId="149100000" glAccountTypeEnumId="GatUnreceivedInventory" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="149000000"/>
+    <!-- needed? WIP from external source or something? <mantle.ledger.account.GlAccount accountName="Work in Progress Unreceived/Unbilled" description="" glAccountClassEnumId="INVENTORY_ASSET"
+        glAccountId="149200000" glAccountTypeEnumId="GatUnreceivedInventory" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="149000000"/> -->
+    <mantle.ledger.account.GlAccount accountName="Finished Good Unreceived/Unbilled" description="" glAccountClassEnumId="INVENTORY_ASSET"
+        glAccountId="149300000" glAccountTypeEnumId="GatUnreceivedInventory" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="149000000"/>
+
+    <!-- 150000 ASSET - PREPAID EXPENSES -->
+    <mantle.ledger.account.GlAccount accountName="Prepaid Expenses, Deposits, Other Current Assets" description="" glAccountClassEnumId="CURRENT_ASSET"
+        glAccountId="150000000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="100000000" disallowPosting="Y"/>
+
+    <mantle.ledger.account.GlAccount accountName="Prepaid Expenses" description="" glAccountClassEnumId="PREPAID_EXPENSE"
+        glAccountId="151000000" glAccountTypeEnumId="GatPrepaidExpenses" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="150000000"/>
+    <mantle.ledger.account.GlAccount accountName="Prepaid Insurance" description="" glAccountClassEnumId="PREPAID_EXPENSE"
+        glAccountId="151100000" glAccountTypeEnumId="GatPrepaidExpenses" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="151000000"/>
+    <mantle.ledger.account.GlAccount accountName="Prepaid Rent" description="" glAccountClassEnumId="PREPAID_EXPENSE"
+        glAccountId="151200000" glAccountTypeEnumId="GatPrepaidExpenses" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="151000000"/>
+    <mantle.ledger.account.GlAccount accountName="Prepaid Interest" description="" glAccountClassEnumId="PREPAID_EXPENSE"
+        glAccountId="151300000" glAccountTypeEnumId="GatPrepaidExpenses" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="151000000"/>
+    <mantle.ledger.account.GlAccount accountName="Prepaid Wages" description="" glAccountClassEnumId="PREPAID_EXPENSE"
+        glAccountId="151400000" glAccountTypeEnumId="GatPrepaidExpenses" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="151000000"/>
+    <mantle.ledger.account.GlAccount accountName="Prepaid Other" description="" glAccountClassEnumId="PREPAID_EXPENSE"
+        glAccountId="151900000" glAccountTypeEnumId="GatPrepaidExpenses" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="151000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Deposits" description="" glAccountClassEnumId="PREPAID_EXPENSE"
+        glAccountId="152000000" glAccountTypeEnumId="GatPrepaidExpenses" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="150000000"/>
+    <mantle.ledger.account.GlAccount accountName="Deposit - Ups" description="" glAccountClassEnumId="PREPAID_EXPENSE"
+        glAccountId="152100000" glAccountTypeEnumId="GatPrepaidExpenses" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="152000000"/>
+    <mantle.ledger.account.GlAccount accountName="Deposit - Utilities" description="" glAccountClassEnumId="PREPAID_EXPENSE"
+        glAccountId="152200000" glAccountTypeEnumId="GatPrepaidExpenses" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="152000000"/>
+    <mantle.ledger.account.GlAccount accountName="Deposit - Rent" description="" glAccountClassEnumId="PREPAID_EXPENSE"
+        glAccountId="152300000" glAccountTypeEnumId="GatPrepaidExpenses" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="152000000"/>
+    <mantle.ledger.account.GlAccount accountName="Deposits - Other" description="" glAccountClassEnumId="PREPAID_EXPENSE"
+        glAccountId="152900000" glAccountTypeEnumId="GatPrepaidExpenses" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="152000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Other Current Assets" description="" glAccountClassEnumId="CURRENT_ASSET"
+        glAccountId="153000000" glAccountTypeEnumId="GatCurrentAsset" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="150000000"/>
+
+    <!-- 160000 ASSET - ACCRUED REVENUE -->
+    <mantle.ledger.account.GlAccount accountName="Accrued Revenue" description="" glAccountClassEnumId="ACCRUED_REVENUE"
+        glAccountId="160000000" glAccountTypeEnumId="GatAccruedRevenue" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="100000000"/>
+
+    <!-- 180000 ASSET - ACCUMULATED DEPRECIATION -->
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="180000000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="100000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Land and Building" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="181000000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="180000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Land" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="181100000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="181000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Building" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="181200000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="181000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Land Improvements" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="181300000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="181000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Building Improvements" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="181400000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="181000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Leasehold Improvements" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="181500000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="181000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Investment Real Estate" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="181800000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="181000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Equipment" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="182000000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="180000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Office Furniture Fixtures Equipment" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="182100000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="182000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Data Processing Equipment" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="182200000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="182000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Data Processing Software" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="182300000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="182000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Vehicles" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="182400000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="182000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Plant Equipment" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="182500000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="182000000"/>
+
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Other Assets Root" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="183000000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="180000000" disallowPosting="Y"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Biological Assets" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="183500000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="183000000"/>
+    <mantle.ledger.account.GlAccount accountName="Accumulated Depreciation - Other Assets" description="" glAccountClassEnumId="ACCUM_DEPRECIATION"
+        glAccountId="183800000" glAccountTypeEnumId="GatFaAccumDepreciation" glResourceTypeEnumId="GlrtMoney" parentGlAccountId="183000000"/>
+</entity-facade-xml>

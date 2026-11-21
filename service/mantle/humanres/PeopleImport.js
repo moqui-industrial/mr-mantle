@@ -1,6 +1,6 @@
 // The employees import (mantle.humanres.PeopleServices validate#EmployeeImportRow, apply#EmployeeImportRow and
 // find#EmployeeImportScopes; IronStone People design §12 EmployeeImport, Admin §11, PE-19, F16; impl-people P7): the row services
-// of the framework's import target `employees` (data/PeopleLifecycleSetupData.xml), called by org.moqui.admin.DataTransferServices
+// of the framework's import target `employees` (data/10-seed/PeopleAndPayroll.xml), called by org.moqui.admin.DataTransferServices
 // for each row of a staged file, as the importer. A row is one hire into the batch's employer (its scope): an existing person by
 // id (admitted as the hire wizard admits one) or a new one by name and work email, the start and optional end, and the first
 // assignment by id; it is validated by preview#Hire's own checks and applied by hire#Employee itself, under the row's operation

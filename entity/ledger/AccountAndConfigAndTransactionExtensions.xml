@@ -83,7 +83,7 @@ along with this software (see the LICENSE.md file). If not, see
 
 <!-- A sales order's confirmation as placed (design-customer-service §4 OrderDetail, impl-customer-service §4, P3, F29, F55;
     mantle.order.OrderConfirmationServices): its PDF, rendered as of the order's placed time, is an OrderContent of type
-    OctOrderConfirmation (seeded in data/MantleSetupData.xml) stored once; each resend is an OrderEmailMessage naming the
+    OctOrderConfirmation (seeded in data/15-seed-initial/Notifications.xml) stored once; each resend is an OrderEmailMessage naming the
     content it sent (orderContentId, the version) with its recipient party, the message holding the address and its
     result. An organization's orderConfirmationOnPlace (off by default) stores it at
     placement. -->

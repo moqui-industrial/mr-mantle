@@ -1,4 +1,4 @@
-// The personal contact filter (MANTLE_PRIVATE_CONTACT, data/MantleSetupData.xml) fails closed on a view over Party
+// The personal contact filter (MANTLE_PRIVATE_CONTACT, data/15-seed-initial/OrganizationFilters.xml) fails closed on a view over Party
 // (allowMissingAlias="N", SEC-DAT-11): a view that left out Party's privateOwnerUserId was read with the filter term left
 // out, so another user saw a row of someone's personal contact. The views over Party alias it; here a carrier that is a
 // user's personal contact, read through CarrierShipmentMethodDetail under a grant that carries the filter, is its owner's

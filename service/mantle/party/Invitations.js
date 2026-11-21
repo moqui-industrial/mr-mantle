@@ -459,7 +459,7 @@ function invitationProposal(p) {
 
 // ===== the import of staff invitations (mr-boss impl-admin P15; design-admin §4 Invitations' bulk invite, §11.1) =====
 // The row services of the import target staffInvitations (the framework's moqui.server.TransferTarget, seeded in
-// data/PartyInvitationData.xml), called by org.moqui.admin.DataTransferServices for each row of a staged file, as the
+// data/10-seed/PartyAndIdentity.xml), called by org.moqui.admin.DataTransferServices for each row of a staged file, as the
 // importer. A row is an address, an optional existing person, a display name, and the access as registered bundles; the batch
 // is for one organization (its scope), and its expiry, relationship and note are the batch's options. A row is validated by
 // what invite#User checks (invitationProposal) and applied by invite#User itself, under the row's operation key, so a bulk

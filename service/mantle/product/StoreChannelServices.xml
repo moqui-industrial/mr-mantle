@@ -198,7 +198,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="find" noun="MessageRecoveryTargets" allow-remote="false">
-        <description>Store channel messages as a registered operational recovery (moqui.server.RecoveryDescriptor rows in data/StoreChannelSetupData.xml; the framework's org.moqui.admin.OperationServices): which of the given system messages are a store integration's, and for each whether retry#StoreMessages would take it now for this caller (retryEligible, with the reason when not), its state and its integration (ownerRef), answered only within the caller's own COMMERCE_VIEW, COMMERCE_CHANNEL_OPERATE and store scope: a message of a store outside it is answered as held, with no state or detail. Nothing is reconciled or cancelled here and no payload is shown. It changes nothing.</description>
+        <description>Store channel messages as a registered operational recovery (moqui.server.RecoveryDescriptor rows in data/10-seed/MarketingAndCommerce.xml; the framework's org.moqui.admin.OperationServices): which of the given system messages are a store integration's, and for each whether retry#StoreMessages would take it now for this caller (retryEligible, with the reason when not), its state and its integration (ownerRef), answered only within the caller's own COMMERCE_VIEW, COMMERCE_CHANNEL_OPERATE and store scope: a message of a store outside it is answered as held, with no state or detail. Nothing is reconciled or cancelled here and no payload is shown. It changes nothing.</description>
         <implements service="org.moqui.admin.OperationServices.find#RecoveryTargets"/>
         <actions>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('findMessageRecoveryTargets', context)"/>
@@ -563,7 +563,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <!-- mr-boss impl-admin P15 (design-admin §11.1; impl-commerce §7): ChannelImport's result contract for the framework's
-        org.moqui.admin.DataTransferServices (the target channelOrders, data/StoreChannelSetupData.xml) -->
+        org.moqui.admin.DataTransferServices (the target channelOrders, data/10-seed/MarketingAndCommerce.xml) -->
     <service verb="find" noun="ChannelImportRuns" allow-remote="false">
         <description>The channel import batches of the stores the caller operates (COMMERCE_VIEW, COMMERCE_CHANNEL_OPERATE
             and the store scope, as get#ChannelImport), newest first, as summaries: the file's name and store, the

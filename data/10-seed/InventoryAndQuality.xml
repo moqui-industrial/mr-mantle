@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed">
+    <!-- Counts (impl-warehouse P10, design-warehouse WH-COUNT): the count modes, sources, schedule kinds and skip reasons;
+        the status flow of a count (the four PhysicalInventory statuses and a cancel) and of its lines; the due-count
+        notification and its nightly job (mantle.product.InventoryCountServices). -->
+    <moqui.basic.EnumerationType enumTypeId="CountMode" description="Count mode"/>
+    <moqui.basic.Enumeration enumId="CntModeFull" enumTypeId="CountMode" description="Full" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="CntModeCycle" enumTypeId="CountMode" description="Cycle" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="CntModeSpot" enumTypeId="CountMode" description="Spot" sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType enumTypeId="CountSource" description="Why a count exists"/>
+    <moqui.basic.Enumeration enumId="CntSrcPlanned" enumTypeId="CountSource" description="Planned" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="CntSrcSchedule" enumTypeId="CountSource" description="Count schedule" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="CntSrcRequest" enumTypeId="CountSource" description="Count requested" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="CntSrcShortPick" enumTypeId="CountSource" description="Short pick recount"
+            sequenceNum="4"/>
+
+    <moqui.basic.EnumerationType enumTypeId="CountScheduleKind" description="Count schedule kind"/>
+    <moqui.basic.Enumeration enumId="CskPeriodic" enumTypeId="CountScheduleKind" description="Every few days"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="CskAnnual" enumTypeId="CountScheduleKind" description="Once a year" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="CskZero" enumTypeId="CountScheduleKind" description="When stock reaches zero"
+            sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType enumTypeId="CountSkipReason" description="Why a count line was not counted"/>
+    <moqui.basic.Enumeration enumId="CntSkNotCounted" enumTypeId="CountSkipReason" description="Not counted"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="CntSkNoAccess" enumTypeId="CountSkipReason" description="Could not reach it"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="CntSkOther" enumTypeId="CountSkipReason" description="Other" sequenceNum="3"/>
+
+    <!-- a count: planned, counting, in review, complete; cancelled before anything posts -->
+    <moqui.basic.StatusItem statusId="PICancelled" statusTypeId="PhysicalInventory" description="Cancelled" sequenceNum="5"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInPlanning" toStatusId="PIInProgress"
+            transitionName="Start"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInProgress" toStatusId="PIInValidation"
+            transitionName="Submit"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInValidation" toStatusId="PIInProgress"
+            transitionName="Recount"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInValidation" toStatusId="PIComplete"
+            transitionName="Complete"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInPlanning" toStatusId="PICancelled"
+            transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInProgress" toStatusId="PICancelled"
+            transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInValidation" toStatusId="PICancelled"
+            transitionName="Cancel"/>
+
+    <!-- a count line: to count, counted or skipped; reviewed into approved or a conflict; posted or failed -->
+    <moqui.basic.StatusType statusTypeId="PhysicalInventoryCount" description="Count line status"/>
+    <moqui.basic.StatusItem statusId="PicOpen" statusTypeId="PhysicalInventoryCount" description="To count" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="PicCounted" statusTypeId="PhysicalInventoryCount" description="Counted"
+            sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="PicSkipped" statusTypeId="PhysicalInventoryCount" description="Skipped"
+            sequenceNum="3"/>
+    <moqui.basic.StatusItem statusId="PicConflict" statusTypeId="PhysicalInventoryCount" description="Stock moved"
+            sequenceNum="4"/>
+    <moqui.basic.StatusItem statusId="PicApproved" statusTypeId="PhysicalInventoryCount" description="Approved"
+            sequenceNum="5"/>
+    <moqui.basic.StatusItem statusId="PicPosted" statusTypeId="PhysicalInventoryCount" description="Posted" sequenceNum="6"/>
+    <moqui.basic.StatusItem statusId="PicFailed" statusTypeId="PhysicalInventoryCount" description="Failed" sequenceNum="7"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicOpen" toStatusId="PicCounted" transitionName="Count"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicOpen" toStatusId="PicSkipped" transitionName="Skip"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicCounted" toStatusId="PicSkipped"
+            transitionName="Skip"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicCounted" toStatusId="PicOpen"
+            transitionName="Clear"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicSkipped" toStatusId="PicCounted"
+            transitionName="Count"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicSkipped" toStatusId="PicOpen"
+            transitionName="Recount"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicCounted" toStatusId="PicApproved"
+            transitionName="Approve"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicCounted" toStatusId="PicConflict"
+            transitionName="Stock moved"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicConflict" toStatusId="PicApproved"
+            transitionName="Carry variance"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicConflict" toStatusId="PicOpen"
+            transitionName="Recount"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicConflict" toStatusId="PicSkipped"
+            transitionName="Skip"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicApproved" toStatusId="PicConflict"
+            transitionName="Stock moved"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicApproved" toStatusId="PicOpen"
+            transitionName="Recount"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicApproved" toStatusId="PicPosted"
+            transitionName="Post"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicApproved" toStatusId="PicFailed"
+            transitionName="Post failed"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicFailed" toStatusId="PicPosted"
+            transitionName="Post"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicFailed" toStatusId="PicConflict"
+            transitionName="Stock moved"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicFailed" toStatusId="PicOpen"
+            transitionName="Recount"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicFailed" toStatusId="PicApproved"
+            transitionName="Carry variance"/>
+
+    <moqui.security.UserPermission userPermissionId="PRODUCT_COST_VIEW" description="Product cost view"/>
+    <moqui.security.UserPermission userPermissionId="PRODUCT_COST_ESTIMATE" description="Product cost estimate"/>
+    <moqui.security.UserPermission userPermissionId="PRODUCT_COST_APPROVE" description="Product cost approve"/>
+    <!-- turning an organization's cost self approval on (ProductCatalogSetting allowCostSelfApproval): held by no BOSS bundle,
+        so whoever drafts and approves estimates does not also waive the second person (SEC-BAP-106) -->
+    <moqui.security.UserPermission userPermissionId="PRODUCT_COST_SELF_APPROVAL" description="Allow product cost self approval"/>
+    <moqui.security.UserPermission userPermissionId="ACCOUNTING_VIEW" description="Accounting view"/>
+    <moqui.security.UserPermission userPermissionId="ACCOUNTING_GL_POST" description="Accounting gl post"/>
+    <moqui.security.UserPermission userPermissionId="METHOD_VIEW" description="Method view"/>
+    <moqui.security.UserPermission userPermissionId="METHOD_EDIT" description="Method edit"/>
+    <moqui.security.UserPermission userPermissionId="METHOD_APPROVE" description="Method approve"/>
+    <moqui.security.UserPermission userPermissionId="METHOD_RESOURCES" description="Method resources"/>
+    <moqui.security.UserPermission userPermissionId="METHOD_COST_EDIT" description="Method cost edit"/>
+    <moqui.security.UserPermission userPermissionId="METHOD_COST_APPROVE" description="Method cost approve"/>
+    <moqui.security.UserPermission userPermissionId="STOCK_POLICY_PLAN" description="Stock policy plan"/>
+    <moqui.security.UserPermission userPermissionId="STOCK_POLICY_MANAGE" description="Stock policy manage"/>
+    <moqui.security.UserPermission userPermissionId="PRICE_VIEW" description="Price view"/>
+    <moqui.security.UserPermission userPermissionId="PRICE_EDIT" description="Price edit"/>
+    <moqui.security.UserPermission userPermissionId="SUPPLIER_PRICE_VIEW" description="Supplier price view"/>
+    <moqui.security.UserPermission userPermissionId="SUPPLIER_PRICE_EDIT" description="Supplier price edit"/>
+    <moqui.security.UserPermission userPermissionId="PRODUCT_CATALOG_ADMIN" description="Product catalog admin"/>
+    <moqui.security.UserPermission userPermissionId="PRODUCT_CATALOG_VIEW" description="Read owned catalog content"/>
+    <moqui.security.UserPermission userPermissionId="PRODUCT_CATALOG_EDIT" description="Maintain owned catalog content"/>
+
+    <moqui.basic.Enumeration enumId="GatInventoryRevaluation" enumTypeId="GlAccountType" description="Inventory revaluation offset"/>
+    <moqui.basic.Enumeration enumId="AttInventoryRevaluation" enumTypeId="AcctgTransType" description="Inventory revaluation"/>
+    <moqui.basic.EnumerationType enumTypeId="AssetBookEventType" description="Asset book event type"/>
+    <moqui.basic.Enumeration enumId="AbeInventoryRevaluation" enumTypeId="AssetBookEventType" description="Inventory revaluation"/>
+
+    <mantle.product.ProductCatalogImportKind kindId="products" description="Products" permissionId="PRODUCT_CATALOG_EDIT" readPermissionId="PRODUCT_CATALOG_VIEW" validatorService="mantle.product.ProductImportServices.validate#CatalogImportRow" storeService="mantle.product.CatalogRecordServices.store#Product" fixedParametersJson="{}" columnsJson="[{&quot;name&quot;:&quot;productId&quot;,&quot;label&quot;:&quot;Product ID&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;productName&quot;,&quot;label&quot;:&quot;Product name&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;pseudoId&quot;,&quot;label&quot;:&quot;Pseudo id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;description&quot;,&quot;label&quot;:&quot;Description&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;comments&quot;,&quot;label&quot;:&quot;Comments&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;productTypeEnumId&quot;,&quot;label&quot;:&quot;Product type enum id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;amountUomId&quot;,&quot;label&quot;:&quot;Amount uom id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;salesAllowed&quot;,&quot;label&quot;:&quot;Sales allowed&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;purchaseAllowed&quot;,&quot;label&quot;:&quot;Purchase allowed&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;requireInventory&quot;,&quot;label&quot;:&quot;Require inventory&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;productIdTypeEnumId&quot;,&quot;label&quot;:&quot;Product id type enum id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;idValue&quot;,&quot;label&quot;:&quot;Id value&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false}]" keyFields="productId" sequenceNum="1" organizationField="ownerPartyId" afterStoreService="mantle.product.ProductImportServices.assign#ImportedIdentifier" />
+    <mantle.product.ProductCatalogImportKind kindId="identifiers" description="Product identifiers" permissionId="PRODUCT_CATALOG_EDIT" readPermissionId="PRODUCT_CATALOG_VIEW" validatorService="mantle.product.ProductImportServices.validate#CatalogImportRow" storeService="mantle.product.ProductServices.store#ProductIdentifier" fixedParametersJson="{}" columnsJson="[{&quot;name&quot;:&quot;productId&quot;,&quot;label&quot;:&quot;Product ID&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;productIdTypeEnumId&quot;,&quot;label&quot;:&quot;Product id type enum id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;idValue&quot;,&quot;label&quot;:&quot;Id value&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true}]" keyFields="productId,productIdTypeEnumId" sequenceNum="2" />
+    <mantle.product.ProductCatalogImportKind kindId="categories" description="Category memberships" permissionId="PRODUCT_CATALOG_EDIT" readPermissionId="PRODUCT_CATALOG_VIEW" validatorService="mantle.product.ProductImportServices.validate#CatalogImportRow" storeService="mantle.product.CatalogRecordServices.store#CatalogRow" fixedParametersJson="{&quot;kind&quot;:&quot;category&quot;}" columnsJson="[{&quot;name&quot;:&quot;productId&quot;,&quot;label&quot;:&quot;Product ID&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;productCategoryId&quot;,&quot;label&quot;:&quot;Product category id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;fromDate&quot;,&quot;label&quot;:&quot;Effective from&quot;,&quot;type&quot;:&quot;date&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;thruDate&quot;,&quot;label&quot;:&quot;Through&quot;,&quot;type&quot;:&quot;date&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;sequenceNum&quot;,&quot;label&quot;:&quot;Sequence num&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;comments&quot;,&quot;label&quot;:&quot;Comments&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false}]" keyFields="productId,productCategoryId,fromDate" sequenceNum="3" />
+    <mantle.product.ProductCatalogImportKind kindId="features" description="Product features" permissionId="PRODUCT_CATALOG_EDIT" readPermissionId="PRODUCT_CATALOG_VIEW" validatorService="mantle.product.ProductImportServices.validate#CatalogImportRow" storeService="mantle.product.CatalogRecordServices.store#CatalogRow" fixedParametersJson="{&quot;kind&quot;:&quot;feature&quot;}" columnsJson="[{&quot;name&quot;:&quot;productId&quot;,&quot;label&quot;:&quot;Product ID&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;productFeatureId&quot;,&quot;label&quot;:&quot;Product feature id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;applTypeEnumId&quot;,&quot;label&quot;:&quot;Appl type enum id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;fromDate&quot;,&quot;label&quot;:&quot;Effective from&quot;,&quot;type&quot;:&quot;date&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;thruDate&quot;,&quot;label&quot;:&quot;Through&quot;,&quot;type&quot;:&quot;date&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;amount&quot;,&quot;label&quot;:&quot;Amount&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;recurringAmount&quot;,&quot;label&quot;:&quot;Recurring amount&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;sequenceNum&quot;,&quot;label&quot;:&quot;Sequence num&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false}]" keyFields="productId,productFeatureId,fromDate" sequenceNum="4" />
+    <mantle.product.ProductCatalogImportKind kindId="prices" description="Selling prices" permissionId="PRICE_EDIT" readPermissionId="PRICE_VIEW" validatorService="mantle.product.ProductImportServices.validate#CatalogImportRow" storeService="mantle.product.PriceServices.store#ProductPrice" fixedParametersJson="{}" columnsJson="[{&quot;name&quot;:&quot;productPriceId&quot;,&quot;label&quot;:&quot;Product price id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;productId&quot;,&quot;label&quot;:&quot;Product ID&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;priceTypeEnumId&quot;,&quot;label&quot;:&quot;Price type enum id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;pricePurposeEnumId&quot;,&quot;label&quot;:&quot;Price purpose enum id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;price&quot;,&quot;label&quot;:&quot;Price&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;priceUomId&quot;,&quot;label&quot;:&quot;Price uom id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;minQuantity&quot;,&quot;label&quot;:&quot;Min quantity&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;quantityUomId&quot;,&quot;label&quot;:&quot;Quantity uom id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;fromDate&quot;,&quot;label&quot;:&quot;Effective from&quot;,&quot;type&quot;:&quot;date&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;thruDate&quot;,&quot;label&quot;:&quot;Through&quot;,&quot;type&quot;:&quot;date&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;changeReason&quot;,&quot;label&quot;:&quot;Change reason&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;customerPartyId&quot;,&quot;label&quot;:&quot;Customer party id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false}]" keyFields="productPriceId,productId,fromDate,priceTypeEnumId" sequenceNum="5" organizationField="vendorPartyId" batchValidatorService="mantle.product.ProductImportServices.validate#CatalogPriceRows" />
+    <mantle.product.ProductCatalogImportKind kindId="supplierPrices" description="Supplier prices" permissionId="SUPPLIER_PRICE_EDIT" readPermissionId="SUPPLIER_PRICE_VIEW" validatorService="mantle.product.ProductImportServices.validate#CatalogImportRow" storeService="mantle.product.PriceServices.store#ProductPrice" fixedParametersJson="{&quot;pricePurposeEnumId&quot;:&quot;PppPurchase&quot;}" columnsJson="[{&quot;name&quot;:&quot;productPriceId&quot;,&quot;label&quot;:&quot;Product price id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;productId&quot;,&quot;label&quot;:&quot;Product ID&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;priceTypeEnumId&quot;,&quot;label&quot;:&quot;Price type enum id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;pricePurposeEnumId&quot;,&quot;label&quot;:&quot;Price purpose enum id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;price&quot;,&quot;label&quot;:&quot;Price&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;priceUomId&quot;,&quot;label&quot;:&quot;Price uom id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;minQuantity&quot;,&quot;label&quot;:&quot;Min quantity&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;quantityUomId&quot;,&quot;label&quot;:&quot;Quantity uom id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;fromDate&quot;,&quot;label&quot;:&quot;Effective from&quot;,&quot;type&quot;:&quot;date&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;thruDate&quot;,&quot;label&quot;:&quot;Through&quot;,&quot;type&quot;:&quot;date&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;changeReason&quot;,&quot;label&quot;:&quot;Change reason&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;vendorPartyId&quot;,&quot;label&quot;:&quot;Vendor party id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;otherPartyItemId&quot;,&quot;label&quot;:&quot;Other party item id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;quantityIncrement&quot;,&quot;label&quot;:&quot;Quantity increment&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;quantityIncluded&quot;,&quot;label&quot;:&quot;Quantity included&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;standardLeadTimeDays&quot;,&quot;label&quot;:&quot;Standard lead time days&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;preferredOrderEnumId&quot;,&quot;label&quot;:&quot;Preferred order enum id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false}]" keyFields="productPriceId,productId,vendorPartyId,fromDate" sequenceNum="6" organizationField="customerPartyId" batchValidatorService="mantle.product.ProductImportServices.validate#CatalogPriceRows" />
+    <!-- mr-boss impl-admin P15 (design-admin §11.1): the catalog import as a registered target of the framework's
+        org.moqui.admin.DataTransferServices. Its owner batch stays ProductCatalogOperation and its five steps
+        ProductImportServices', each with its own authority (the kinds above name each kind's permission), so the
+        registration names no permission of its own and adds no right. -->
+    <moqui.server.TransferTarget targetId="catalog" direction="import" targetMode="steps" title="Product import"
+            description="Products, identifiers, categories, features, prices and supplier prices, by import kind"
+            effectsNote="Each ready row creates or updates one catalog record through its own service, with its permission and effective dates."
+            ownerApp="Products" targetVersion="1" fieldLabel="Catalog field" scopeLabel="Organization"
+            stepFeatures="kinds,updateMode,formats,clearFields,forceNew,sample" clearableFields="description,comments,pseudoId"
+            stageService="mantle.product.ProductImportServices.stage#CatalogImport"
+            configureService="mantle.product.ProductImportServices.configure#CatalogImport"
+            validateService="mantle.product.ProductImportServices.validate#CatalogImport"
+            applyService="mantle.product.ProductImportServices.apply#CatalogImport"
+            getService="mantle.product.ProductImportServices.get#CatalogImport"
+            reportService="mantle.product.ProductImportServices.get#CatalogImportReport"
+            sampleService="mantle.product.ProductImportServices.get#CatalogImportSample"
+            kindsService="mantle.product.ProductImportServices.get#CatalogImportKinds"
+            findService="mantle.product.ProductImportServices.find#CatalogImportRuns"
+            ownerRoute="productsImport" sequenceNum="10"/>
+
+    <moqui.basic.EnumerationType enumTypeId="ProductBomItemRole" description="BOM requirement/output role"/>
+    <moqui.basic.Enumeration enumId="BmirConsume" enumTypeId="ProductBomItemRole" description="Consume"/>
+    <moqui.basic.Enumeration enumId="BmirByproduct" enumTypeId="ProductBomItemRole" description="By-product"/>
+    <moqui.basic.EnumerationType enumTypeId="BomSubstitutionRule" description="BOM substitution policy"/>
+    <moqui.basic.Enumeration enumId="BsrNone" enumTypeId="BomSubstitutionRule" description="No substitution"/>
+    <moqui.basic.Enumeration enumId="BsrEquivalent" enumTypeId="BomSubstitutionRule" description="Approved equivalents"/>
+    <moqui.basic.EnumerationType enumTypeId="ProductCostComponentType" description="Product cost component"/>
+    <moqui.basic.Enumeration enumId="PccMaterial" enumTypeId="ProductCostComponentType" description="Material"/>
+    <moqui.basic.Enumeration enumId="PccLabor" enumTypeId="ProductCostComponentType" description="Labor"/>
+    <moqui.basic.Enumeration enumId="PccMachine" enumTypeId="ProductCostComponentType" description="Machine"/>
+    <moqui.basic.Enumeration enumId="PccOverhead" enumTypeId="ProductCostComponentType" description="Overhead"/>
+    <moqui.basic.Enumeration enumId="PccOverheadPercent" enumTypeId="ProductCostComponentType" description="Overhead percentage"/>
+    <moqui.basic.Enumeration enumId="PccOutside" enumTypeId="ProductCostComponentType" description="Outside processing"/>
+    <moqui.basic.EnumerationType enumTypeId="ProductBomContentType" description="BOM content"/>
+    <moqui.basic.Enumeration enumId="BomctDocument" enumTypeId="ProductBomContentType" description="Method document"/>
+    <moqui.basic.Enumeration enumId="BomctInstruction" enumTypeId="ProductBomContentType" description="Instruction"/>
+
+    <moqui.service.ServiceRegister serviceRegisterId="ProductPriceList" serviceTypeEnumId="ProductPriceModify" serviceName="mantle.product.PriceServices.modify#ProductPriceList" description="Dated price-list policy resolver"/>
+    <mantle.product.ProductPriceModify priceModifyId="ProductPriceList" serviceRegisterId="ProductPriceList" sequenceNum="100"/>
+
+    <!-- Putaway (impl-warehouse P9, design-warehouse WH-PUTAWAY): the storage types of products and locations, which
+        mantle.facility.PutawayServices matches (a location of a storage type takes only products of it, and a product of one
+        goes only to its locations); extended as data. -->
+    <moqui.basic.EnumerationType enumTypeId="StorageType" description="Storage type"/>
+    <moqui.basic.Enumeration enumId="StgCold" enumTypeId="StorageType" description="Refrigerated" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="StgFrozen" enumTypeId="StorageType" description="Frozen" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="StgHazardous" enumTypeId="StorageType" description="Hazardous" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="StgOversize" enumTypeId="StorageType" description="Oversize" sequenceNum="4"/>
+
+    <!-- Shared quality inspection (design-crosscut §3.19 CX-QUALITY; impl-warehouse P8): the template and inspection status
+        flows, the one disposition vocabulary, the contexts, sources, reading types, sample policies, results and file types,
+        and the inspection decision notification (mantle.product.QualityServices). -->
+    <!-- a template: drafted, published (its items stamped), retired -->
+    <moqui.basic.StatusType statusTypeId="InspectionTemplate" description="Inspection template"/>
+    <moqui.basic.StatusItem statusId="QtDraft" statusTypeId="InspectionTemplate" description="Draft" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="QtPublished" statusTypeId="InspectionTemplate" description="Published"
+            sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="QtRetired" statusTypeId="InspectionTemplate" description="Retired" sequenceNum="3"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QtDraft" toStatusId="QtPublished"
+            transitionName="Publish"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QtPublished" toStatusId="QtRetired"
+            transitionName="Retire"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QtDraft" toStatusId="QtRetired"
+            transitionName="Retire"/>
+
+    <!-- an inspection: draft (readings), submitted (result), verified, disposed; a failed verification goes back to draft
+        with its readings kept; a draft or submitted inspection may be cancelled -->
+    <moqui.basic.StatusType statusTypeId="QualityInspection" description="Quality inspection"/>
+    <moqui.basic.StatusItem statusId="QiDraft" statusTypeId="QualityInspection" description="Draft" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="QiSubmitted" statusTypeId="QualityInspection" description="Submitted"
+            sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="QiVerified" statusTypeId="QualityInspection" description="Verified" sequenceNum="3"/>
+    <moqui.basic.StatusItem statusId="QiDisposed" statusTypeId="QualityInspection" description="Disposed" sequenceNum="4"/>
+    <moqui.basic.StatusItem statusId="QiCancelled" statusTypeId="QualityInspection" description="Cancelled"
+            sequenceNum="5"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QiDraft" toStatusId="QiSubmitted"
+            transitionName="Submit"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QiSubmitted" toStatusId="QiVerified"
+            transitionName="Verify"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QiSubmitted" toStatusId="QiDraft"
+            transitionName="Return to inspector"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QiVerified" toStatusId="QiDisposed"
+            transitionName="Dispose"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QiDraft" toStatusId="QiCancelled"
+            transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QiSubmitted" toStatusId="QiCancelled"
+            transitionName="Cancel"/>
+
+    <!-- the one disposition vocabulary (CX-QUALITY) -->
+    <moqui.basic.EnumerationType enumTypeId="InspectionDisposition" description="Inspection disposition"/>
+    <moqui.basic.Enumeration enumId="QdRelease" enumTypeId="InspectionDisposition" description="Release" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QdQuarantine" enumTypeId="InspectionDisposition" description="Quarantine"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QdRework" enumTypeId="InspectionDisposition" description="Rework or repair"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="QdReturnCustomer" enumTypeId="InspectionDisposition" description="Return to customer"
+            sequenceNum="4"/>
+    <moqui.basic.Enumeration enumId="QdReturnSupplier" enumTypeId="InspectionDisposition" description="Return to supplier"
+            sequenceNum="5"/>
+    <moqui.basic.Enumeration enumId="QdScrap" enumTypeId="InspectionDisposition" description="Scrap" sequenceNum="6"/>
+    <moqui.basic.Enumeration enumId="QdUseAsIs" enumTypeId="InspectionDisposition" description="Use as is" sequenceNum="7"/>
+
+    <moqui.basic.EnumerationType enumTypeId="InspectionContext" description="Inspection context"/>
+    <moqui.basic.Enumeration enumId="QicReceipt" enumTypeId="InspectionContext" description="Incoming receipt"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QicReturn" enumTypeId="InspectionContext" description="Customer return"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QicOutgoing" enumTypeId="InspectionContext" description="Outgoing shipment"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="QicProduction" enumTypeId="InspectionContext" description="Production"
+            sequenceNum="4"/>
+
+    <moqui.basic.EnumerationType enumTypeId="InspectionSourceType" description="Inspection source"/>
+    <moqui.basic.Enumeration enumId="QisReceipt" enumTypeId="InspectionSourceType" description="Receipt" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QisReturn" enumTypeId="InspectionSourceType" description="Return item" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QisShipment" enumTypeId="InspectionSourceType" description="Outgoing shipment"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="QisWorkEffort" enumTypeId="InspectionSourceType" description="Production run"
+            sequenceNum="4"/>
+    <moqui.basic.Enumeration enumId="QisAsset" enumTypeId="InspectionSourceType" description="Stock" sequenceNum="5"/>
+
+    <moqui.basic.EnumerationType enumTypeId="InspectionReadingType" description="Inspection reading type"/>
+    <moqui.basic.Enumeration enumId="QrtNumeric" enumTypeId="InspectionReadingType" description="Measured value"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QrtPassFail" enumTypeId="InspectionReadingType" description="Pass or fail"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QrtText" enumTypeId="InspectionReadingType" description="Observation"
+            sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType enumTypeId="InspectionSamplePolicy" description="Inspection sample policy"/>
+    <moqui.basic.Enumeration enumId="QspAll" enumTypeId="InspectionSamplePolicy" description="Every unit" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QspFixed" enumTypeId="InspectionSamplePolicy" description="A fixed number of units"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QspPercent" enumTypeId="InspectionSamplePolicy" description="A percentage of units"
+            sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType enumTypeId="InspectionResult" description="Inspection result"/>
+    <moqui.basic.Enumeration enumId="QirAccepted" enumTypeId="InspectionResult" description="Accepted" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QirPartial" enumTypeId="InspectionResult" description="Partly accepted"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QirRejected" enumTypeId="InspectionResult" description="Rejected" sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType enumTypeId="QualityInspectionContentType" description="Inspection file type"/>
+    <moqui.basic.Enumeration enumId="QicntEvidence" enumTypeId="QualityInspectionContentType" description="Evidence"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QicntPhoto" enumTypeId="QualityInspectionContentType" description="Photo"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QicntCertificate" enumTypeId="QualityInspectionContentType" description="Certificate"
+            sequenceNum="3"/>
+
+    <!-- Notification: an inspection's decision. On submit, to the organization's QUALITY_VERIFY holders (a result to
+        verify); on verification and on each disposition, to its inspector. No link template: the inspection's screen
+        belongs to the app. -->
+    <moqui.security.user.NotificationTopic topic="QualityInspectionDecision" description="Inspection decision"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Inspection ${qualityInspectionId}: ${decision}"/>
+
+    <!-- Reorder-rule rows as a row kind of Products' catalog import (impl-purchasing P14a, design-purchasing §15, PRD-IMPORT):
+        each row a product's rule at a facility of the import's organization, validated by store#ProductFacilityPolicy's own
+        checks (ReorderRuleServices.validate#ReorderRuleImportRow) and stored through it with its row result. -->
+    <mantle.product.ProductCatalogImportKind kindId="reorderRules" description="Reorder rules" permissionId="STOCK_POLICY_PLAN"
+            readPermissionId="STOCK_POLICY_PLAN" validatorService="mantle.facility.ReorderRuleServices.validate#ReorderRuleImportRow"
+            storeService="mantle.facility.FacilityServices.store#ProductFacilityPolicy" fixedParametersJson="{}"
+            keyFields="productId,facilityId" sequenceNum="7"
+            columnsJson="[{&quot;name&quot;:&quot;productId&quot;,&quot;label&quot;:&quot;Product ID&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;facilityId&quot;,&quot;label&quot;:&quot;Facility ID&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;minimumStock&quot;,&quot;label&quot;:&quot;Minimum stock&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;maximumStock&quot;,&quot;label&quot;:&quot;Maximum stock&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;reorderQuantity&quot;,&quot;label&quot;:&quot;Reorder quantity&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;reorderMethodEnumId&quot;,&quot;label&quot;:&quot;Reorder method enum id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;daysToShip&quot;,&quot;label&quot;:&quot;Days to ship&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;snoozeThruDate&quot;,&quot;label&quot;:&quot;Snoozed through&quot;,&quot;type&quot;:&quot;date&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;snoozeReason&quot;,&quot;label&quot;:&quot;Snooze reason&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;changeReason&quot;,&quot;label&quot;:&quot;Change reason&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false}]"/>
+
+    <moqui.basic.EnumerationType enumTypeId="AbcClass" description="Manual inventory ABC class"/>
+    <moqui.basic.Enumeration enumId="AbcA" enumTypeId="AbcClass" description="A" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AbcB" enumTypeId="AbcClass" description="B" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AbcC" enumTypeId="AbcClass" description="C" sequenceNum="3"/>
+    <moqui.basic.EnumerationType enumTypeId="ReorderMethod" description="Product facility replenishment method"/>
+    <moqui.basic.Enumeration enumId="RdmFixedQuantity" enumTypeId="ReorderMethod" description="Fixed quantity" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="RdmUpToMaximum" enumTypeId="ReorderMethod" description="Up to maximum" sequenceNum="2"/>
+</entity-facade-xml>

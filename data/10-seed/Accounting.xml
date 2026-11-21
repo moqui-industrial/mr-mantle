@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed">
+    <!-- The PASS Account foundation's email preferences (mr-pass impl-shop P6, F6, X15): a store's cart reminders topic is a
+        contact list of its own (type CART_REMINDER, named by the store's PsstCartReminderList setting), turned on by a signed-in
+        customer's PcpCartReminder consent on it. -->
+    <moqui.basic.Enumeration enumId="PcpCartReminder" description="Cart Reminders" sequenceNum="5" enumTypeId="PartyConsentPurpose"/>
+    <moqui.basic.Enumeration enumId="CART_REMINDER" description="Cart reminders" enumTypeId="ContactListType"/>
+    <moqui.basic.Enumeration description="Cart reminders topic list" enumId="PsstCartReminderList" enumTypeId="ProductStoreSettingType"/>
+    <!-- Commerce P9 follow-up (Nov 6, impl-commerce §4): a store's review requests are a topic of their own (type
+        REVIEW_REQUEST, named by PsstReviewRequestList, purpose PcpReviewRequest), as cart reminders are; the review request
+        is sent only with it granted. Checkout offers the store's opt-ins (PsstCheckoutOptIns: a comma list of reviewRequests,
+        cartReminders and news; absent, the first two, and news only once PsstNewsList names the store's news list; "none"
+        offers none), each unchecked; a guest's or an unverified account's choice waits as a pending ContactListParty row
+        until the receipt's link or a verified sign-in confirms it. -->
+    <moqui.basic.Enumeration enumId="PcpReviewRequest" description="Review Requests" sequenceNum="6" enumTypeId="PartyConsentPurpose"/>
+    <moqui.basic.Enumeration enumId="REVIEW_REQUEST" description="Review requests" enumTypeId="ContactListType"/>
+    <moqui.basic.Enumeration description="Review requests topic list" enumId="PsstReviewRequestList" enumTypeId="ProductStoreSettingType"/>
+    <moqui.basic.Enumeration description="Checkout opt-ins offered" enumId="PsstCheckoutOptIns" enumTypeId="ProductStoreSettingType"/>
+    <moqui.basic.Enumeration description="News and offers list" enumId="PsstNewsList" enumTypeId="ProductStoreSettingType"/>
+
+    <moqui.security.UserPermission userPermissionId="ACCOUNTING_ADMIN" description="Accounting Admin"/>
+    <!-- Accounting's scope in every internal organization, which reads and changes nothing by itself (as PEOPLE_ALL_ORGANIZATIONS
+        and SALES_ALL_ORGANIZATIONS): without it a finance administrator (ACCOUNTING_ADMIN) works in the organizations they work
+        for, and selects only one of those as active. ADMIN's alone (the user's call of Nov 16, 2026, SEC-BOS-02). -->
+    <moqui.security.UserPermission userPermissionId="ACCOUNTING_ALL_ORGANIZATIONS" description="Accounting in every organization"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="ACCOUNTING_ALL_ORGANIZATIONS" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="BANK_RECONCILE" description="Bank Reconcile"/>
+    <moqui.security.UserPermission userPermissionId="BUDGET_APPROVE" description="Budget Approve"/>
+    <moqui.security.UserPermission userPermissionId="BUDGET_EDIT" description="Budget Edit"/>
+    <moqui.security.UserPermission userPermissionId="BUDGET_OVERRIDE" description="Budget Override"/>
+    <moqui.security.UserPermission userPermissionId="CREDIT_HOLD_RELEASE" description="Credit Hold Release"/>
+    <moqui.security.UserPermission userPermissionId="CUSTOMER_CREDIT_VIEW" description="Customer Credit View"/>
+    <moqui.security.UserPermission userPermissionId="FISCAL_CLOSE" description="Fiscal Close"/>
+    <moqui.security.UserPermission userPermissionId="INVOICE_APPROVE" description="Invoice Approve"/>
+    <moqui.security.UserPermission userPermissionId="INVOICE_HOLD" description="Invoice Hold"/>
+    <moqui.security.UserPermission userPermissionId="INVOICE_HOLD_RELEASE" description="Invoice Hold Release"/>
+    <moqui.security.UserPermission userPermissionId="INVOICE_MATCH" description="Invoice Match"/>
+    <moqui.security.UserPermission userPermissionId="PAYABLE_EDIT" description="Payable Edit"/>
+    <moqui.security.UserPermission userPermissionId="PAYABLE_IMPORT" description="Payable Import"/>
+    <moqui.security.UserPermission userPermissionId="PAYABLE_VIEW" description="Payable View"/>
+    <moqui.security.UserPermission userPermissionId="PAYMENT_EDIT" description="Payment Edit"/>
+    <!-- the whole card and bank account numbers of a payment method (PaymentMethodServices.get#PartyPaymentMethodInfo, the
+        edit form; the REST GET of paymentMethods/info); others but the owner's own user see them masked. CARD_NUMBER_EDIT
+        (typing a new card number) and PAYMENT_EDIT do not show them (the user's call of Nov 16, 2026, SEC-BAP-04). -->
+    <moqui.security.UserPermission userPermissionId="PAYMENT_NUMBER_VIEW" description="Payment Method Number View"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="PAYMENT_NUMBER_VIEW" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="PAYMENT_RUN_APPROVE" description="Payment Run Approve"/>
+    <moqui.security.UserPermission userPermissionId="PAYMENT_VIEW" description="Payment View"/>
+    <moqui.security.UserPermission userPermissionId="PRODUCTION_COST_POST" description="Production Cost Post"/>
+    <moqui.security.UserPermission userPermissionId="RECEIVABLE_EDIT" description="Receivable Edit"/>
+    <moqui.security.UserPermission userPermissionId="RECEIVABLE_VIEW" description="Receivable View"/>
+    <moqui.security.UserPermission userPermissionId="RETURN_CREDIT_APPROVE" description="Return Credit Approve"/>
+    <!-- Warehouse's receipt permission, which WarehouseTaskServices.receive#ReturnItems checks -->
+    <moqui.security.UserPermission userPermissionId="STOCK_RECEIVE" description="Stock Receive"/>
+    <moqui.security.UserPermission userPermissionId="SUPPLIER_TERMS_EDIT" description="Supplier Terms Edit"/>
+    <moqui.security.UserPermission userPermissionId="TAX_STATEMENT_EDIT" description="Tax Statement Edit"/>
+    <moqui.basic.Enumeration enumId="AtrPostingFailed" enumTypeId="AcctgTransResult" description="Posting failed; review error journal"/>
+    <moqui.basic.EnumerationType enumTypeId="AcctgTransContentType" description="Journal attachment type"/>
+    <moqui.basic.Enumeration enumId="AtctEvidence" enumTypeId="AcctgTransContentType" description="Supporting evidence"/>
+    <moqui.basic.Enumeration enumId="AtctOther" enumTypeId="AcctgTransContentType" description="Other attachment"/>
+
+    <!-- Period close (mantle.ledger.CloseServices), period runs (PeriodRunServices) and project cost posting
+        (OtherAutoPostServices.post#WorkEffortCost). -->
+    <!-- The rows of a period's close checklist, in order. Each names the service that finds its items (enumCode, a service
+        implementing CloseServices.define#CloseCheck) and whether an item blocks the close (optionIndicator Y); another
+        source adds its row with its own service. -->
+    <moqui.basic.EnumerationType enumTypeId="PeriodCloseCheck" description="Period close check"/>
+    <moqui.basic.Enumeration enumId="PccUnpostedTransactions" enumTypeId="PeriodCloseCheck" sequenceNum="10"
+            description="Unposted transactions" optionIndicator="Y"
+            enumCode="mantle.ledger.CloseServices.check#StandardClose"/>
+    <moqui.basic.Enumeration enumId="PccErrorJournal" enumTypeId="PeriodCloseCheck" sequenceNum="20"
+            description="Automatic postings in the error journal" optionIndicator="Y"
+            enumCode="mantle.ledger.CloseServices.check#StandardClose"/>
+    <moqui.basic.Enumeration enumId="PccImbalance" enumTypeId="PeriodCloseCheck" sequenceNum="30"
+            description="Unbalanced transactions" optionIndicator="Y"
+            enumCode="mantle.ledger.CloseServices.check#StandardClose"/>
+    <moqui.basic.Enumeration enumId="PccUnpostedDocuments" enumTypeId="PeriodCloseCheck" sequenceNum="40"
+            description="Unposted invoices, bills and payments" optionIndicator="Y"
+            enumCode="mantle.ledger.CloseServices.check#StandardClose"/>
+    <moqui.basic.Enumeration enumId="PccBankStatements" enumTypeId="PeriodCloseCheck" sequenceNum="50"
+            description="Bank lines not on a finished statement" optionIndicator="Y"
+            enumCode="mantle.ledger.CloseServices.check#StandardClose"/>
+    <moqui.basic.Enumeration enumId="PccMissingRates" enumTypeId="PeriodCloseCheck" sequenceNum="60"
+            description="Documents without an exchange rate" optionIndicator="Y"
+            enumCode="mantle.ledger.CloseServices.check#StandardClose"/>
+    <moqui.basic.Enumeration enumId="PccHardLock" enumTypeId="PeriodCloseCheck" sequenceNum="65"
+            description="Hard locks through the year end" optionIndicator="Y"
+            enumCode="mantle.ledger.CloseServices.check#StandardClose"/>
+    <moqui.basic.Enumeration enumId="PccPayableHolds" enumTypeId="PeriodCloseCheck" sequenceNum="70"
+            description="Bills on hold" optionIndicator="N"
+            enumCode="mantle.ledger.CloseServices.check#StandardClose"/>
+    <moqui.basic.Enumeration enumId="PccStockPostings" enumTypeId="PeriodCloseCheck" sequenceNum="80"
+            description="Stock movements that posted nothing" optionIndicator="N"
+            enumCode="mantle.ledger.CloseServices.check#StandardClose"/>
+    <moqui.basic.Enumeration enumId="PccOpenWip" enumTypeId="PeriodCloseCheck" sequenceNum="90"
+            description="Open WIP on completed assembly work" optionIndicator="N"
+            enumCode="mantle.ledger.CloseServices.check#StandardClose"/>
+    <moqui.basic.Enumeration enumId="PccProjectCost" enumTypeId="PeriodCloseCheck" sequenceNum="100"
+            description="Approved project time not posted to cost" optionIndicator="N"
+            enumCode="mantle.ledger.CloseServices.check#StandardClose"/>
+
+    <!-- The kinds of period run: enumCode the service that calculates a preview's results (implementing
+        PeriodRunServices.define#RunCalculation), optionValue the service that posts a previewed run (implementing
+        PeriodRunServices.define#RunPosting). -->
+    <moqui.basic.EnumerationType enumTypeId="PeriodRunKind" description="Period run kind"/>
+    <moqui.basic.Enumeration enumId="PrkProjectCost" enumTypeId="PeriodRunKind" sequenceNum="20"
+            description="Project cost" enumCode="mantle.ledger.OtherAutoPostServices.calculate#WorkEffortCostRun"
+            optionValue="mantle.ledger.OtherAutoPostServices.post#WorkEffortCostRun"/>
+
+    <!-- Project cost: approved project time at its cost rate, debiting project cost and crediting labor clearing -->
+    <moqui.basic.Enumeration enumId="AttWorkEffortCost" enumTypeId="AcctgTransType" description="Project cost"/>
+    <moqui.basic.Enumeration enumId="GatProjectLaborCost" enumTypeId="GlAccountType" parentEnumId="GatCogs"
+            description="Project labor cost"/>
+    <moqui.basic.Enumeration enumId="GatLaborClearing" enumTypeId="GlAccountType"
+            description="Labor clearing (wage expense absorbed by projects)"/>
+
+    <dataDocuments dataDocumentId="MantlePayment" indexName="mantle" documentName="Payment" primaryEntityName="mantle.account.payment.Payment" documentTitle="${paymentId}">
+        <fields fieldSeqId="01" fieldPath="paymentId" fieldNameAlias="paymentId" searchRole="code" searchWeight="A"/>
+        <fields fieldSeqId="02" fieldPath="paymentId" fieldNameAlias="displayName" searchRole="title" searchWeight="A"/>
+        <fields fieldSeqId="03" fieldPath="fromPartyId" fieldNameAlias="fromPartyId"/>
+        <fields fieldSeqId="04" fieldPath="toPartyId" fieldNameAlias="toPartyId"/>
+    </dataDocuments>
+    <dataDocuments dataDocumentId="MantleGlAccount" indexName="mantle" documentName="GlAccount" primaryEntityName="mantle.ledger.account.GlAccount" documentTitle="${glAccountId}">
+        <fields fieldSeqId="01" fieldPath="glAccountId" fieldNameAlias="glAccountId" searchRole="code" searchWeight="A"/>
+        <fields fieldSeqId="02" fieldPath="accountName" fieldNameAlias="displayName" searchRole="title" searchWeight="A"/>
+        <fields fieldSeqId="05" fieldPath="mantle.ledger.account.GlAccountOrganization:organizationPartyId" fieldNameAlias="organizationPartyIds"/>
+    </dataDocuments>
+    <dataDocuments dataDocumentId="MantleAcctgTrans" indexName="mantle" documentName="AcctgTrans" primaryEntityName="mantle.ledger.transaction.AcctgTrans" documentTitle="${acctgTransId}">
+        <fields fieldSeqId="01" fieldPath="acctgTransId" fieldNameAlias="acctgTransId" searchRole="code" searchWeight="A"/>
+        <fields fieldSeqId="02" fieldPath="description" fieldNameAlias="displayName" searchRole="title" searchWeight="A"/>
+        <fields fieldSeqId="03" fieldPath="organizationPartyId" fieldNameAlias="organizationPartyId"/>
+    </dataDocuments>
+
+    <!-- An internal transfer is one payment from the organization to itself, from one of its cash methods to another,
+        posted through the PtInternalTransfer transit accounts of PaymentTypeGlAccount (20-install/60PostingDefaults.xml). -->
+    <moqui.basic.Enumeration enumId="PtInternalTransfer" enumTypeId="PaymentType" description="Internal Transfer"/>
+
+    <!-- Payment reviews (PaymentReview): what a review is of, and the reason code prefix of its refusals (optionValue). -->
+    <moqui.basic.EnumerationType enumTypeId="PaymentReviewKind" description="Payment Review Kind"/>
+    <moqui.basic.Enumeration enumId="PrkSettlement" enumTypeId="PaymentReviewKind" enumCode="manual" optionValue="SETTLEMENT"
+            sequenceNum="1" description="Settlement"/>
+    <moqui.basic.Enumeration enumId="PrkAutoApply" enumTypeId="PaymentReviewKind" enumCode="auto" optionValue="SETTLEMENT"
+            sequenceNum="2" description="Automatic Application"/>
+    <moqui.basic.Enumeration enumId="PrkSettlementDraft" enumTypeId="PaymentReviewKind" enumCode="draft"
+            optionValue="SETTLEMENT" sequenceNum="3" description="Settlement Draft"/>
+    <moqui.basic.Enumeration enumId="PrkState" enumTypeId="PaymentReviewKind" enumCode="state" optionValue="PAYMENT"
+            sequenceNum="4" description="Payment State Change"/>
+    <moqui.basic.Enumeration enumId="PrkUnapply" enumTypeId="PaymentReviewKind" enumCode="unapply" optionValue="PAYMENT"
+            sequenceNum="5" description="Payment Unapplication"/>
+    <moqui.basic.Enumeration enumId="PrkGateway" enumTypeId="PaymentReviewKind" enumCode="gateway" optionValue="GATEWAY"
+            sequenceNum="6" description="Gateway Action"/>
+    <moqui.basic.Enumeration enumId="PrkRefund" enumTypeId="PaymentReviewKind" enumCode="refund" optionValue="REFUND"
+            sequenceNum="7" description="Refund"/>
+    <moqui.basic.Enumeration enumId="PrkTransfer" enumTypeId="PaymentReviewKind" enumCode="transfer" optionValue="TRANSFER"
+            sequenceNum="8" description="Internal Transfer"/>
+    <moqui.basic.StatusType statusTypeId="PaymentReview" description="Payment Review"/>
+    <moqui.basic.StatusItem statusId="PrvDraft" statusTypeId="PaymentReview" statusCode="draft" sequenceNum="1"
+            description="Draft"/>
+    <moqui.basic.StatusItem statusId="PrvReview" statusTypeId="PaymentReview" statusCode="review" sequenceNum="2"
+            description="In Review"/>
+    <moqui.basic.StatusItem statusId="PrvComplete" statusTypeId="PaymentReview" statusCode="complete" sequenceNum="3"
+            description="Confirmed"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrvReview" toStatusId="PrvComplete"
+            transitionName="Confirm"/>
+
+    <!-- BankAccount.accountNumber is encrypted from Nov 16, 2026: a number stored before in plain text is encrypted, and a
+        payment method description that holds it keeps its last four digits only (migrate#BankAccountNumbers) -->
+    <mantle.account.PaymentMethodServices.migrate-BankAccountNumbers/>
+
+    <!-- Accounting setup and activation (mantle.ledger.SetupServices): the chart template role, the opening line and
+        transaction types, and the migration clearing account type a template maps. -->
+    <!-- A chart template: an organization with no transactions holding the account links, type defaults and mappings
+        init#PartyAccountingConfiguration copies into a new organization (sourcePartyId). Mantle's installed chart ships
+        one, DefaultSettings. -->
+    <mantle.party.RoleType roleTypeId="OrgAccountingTemplate" description="Accounting chart template"/>
+    <!-- the line of an open invoice or bill imported at cutover, ItemOpeningBalance, is in 10-seed/02ItemTypes.xml -->
+    <!-- the opening trial balance activation posts -->
+    <moqui.basic.Enumeration enumId="AttOpeningBalance" enumTypeId="AcctgTransType" description="Opening balance"/>
+    <!-- the account opening items and balances post against, which nets to zero once accounting is activated -->
+    <moqui.basic.Enumeration enumId="GatMigrationClearing" enumTypeId="GlAccountType" description="Migration clearing"/>
+
+    <!-- mr-boss impl-admin P15 (design-admin §11.1): Accounting's two imports as registered targets of the framework's
+        org.moqui.admin.DataTransferServices. Each keeps its owner wizard (bank statement formats and their review; the
+        cutover's opening items), so only its result contract is registered: the service that answers, for the caller and
+        by Accounting's own authority and organization scope, the runs to list with the place that opens each. Nothing is
+        staged or applied through the registration, and it adds no right. -->
+    <moqui.server.TransferTarget targetId="statementImports" direction="import" targetMode="wizard" title="Bank statements"
+            description="Statement files of a bank account (BAI2, OFX, CSV), reviewed and committed in Accounting's Banking"
+            effectsNote="Committed lines become bank lines of the account, to reconcile; nothing is posted by the import."
+            ownerApp="Accounting" targetVersion="1" scopeLabel="Organization"
+            findService="mantle.account.ReconciliationServices.find#StatementImportRuns"
+            ownerRoute="accountingStatementImport" sequenceNum="40"/>
+    <moqui.server.TransferTarget targetId="openingOpenItems" direction="import" targetMode="wizard" title="Opening open items"
+            description="The open customer invoices and supplier bills at an organization's cutover, a step of Accounting's setup"
+            effectsNote="Each row becomes an open invoice or bill dated before the opening date; the setup run keeps the latest import's result."
+            ownerApp="Accounting" targetVersion="1" scopeLabel="Organization"
+            findService="mantle.ledger.SetupServices.find#OpenItemImportRuns"
+            ownerRoute="accountingOpenItems" sequenceNum="41"/>
+
+    <!-- Fixed asset books (mantle.ledger.AssetBookServices): the book event types, the transaction types of a book posting and
+        depreciation as a kind of period run (PeriodRunServices). -->
+    <!-- the cost types are defined in InventoryAndQuality.xml and the close checks above -->
+    <moqui.basic.EnumerationType enumTypeId="AssetBookEventType" description="Asset book event type"/>
+    <moqui.basic.EnumerationType enumTypeId="PeriodRunKind" description="Period run kind"/>
+    <moqui.basic.Enumeration enumId="AbeCapitalize" enumTypeId="AssetBookEventType" description="Capitalized"/>
+    <moqui.basic.Enumeration enumId="AbeAdjust" enumTypeId="AssetBookEventType" description="Book adjusted"/>
+    <moqui.basic.Enumeration enumId="AbeDispose" enumTypeId="AssetBookEventType" description="Disposed"/>
+    <moqui.basic.Enumeration enumId="AbeReversal" enumTypeId="AssetBookEventType" description="Reversed"/>
+    <moqui.basic.Enumeration enumId="AbeCostRepair" enumTypeId="AssetBookEventType" description="Acquire cost repaired"/>
+
+    <moqui.basic.Enumeration enumId="AttAssetBookAdjust" enumTypeId="AcctgTransType" description="Asset book adjustment"/>
+    <moqui.basic.Enumeration enumId="AttAssetDisposal" enumTypeId="AcctgTransType" description="Asset disposal"/>
+
+    <moqui.basic.Enumeration enumId="PrkDepreciation" enumTypeId="PeriodRunKind" sequenceNum="10" description="Depreciation"
+            enumCode="mantle.ledger.AssetBookServices.calculate#DepreciationRun"
+            optionValue="mantle.ledger.AssetBookServices.post#DepreciationRun"/>
+
+    <!-- Inventory valuation and landed costs (AssetBookServices preview#/post#LandedCost, InventoryReportServices
+        run#InventoryValuation), the production cost GL account types Manufacturing's cost close posts to, the scrap
+        variance reasons, and the valuation rows of the period close checklist. -->
+    <!-- Landed costs: the basis a charge is spread by, and an allocation's state -->
+    <moqui.basic.EnumerationType enumTypeId="LandedCostBasis" description="Landed cost allocation basis"/>
+    <moqui.basic.Enumeration enumId="LcbQuantity" enumTypeId="LandedCostBasis" sequenceNum="10" description="Quantity"/>
+    <moqui.basic.Enumeration enumId="LcbValue" enumTypeId="LandedCostBasis" sequenceNum="20" description="Value"/>
+    <moqui.basic.Enumeration enumId="LcbWeight" enumTypeId="LandedCostBasis" sequenceNum="30" description="Weight"/>
+    <moqui.basic.Enumeration enumId="LcbVolume" enumTypeId="LandedCostBasis" sequenceNum="40" description="Volume"/>
+    <moqui.basic.StatusType statusTypeId="LandedCostAllocation" description="Landed cost allocation"/>
+    <moqui.basic.StatusItem statusId="LcaPosted" statusTypeId="LandedCostAllocation" sequenceNum="10" description="Posted"/>
+    <!-- the bill line types a landed cost allocates: freight, fees and other charges -->
+    <moqui.basic.Enumeration enumId="EngItemsLandedCost" enumTypeId="EnumGroup" description="Landed cost charge items"/>
+    <moqui.basic.EnumGroupMember enumId="ItemShipping" enumGroupEnumId="EngItemsLandedCost"/>
+    <moqui.basic.EnumGroupMember enumId="ItemFee" enumGroupEnumId="EngItemsLandedCost"/>
+    <moqui.basic.EnumGroupMember enumId="ItemMiscCharge" enumGroupEnumId="EngItemsLandedCost"/>
+    <moqui.basic.Enumeration enumId="AttLandedCost" enumTypeId="AcctgTransType" description="Landed cost allocation"/>
+    <moqui.basic.Enumeration enumId="AbeLandedCost" enumTypeId="AssetBookEventType" description="Landed cost"/>
+    <moqui.basic.Enumeration enumId="AbeCostDataRepair" enumTypeId="AssetBookEventType" description="Cost data repair"/>
+
+    <!-- Production cost close (Manufacturing): applied labor and overhead and accrued outside processing credited
+        against WIP, and the residual to production variance. Each organization maps them in PostingDefaults. -->
+    <moqui.basic.Enumeration enumId="GatLaborApplied" enumTypeId="GlAccountType" description="Applied production labor"/>
+    <moqui.basic.Enumeration enumId="GatOverheadApplied" enumTypeId="GlAccountType"
+            description="Applied production machine and overhead"/>
+    <moqui.basic.Enumeration enumId="GatOutsideProcessAccrued" enumTypeId="GlAccountType"
+            description="Accrued outside processing"/>
+    <moqui.basic.Enumeration enumId="GatProductionVariance" enumTypeId="GlAccountType" parentEnumId="GatCogs"
+            description="Production variance"/>
+
+    <!-- Scrap reasons (enumCode scrap): a count variance with one posts to the organization's account for the reason,
+        else to the asset type's scrap account (post#PhysicalInventoryVariance) -->
+    <moqui.basic.Enumeration enumId="InVrScrap" enumTypeId="InventoryVarianceReason" enumCode="scrap" description="Scrap"/>
+    <moqui.basic.Enumeration enumId="InVrExpired" enumTypeId="InventoryVarianceReason" enumCode="scrap"
+            description="Expired"/>
+
+    <!-- The valuation rows of the period close checklist (CloseServices.define#CloseCheck), shown without blocking -->
+    <moqui.basic.Enumeration enumId="PccReceiptCostBasis" enumTypeId="PeriodCloseCheck" sequenceNum="82"
+            description="Receipts without a cost basis" optionIndicator="N"
+            enumCode="mantle.product.InventoryReportServices.check#ValuationClose"/>
+    <moqui.basic.Enumeration enumId="PccValuationTieOut" enumTypeId="PeriodCloseCheck" sequenceNum="84"
+            description="Inventory valuation against the inventory accounts" optionIndicator="N"
+            enumCode="mantle.product.InventoryReportServices.check#ValuationClose"/>
+</entity-facade-xml>

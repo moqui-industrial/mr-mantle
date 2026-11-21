@@ -138,7 +138,7 @@
     </service>
     <!-- The framework's mail queue (org.moqui.admin.OperationServices, moqui.server.MailOutcomeOwner; mr-boss impl-admin P12):
         the ledger answers for the stored messages its attempts made, so none is retried or settled beside it. Every user
-        may call both (MantleOperationOwners, data/PartyAccessData.xml), as the mail queue's services call them as the
+        may call both (MantleOperationOwners, data/10-seed/PartyAndIdentity.xml), as the mail queue's services call them as the
         caller: the first answers only a reader of the mail queue (ADMIN_OPERATION_VIEW or _MANAGE, ADMIN_CONNECTION_VIEW
         or _MANAGE), the second checks the ledger's own permission. -->
     <service verb="find" noun="MailOutcomeOwners" allow-remote="false">

@@ -1,6 +1,6 @@
 // The equipment import (mantle.product.MaintenanceImportServices validate#EquipmentImportRow, apply#EquipmentImportRow and
 // find#EquipmentImportScopes; IronStone Maintenance design §6 EquipmentImport, §12, MT-12; impl-maintenance P18, F36, F51): the
-// row services of the framework's import target `equipment` (data/MaintenanceSettingsData.xml), called by
+// row services of the framework's import target `equipment` (data/10-seed/Maintenance.xml), called by
 // org.moqui.admin.DataTransferServices for each row of a staged file, as the importer.
 //
 // A row is one piece of equipment of the batch's organization (its scope), kept by its source system and key: an

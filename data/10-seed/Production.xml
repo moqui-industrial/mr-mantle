@@ -1,0 +1,370 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed">
+    <!-- Controlled changes of a production run (design-manufacturing Components Substitute, SplitWorkOrder, BillOfMaterialsCompare's
+        amendment; impl-manufacturing P9): the kinds of a change, its status flow, where a split, backorder or clone came from,
+        and the two approval notices. A substitution is sent to the run organization's PRODUCTION_SUPERVISE holders, an amendment
+        to its METHOD_APPROVE and PRODUCTION_SUPERVISE holders. Both are decided on the run (substitute#ProductionMaterial,
+        amend#ProductionOrder), since each needs its preview, never from the notification (F40), so neither has an approve
+        service; the decision marks them read. -->
+    <moqui.basic.EnumerationType description="Production Change Type" enumTypeId="ProductionChangeType"/>
+    <moqui.basic.Enumeration description="Substitution" enumId="PchtSubstitution" enumTypeId="ProductionChangeType"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Amendment" enumId="PchtAmendment" enumTypeId="ProductionChangeType" sequenceNum="2"/>
+
+    <moqui.basic.EnumerationType description="Production Source Origin" enumTypeId="ProductionSourceOrigin"/>
+    <moqui.basic.Enumeration description="Split from" enumId="PsoSplit" enumTypeId="ProductionSourceOrigin" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Backorder of" enumId="PsoBackorder" enumTypeId="ProductionSourceOrigin"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Cloned from" enumId="PsoClone" enumTypeId="ProductionSourceOrigin" sequenceNum="3"/>
+
+    <moqui.basic.StatusType statusTypeId="ProductionChange" description="Production change"/>
+    <moqui.basic.StatusItem statusId="PchRequested" statusTypeId="ProductionChange" description="Waiting for review"
+            sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="PchApplied" statusTypeId="ProductionChange" description="Applied" sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="PchRefused" statusTypeId="ProductionChange" description="Refused" sequenceNum="3"/>
+    <moqui.basic.StatusFlow statusFlowId="ProductionChange" statusTypeId="ProductionChange"
+            description="Production change review"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="ProductionChange" statusId="PchRequested" toStatusId="PchApplied"
+            transitionName="Apply"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="ProductionChange" statusId="PchRequested" toStatusId="PchRefused"
+            transitionName="Refuse"/>
+
+    <moqui.security.user.NotificationTopic topic="ProductionSubstitution" inboxEnumId="NinNotifications"
+            description="Substitute component to approve" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Approve ${substituteName} for ${productName} on work order ${workEffortId}"/>
+    <moqui.security.user.NotificationTopic topic="ProductionAmendment" inboxEnumId="NinNotifications"
+            description="Work order amendment to review" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" titleTemplate="Review an amendment of work order ${workEffortId}: ${workEffortName}"/>
+
+    <!-- Production cost evidence (design-manufacturing §12 M8 and ProductionCosts, crosscut CX-COST; impl-manufacturing P6): the
+        kinds of a ProductionCostEvent and its cost components, valuation and ledger states, the destinations of a
+        ProductionCostAllocation, the run's cost-review status, and the ProductionCostReview notification. -->
+    <!-- the facts that write an event; P7 adds the scrap of issued material, P10 labor and machine runtime, P14 the
+        outside-processing accrual and its price variance -->
+    <moqui.basic.EnumerationType description="Production Cost Event Type" enumTypeId="ProductionCostEventType"/>
+    <moqui.basic.Enumeration description="Material issued" enumId="PcetMaterialIssue" enumTypeId="ProductionCostEventType"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Unused material returned" enumId="PcetMaterialReturn"
+            enumTypeId="ProductionCostEventType" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Output received" enumId="PcetOutputReceipt" enumTypeId="ProductionCostEventType"
+            sequenceNum="3"/>
+
+    <!-- the cost components of an event, the components of the frozen estimate (ProductStandardCost) with the output's
+        relief of WIP beside them; overhead is a component of the estimate only, never of an event (preview#CostClose
+        computes it, R-SA-18) -->
+    <moqui.basic.EnumerationType description="Production Cost Component" enumTypeId="ProductionCostComponent"/>
+    <moqui.basic.Enumeration description="Material" enumId="PrcMaterial" enumTypeId="ProductionCostComponent" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Labor" enumId="PrcLabor" enumTypeId="ProductionCostComponent" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Machine" enumId="PrcMachine" enumTypeId="ProductionCostComponent" sequenceNum="3"/>
+    <moqui.basic.Enumeration description="Outside processing" enumId="PrcOutside" enumTypeId="ProductionCostComponent"
+            sequenceNum="4"/>
+    <moqui.basic.Enumeration description="Output" enumId="PrcOutput" enumTypeId="ProductionCostComponent" sequenceNum="5"/>
+    <moqui.basic.Enumeration description="Overhead" enumId="PrcOverhead" enumTypeId="ProductionCostComponent"
+            sequenceNum="6"/>
+
+    <!-- an event without a value (no cost on the asset, no rate in effect on its date) waits for review, and the cost close
+        refuses a run that has one (impl-manufacturing §4) -->
+    <moqui.basic.EnumerationType description="Production Cost Valuation" enumTypeId="ProductionCostValuation"/>
+    <moqui.basic.Enumeration description="Valued" enumId="PcvValued" enumTypeId="ProductionCostValuation" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Not valued" enumId="PcvUnvalued" enumTypeId="ProductionCostValuation"
+            sequenceNum="2"/>
+
+    <moqui.basic.EnumerationType description="Production Cost Ledger Status" enumTypeId="ProductionCostLedger"/>
+    <moqui.basic.Enumeration description="Posted with its stock movement" enumId="PclPosted" enumTypeId="ProductionCostLedger"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Not posted by its stock movement" enumId="PclNotPosted"
+            enumTypeId="ProductionCostLedger" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Awaiting the cost close" enumId="PclAwaitingClose" enumTypeId="ProductionCostLedger"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration description="Posted at the cost close" enumId="PclClosePosted" enumTypeId="ProductionCostLedger"
+            sequenceNum="4"/>
+
+    <moqui.basic.EnumerationType description="Production Cost Destination" enumTypeId="ProductionCostDestination"/>
+    <moqui.basic.Enumeration description="Work in process" enumId="PcdWip" enumTypeId="ProductionCostDestination"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Output" enumId="PcdOutput" enumTypeId="ProductionCostDestination" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="By-product" enumId="PcdByproduct" enumTypeId="ProductionCostDestination"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration description="Production variance" enumId="PcdVariance" enumTypeId="ProductionCostDestination"
+            sequenceNum="4"/>
+
+    <!-- the run's cost review: requested by Manufacturing (review#ProductionCosts); Accounting's cost close (P15) adds its
+        decisions -->
+    <moqui.basic.StatusType statusTypeId="ProductionCostReview" description="Production cost review"/>
+    <moqui.basic.StatusItem statusId="PcrRequested" statusTypeId="ProductionCostReview" description="Review requested"
+            sequenceNum="1"/>
+
+    <!-- Sent by review#ProductionCosts to the run organization's users holding PRODUCTION_COST_POST, Accounting's cost close
+        permission, with the run, its revision and the proposed accounting date; the run is its record. Decided on the
+        record (the cost close), so it has no approve service (impl-manufacturing F40). An app adds its linkTemplate. -->
+    <moqui.security.user.NotificationTopic topic="ProductionCostReview" inboxEnumId="NinNotifications"
+            description="Production cost review" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" titleTemplate="Work order ${workEffortLabel} is ready for its cost close"/>
+
+    <!-- Accounting's production cost close (design-accounting ProductionCostClose and CostingPolicies; impl-manufacturing P15;
+        extends the production cost enumeration types above):
+        the allocation policy's overhead bases and co-product methods, the scrap destination of an allocation, the cost review's
+        decisions, and the two period close checks. -->
+    <!-- the overhead basis of ProductionAllocationPolicy; the default is a rate per work-center hour (impl-manufacturing §4) -->
+    <moqui.basic.EnumerationType description="Production Overhead Basis" enumTypeId="ProductionOverheadBasis"/>
+    <moqui.basic.Enumeration description="Rate per work-center hour" enumId="PobWorkCenterHour"
+            enumTypeId="ProductionOverheadBasis" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Percentage of direct labor" enumId="PobLaborPercent"
+            enumTypeId="ProductionOverheadBasis" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="No overhead" enumId="PobNone" enumTypeId="ProductionOverheadBasis" sequenceNum="3"/>
+
+    <!-- the co-product method; the default is quantity normalized to the primary output's unit -->
+    <moqui.basic.EnumerationType description="Production Co-product Method" enumTypeId="ProductionCoproductMethod"/>
+    <moqui.basic.Enumeration description="Quantity in a common unit" enumId="PcmQuantity" enumTypeId="ProductionCoproductMethod"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Fixed shares on the output lines" enumId="PcmFixedShare"
+            enumTypeId="ProductionCoproductMethod" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Relative sales value" enumId="PcmSalesValue" enumTypeId="ProductionCoproductMethod"
+            sequenceNum="3"/>
+
+    <!-- the scrap of issued material moved out of WIP at the close -->
+    <moqui.basic.Enumeration description="Scrap" enumId="PcdScrap" enumTypeId="ProductionCostDestination" sequenceNum="5"/>
+
+    <!-- Accounting's decisions on a cost review (P6's PcrRequested): returned to Manufacturing, or closed by the cost close -->
+    <moqui.basic.StatusItem statusId="PcrReturned" statusTypeId="ProductionCostReview" description="Returned to production"
+            sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="PcrClosed" statusTypeId="ProductionCostReview" description="Cost closed" sequenceNum="3"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PcrRequested" toStatusId="PcrReturned"
+            transitionName="Return"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PcrRequested" toStatusId="PcrClosed"
+            transitionName="Close"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PcrReturned" toStatusId="PcrRequested"
+            transitionName="Request again"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PcrReturned" toStatusId="PcrClosed"
+            transitionName="Close"/>
+
+    <!-- The production rows of the period close checklist (CloseServices.define#CloseCheck), shown without blocking -->
+    <moqui.basic.Enumeration enumId="PccProductionWip" enumTypeId="PeriodCloseCheck" sequenceNum="92"
+            description="Production WIP against the WIP account and open runs" optionIndicator="N"
+            enumCode="mantle.ledger.ProductionCostServices.check#ProductionClose"/>
+    <moqui.basic.Enumeration enumId="PccProductionCostClose" enumTypeId="PeriodCloseCheck" sequenceNum="94"
+            description="Production runs awaiting cost close" optionIndicator="N"
+            enumCode="mantle.ledger.ProductionCostServices.check#ProductionClose"/>
+
+    <!-- Production runs (design-manufacturing §12 M4; impl-warehouse P16a): the roles of a run's lines
+        (mantle.work.production.ProductionRunLine). -->
+    <moqui.basic.EnumerationType description="Production Run Line Role" enumTypeId="ProductionRunLineRole"/>
+    <moqui.basic.Enumeration description="Material" enumId="PrlrMaterial" enumTypeId="ProductionRunLineRole" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Output" enumId="PrlrOutput" enumTypeId="ProductionRunLineRole" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="By-product" enumId="PrlrByproduct" enumTypeId="ProductionRunLineRole"
+            sequenceNum="3"/>
+    <!-- No WeApproved to WeInPlanning (unrelease) transition is seeded here (P16 review B4): the framework accepts a
+        transition of any status flow on any WorkEffort, so it would let tasks and projects take it and any path unrelease a
+        run that has stock facts; it comes with Manufacturing's transition#ProductionOrder, whose guard checks those facts. -->
+
+    <!-- Production downtime and its maintenance (design-manufacturing Downtime, §12 M6, D24; impl-manufacturing P11, F18): the
+        states of a ProductionDowntime, the kinds of a ResourceUnavailability (MT-07 uses the planned kind), the maintenance
+        request type and the corrective maintenance type that request#ProductionMaintenance writes. -->
+    <!-- a stop is open until its end is recorded; a correction marks the row it replaces Corrected (the new row is open or
+        closed by its own end) -->
+    <moqui.basic.StatusType statusTypeId="ProductionDowntime" description="Production downtime"/>
+    <moqui.basic.StatusItem statusId="PdtOpen" statusTypeId="ProductionDowntime" description="Open" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="PdtClosed" statusTypeId="ProductionDowntime" description="Closed" sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="PdtCorrected" statusTypeId="ProductionDowntime" description="Corrected"
+            sequenceNum="3"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PdtOpen" toStatusId="PdtClosed"
+            transitionName="Close"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PdtOpen" toStatusId="PdtCorrected"
+            transitionName="Correct"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PdtClosed" toStatusId="PdtCorrected"
+            transitionName="Correct"/>
+
+    <moqui.basic.EnumerationType enumTypeId="ResourceUnavailabilityKind" description="Resource Unavailability Kind"/>
+    <moqui.basic.Enumeration enumId="RukActual" enumTypeId="ResourceUnavailabilityKind" description="Actual outage"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="RukPlanned" enumTypeId="ResourceUnavailabilityKind" description="Planned block"
+            sequenceNum="2"/>
+
+    <!-- the intake trail of a maintenance request (a Request the plant triages) and the corrective work it asks for (the
+        AssetMaintenance the later Maintenance app adopts) -->
+    <moqui.basic.Enumeration enumId="RqtMaintenance" description="Maintenance" enumTypeId="RequestType"/>
+    <moqui.basic.Enumeration enumId="MntTpCorrective" description="Corrective Maintenance" enumTypeId="MaintenanceType"/>
+
+    <!-- The production run's own transitions (design-manufacturing WorkOrderDetail States, F9; impl-manufacturing P5a): unrelease
+        (Approved to In Planning), hold before start (Approved to On Hold) and its resume as released (On Hold to Approved). The
+        framework accepts a transition of any status flow on any WorkEffort (call.rs check_status matches by from and to only),
+        so each carries the permission its guard in transition#ProductionOrder checks: a task or project, and a user without the
+        permission, still cannot take it through a generic update. transition#ProductionOrder is the path to a run's status and
+        checks the run's state and facts besides. -->
+    <moqui.basic.StatusFlow statusFlowId="WorkEffortProduction" statusTypeId="WorkEffort"
+            description="Production runs: unrelease, and hold before start with its resume as released"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProduction" statusId="WeApproved" toStatusId="WeInPlanning"
+            transitionName="Unrelease" userPermissionId="PRODUCTION_PLAN"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProduction" statusId="WeApproved" toStatusId="WeOnHold"
+            transitionName="Hold" userPermissionId="PRODUCTION_SUPERVISE"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProduction" statusId="WeOnHold" toStatusId="WeApproved"
+            transitionName="Resume as released" userPermissionId="PRODUCTION_SUPERVISE"/>
+
+    <!-- Production quality gates (design-manufacturing QualityGates and InspectionTemplates; impl-manufacturing P8): a production
+        template's stage and sampling basis, where a gate's template came from, and the quality-block notice sent to the run
+        organization's PRODUCTION_SUPERVISE holders when a production inspection is verified with a rejection. -->
+    <moqui.basic.EnumerationType enumTypeId="ProductionInspectionStage" description="Production inspection stage"/>
+    <moqui.basic.Enumeration enumId="QpsInProcess" enumTypeId="ProductionInspectionStage" description="In-process"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QpsFinal" enumTypeId="ProductionInspectionStage" description="Final" sequenceNum="2"/>
+
+    <moqui.basic.EnumerationType enumTypeId="InspectionSampleBasis" description="Inspection sample basis"/>
+    <moqui.basic.Enumeration enumId="QsbReceipt" enumTypeId="InspectionSampleBasis" description="Each receipt"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QsbRun" enumTypeId="InspectionSampleBasis" description="The run's quantity"
+            sequenceNum="2"/>
+
+    <moqui.basic.EnumerationType enumTypeId="ProductionGateSource" description="Production gate source"/>
+    <moqui.basic.Enumeration enumId="PgsOperation" enumTypeId="ProductionGateSource" description="Operation"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="PgsMethod" enumTypeId="ProductionGateSource" description="Method" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="PgsApplicability" enumTypeId="ProductionGateSource" description="Applicability"
+            sequenceNum="3"/>
+
+    <!-- Notification: a production inspection verified with a rejection blocks its gate (the operations after an in-process
+        gate, the run's completion for a final one). To the run organization's supervisors; no link template here: the work
+        order's screen belongs to the app. -->
+    <moqui.security.user.NotificationTopic topic="ProductionQualityBlock" description="Production quality block"
+            typeString="warning" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Work order ${workEffortId}: inspection ${qualityInspectionId} ${decision}"/>
+
+    <!-- Production quantities, by-products and loss (design-manufacturing Quantities, ScrapLoss, §12.2; impl-manufacturing P7): the
+        kinds of a quantity event and a loss, a loss's approval status, the two cost event types a loss writes, and the two
+        approval notices sent to the run organization's PRODUCTION_SUPERVISE holders. Both are decided on the record
+        (approve#ProductionException), never from the notification (F40), so neither has an approve service; the decision marks
+        them read. -->
+    <moqui.basic.EnumerationType description="Production Quantity Event Type" enumTypeId="ProductionQuantityEventType"/>
+    <moqui.basic.Enumeration description="Good" enumId="PqetGood" enumTypeId="ProductionQuantityEventType" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Produced, held" enumId="PqetPending" enumTypeId="ProductionQuantityEventType"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Process loss" enumId="PqetProcessLoss" enumTypeId="ProductionQuantityEventType"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration description="Scrap" enumId="PqetScrap" enumTypeId="ProductionQuantityEventType" sequenceNum="4"/>
+    <moqui.basic.Enumeration description="Rework" enumId="PqetRework" enumTypeId="ProductionQuantityEventType" sequenceNum="5"/>
+    <moqui.basic.Enumeration description="Target changed" enumId="PqetTargetChange" enumTypeId="ProductionQuantityEventType"
+            sequenceNum="6"/>
+    <moqui.basic.Enumeration description="Overproduction requested" enumId="PqetOverproduction"
+            enumTypeId="ProductionQuantityEventType" sequenceNum="7"/>
+
+    <moqui.basic.EnumerationType description="Production Approval" enumTypeId="ProductionApproval"/>
+    <moqui.basic.Enumeration description="Waiting for a supervisor" enumId="PapPending" enumTypeId="ProductionApproval"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Approved" enumId="PapApproved" enumTypeId="ProductionApproval" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Refused" enumId="PapRefused" enumTypeId="ProductionApproval" sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType description="Production Loss Type" enumTypeId="ProductionLossType"/>
+    <moqui.basic.Enumeration description="Issued component scrapped" enumId="PltComponentScrap"
+            enumTypeId="ProductionLossType" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Output scrapped" enumId="PltOutputScrap" enumTypeId="ProductionLossType"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Process loss" enumId="PltProcessLoss" enumTypeId="ProductionLossType"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration description="Rework" enumId="PltRework" enumTypeId="ProductionLossType" sequenceNum="4"/>
+
+    <moqui.basic.StatusType statusTypeId="ProductionLoss" description="Production loss"/>
+    <moqui.basic.StatusItem statusId="PlsPending" statusTypeId="ProductionLoss" description="Waiting for a supervisor"
+            sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="PlsApproved" statusTypeId="ProductionLoss" description="Recorded" sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="PlsRefused" statusTypeId="ProductionLoss" description="Refused" sequenceNum="3"/>
+    <moqui.basic.StatusFlow statusFlowId="ProductionLoss" statusTypeId="ProductionLoss" description="Production loss approval"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="ProductionLoss" statusId="PlsPending" toStatusId="PlsApproved"
+            transitionName="Approve" userPermissionId="PRODUCTION_SUPERVISE"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="ProductionLoss" statusId="PlsPending" toStatusId="PlsRefused"
+            transitionName="Refuse" userPermissionId="PRODUCTION_SUPERVISE"/>
+
+    <!-- the cost events of a loss: issued material scrapped in WIP (its value, for the cost close's scrap variance; no stock
+        moves, so nothing posts now) and output issued back to the run (the issuance's hook posts it back into WIP) -->
+    <moqui.basic.Enumeration description="Issued material scrapped" enumId="PcetMaterialScrap"
+            enumTypeId="ProductionCostEventType" sequenceNum="4"/>
+    <moqui.basic.Enumeration description="Output scrapped back to the run" enumId="PcetOutputScrap"
+            enumTypeId="ProductionCostEventType" sequenceNum="5"/>
+
+    <moqui.security.user.NotificationTopic topic="ProductionLossApproval" inboxEnumId="NinNotifications"
+            description="Production loss to approve" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Approve a loss of ${quantity} ${productName} on work order ${workEffortId}"/>
+    <moqui.security.user.NotificationTopic topic="ProductionOverproduction" inboxEnumId="NinNotifications"
+            description="Overproduction to approve" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Approve ${quantity} more ${productName} on work order ${workEffortId}"/>
+
+    <!-- The production schedule (design-manufacturing ProductionSchedule, §11; impl-manufacturing P12, F40): the states and kinds
+        of a ProductionScheduleChange; its two notices are in 15-seed-initial/Operations.xml. -->
+    <moqui.basic.StatusType statusTypeId="ProductionScheduleChange" description="Production schedule change"/>
+    <moqui.basic.StatusItem statusId="SchApplied" statusTypeId="ProductionScheduleChange" description="Applied" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="SchRequested" statusTypeId="ProductionScheduleChange" description="Override requested"
+            sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="SchRefused" statusTypeId="ProductionScheduleChange" description="Override refused"
+            sequenceNum="3"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SchRequested" toStatusId="SchApplied"
+            transitionName="Approve override"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SchRequested" toStatusId="SchRefused"
+            transitionName="Refuse override"/>
+
+    <moqui.basic.EnumerationType enumTypeId="ScheduleChangeKind" description="Schedule Change Kind"/>
+    <moqui.basic.Enumeration enumId="SckMove" enumTypeId="ScheduleChangeKind" description="Move" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SckUnschedule" enumTypeId="ScheduleChangeKind" description="Unschedule" sequenceNum="2"/>
+
+    <!-- The shop floor and production time (design-manufacturing §4, §3 ProductionTime, §12 M7; impl-manufacturing P10, F18):
+        the production work types of a person's time, the move of the costing rates of the labor cost event to the one labor
+        costing purpose (a RateAmount by position class and work type, design Y2; People P10), the machine runtime modes, the instruction step kinds and the labor and
+        machine cost event types. -->
+    <!-- the production work types (F18): set-up, run and rework time on an operation -->
+    <moqui.basic.Enumeration enumId="WktpProductionSetup" description="Production set-up" enumTypeId="WorkType"/>
+    <moqui.basic.Enumeration enumId="WktpProductionRun" description="Production run" enumTypeId="WorkType"/>
+    <moqui.basic.Enumeration enumId="WktpProductionRework" description="Production rework" enumTypeId="WorkType"/>
+
+    <!-- the costing rate of production time is the one labor costing purpose, RaprCost (People P10, impl-people §4: seeded with
+        RateAmount in entity/humanres/PositionAndRateEntities.xml): a RateAmount by emplPositionClassId and workTypeEnumId values an
+        approved entry's labor cost event (mantle.humanres.RateServices.get#CostingRate), never the person's own vendor rate
+        (design ProductionTime, review Y2). The production costing purpose of before (RaprProductionCost) is moved to it on a
+        load, its rows and then the value (migrate#ProductionCostRates: nothing to do once done, or on a new database). -->
+    <mantle.humanres.RateServices.migrate-ProductionCostRates/>
+
+    <moqui.basic.EnumerationType enumTypeId="MachineRuntimeMode" description="Machine Runtime Mode"/>
+    <moqui.basic.Enumeration enumId="MrmSetup" description="Set-up" sequenceNum="1" enumTypeId="MachineRuntimeMode"/>
+    <moqui.basic.Enumeration enumId="MrmRun" description="Run" sequenceNum="2" enumTypeId="MachineRuntimeMode"/>
+
+    <!-- what an operator records against an instruction (InstructionAcknowledgment) -->
+    <moqui.basic.EnumerationType enumTypeId="InstructionStepType" description="Instruction Step Type"/>
+    <moqui.basic.Enumeration enumId="IstAcknowledge" description="Instruction acknowledged" sequenceNum="1"
+            enumTypeId="InstructionStepType"/>
+    <moqui.basic.Enumeration enumId="IstEvidence" description="Evidence recorded" sequenceNum="2"
+            enumTypeId="InstructionStepType"/>
+
+    <!-- the labor and machine cost events (record#ProductionCostEvent's TimeEntry and MachineRuntimeEvent sources), awaiting
+        the cost close -->
+    <moqui.basic.Enumeration description="Labor" enumId="PcetLabor" enumTypeId="ProductionCostEventType" sequenceNum="20"/>
+    <moqui.basic.Enumeration description="Machine runtime" enumId="PcetMachine" enumTypeId="ProductionCostEventType"
+            sequenceNum="21"/>
+
+    <!-- Outside processing (design-manufacturing SubcontractDetail, crosscut CX-SUBCONTRACT and CX-PLANNING; impl-manufacturing
+        P14): the subcontract's status, the demand link of an outside-processing requirement to its operation, the
+        outside-processing method of a planning suggestion, and the two cost events of the service: its accrual at service
+        acceptance and the price variance of its matched bill. -->
+    <moqui.basic.StatusType statusTypeId="ProductionSubcontract" description="Production subcontract"/>
+    <moqui.basic.StatusItem statusId="PscRequested" statusTypeId="ProductionSubcontract" description="Requested"
+            sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="PscOrdered" statusTypeId="ProductionSubcontract" description="On a purchase order"
+            sequenceNum="2"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PscRequested" toStatusId="PscOrdered"
+            transitionName="Ordered"/>
+
+    <!-- the demand of an outside-processing requirement: the operation it is for (request#SubcontractService); it covers
+        nothing, so a requirement's covered quantity leaves it out -->
+    <moqui.basic.Enumeration enumId="RstOperationDemand" description="Operation demand" sequenceNum="9"
+            enumTypeId="RequirementSupplyType"/>
+
+    <!-- an outside-processing requirement in a supply plan, converted to a draft service purchase order line by a buyer
+        (PURCHASE_ORDER_EDIT), never netted -->
+    <moqui.basic.Enumeration enumId="PsmOutside" description="Outside processing" sequenceNum="4"
+            enumTypeId="PlanningSuggestionMethod"/>
+
+    <!-- the outside-processing events reach the GL only through the cost close (PclAwaitingClose, D12) -->
+    <moqui.basic.Enumeration description="Outside processing accepted" enumId="PcetOutsideAccrual"
+            enumTypeId="ProductionCostEventType" sequenceNum="20"/>
+    <moqui.basic.Enumeration description="Outside processing bill variance" enumId="PcetOutsideVariance"
+            enumTypeId="ProductionCostEventType" sequenceNum="21"/>
+</entity-facade-xml>

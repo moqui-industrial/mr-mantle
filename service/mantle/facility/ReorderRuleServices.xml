@@ -89,7 +89,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="validate" noun="ReorderRuleImportRow" allow-remote="false">
         <description>The catalog import's validator of a reorder-rule row (kind reorderRules,
-            data/ReorderRuleImportData.xml): the facility of the import's organization, the update mode against the rule
+            data/10-seed/InventoryAndQuality.xml): the facility of the import's organization, the update mode against the rule
             there, and the values checked by store#ProductFacilityPolicy's own rules without writing; the normalized
             parameters are the store's, which the import then calls for the row.</description>
         <in-parameters>

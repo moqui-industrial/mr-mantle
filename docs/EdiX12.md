@@ -30,7 +30,7 @@ This is the common port, not any retailer's certification: a partner's guide is 
 | `EdiLocation` | The partner's location codes (N103/N104, such as `92` store numbers or `UL` GLNs) for a party and its postal address: the 850's ship-to, and the code sent back in the 856 and 810 |
 | `ShipmentPackage.sscc` | A package's 18-digit SSCC for MAN*GM (allocating SSCCs and GS1-128 labels is not in Mantle yet) |
 
-`data/EdiSetupData.xml` has the `EdiX12` message type and the `EDI_ADMIN` permission; `data/EdiSampleProfileData.xml`
+`data/10-seed/Integrations.xml` has the `EdiX12` message type and the `EDI_ADMIN` permission; `data/15-seed-initial/Purchasing.xml`
 (seed-initial) the generic sample profile `X12_4010_SAMPLE` and the job `send_EdiPendingDocuments` (on, every 15
 minutes; two indexed queries when there is nothing to send). Copy the
 sample for a partner (a new ID or revision), never edit a profile a connection is using. Credentials go in the System

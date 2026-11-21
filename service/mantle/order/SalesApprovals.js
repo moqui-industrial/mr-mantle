@@ -18,7 +18,7 @@
 //   every decision (the SECA on increment#OrderRevision marks invalidatedDate, and currency is read by revision anyway). The approver holds
 //   SALES_APPROVE in the quote's organization (and is in the rule's group when it names one) and is not its author (its owner, who
 //   asked for the approval, or who entered a line the rule names) unless the rule allows it.
-// - The SalesQuoteApproval topic (data/MantleSetupData.xml) carries the request to the approvers; its title names the quote and the
+// - The SalesQuoteApproval topic (data/15-seed-initial/Notifications.xml) carries the request to the approvers; its title names the quote and the
 //   customer and never an amount; its handlers decide at the revision in the message.
 // - Sales' pre-approval warnings (§4 Nov 11): for an order whose seller has a rule in effect, an unresolved quote requirement of an
 //   accepted quote and an order rule the order meets are added to check#OrderPreApprove's approveWarnings, so with the seller's

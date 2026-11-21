@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed">
+    <moqui.security.EntityFilterSet entityFilterSetId="MANTLE_USER_ORG" description="User Organization Filters"/>
+
+    <moqui.security.EntityFilterSet entityFilterSetId="MANTLE_ACTIVE_ORG" description="Active Organization Filters" applyCond="activeOrgId" allowMissingAlias="Y"/>
+</entity-facade-xml>

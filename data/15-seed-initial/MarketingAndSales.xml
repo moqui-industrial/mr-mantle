@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed-initial">
+    <!-- Marketing P11 (impl-marketing P11; design-marketing §15.3 Automation admission/steps): the automations' admission and step jobs,
+        their registrations for Admin's Jobs and their recovery, seed-initial so a deployment's schedule and pause are kept. -->
+    <!-- Admission: each active automation's new source events (a confirmed subscription, a segment's new match, an abandoned cart of
+        its store) filed and its filed events admitted, each in a transaction of its own; an event is admitted once (one enrollment per
+        automation, person and source). -->
+    <moqui.service.job.ServiceJob jobName="run_MarketingAutomationAdmission" description="Admit people to Marketing automations"
+            serviceName="mantle.marketing.AutomationServices.run#AutomationAdmission" cronExpression="0 0/5 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <moqui.server.JobRegistration jobName="run_MarketingAutomationAdmission" ownerApp="Marketing" title="Admit to Marketing automations"
+            description="Files each active automation's new source events (confirmed subscriptions, newly matched segment members, abandoned carts) and admits each eligible person once"
+            managePermission="MARKETING_DISPATCH" scheduleEditable="Y" minIntervalMinutes="1" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="MARKETING_DISPATCH" sequenceNum="73"/>
+    <moqui.server.RecoveryDescriptor descriptorKey="marketingAutomationAdmission" title="Marketing automations' admission" ownerApp="Marketing"
+            targetKind="ServiceJob" targetKey="run_MarketingAutomationAdmission" retryMode="native" managePermission="MARKETING_DISPATCH"
+            idempotencyNote="Each source event is filed once per automation (a unique source key) and admitted once (one enrollment per automation, person and source): a run again files and admits only what is left."
+            sequenceNum="73"/>
+    <!-- Steps: the due steps of the active automations' enrollments, bounded a run, each enrollment in a transaction of its own; each
+        step runs once per enrollment, so a stop between enrollments loses nothing and a completed send is never repeated. -->
+    <moqui.service.job.ServiceJob jobName="run_MarketingAutomationSteps" description="Run the due steps of Marketing automations"
+            serviceName="mantle.marketing.AutomationServices.run#AutomationSteps" cronExpression="0 0/5 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <moqui.server.JobRegistration jobName="run_MarketingAutomationSteps" ownerApp="Marketing" title="Run Marketing automation steps"
+            description="Runs the due waits, conditions and sends of the active automations' enrollments, rechecking consent, suppression and the goal before each step; a send step hands its participant to the delivery ledger once"
+            managePermission="MARKETING_DISPATCH" scheduleEditable="Y" minIntervalMinutes="1" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="MARKETING_DISPATCH" sequenceNum="74"/>
+    <moqui.server.RecoveryDescriptor descriptorKey="marketingAutomationSteps" title="Marketing automations' steps" ownerApp="Marketing"
+            targetKind="ServiceJob" targetKey="run_MarketingAutomationSteps" retryMode="native" managePermission="MARKETING_DISPATCH"
+            idempotencyNote="Each step of an enrollment runs once (a unique execution per enrollment and step, committed with the enrollment's next step and the send's hand-off) and the ledger answers the delivery it holds for a recipient's key, so a run again repeats nothing."
+            sequenceNum="74"/>
+
+    <!-- Marketing P9 (impl-marketing P9; design-marketing §15.3): the due dispatch job of Marketing's sends, its registration for Admin's
+        Jobs and its recovery, seed-initial so a deployment's schedule and pause are kept. -->
+    <!-- The due dispatch (design §15.3 Due campaign dispatch): a released send whose time has come starts sending, and each sending send
+        hands a bounded page of recipients at a time to the ledger under a lease, each recipient in a transaction of its own; a stop
+        between pages loses nothing (the next run claims what is left, and a recipient handed off once is never handed off again). -->
+    <moqui.service.job.ServiceJob jobName="run_MarketingDueSends" description="Hand released Marketing sends to the delivery ledger"
+            serviceName="mantle.marketing.CampaignSendServices.run#DueSends" cronExpression="0 0/2 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <moqui.server.JobRegistration jobName="run_MarketingDueSends" ownerApp="Marketing" title="Dispatch Marketing sends"
+            description="Starts the released sends whose time has come and hands their recipients to the delivery ledger a page at a time, rechecking each recipient's membership, consent, suppression and address first; a recipient is handed off once"
+            managePermission="MARKETING_DISPATCH" scheduleEditable="Y" minIntervalMinutes="1" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="MARKETING_DISPATCH" sequenceNum="72"/>
+    <moqui.server.RecoveryDescriptor descriptorKey="marketingDueSends" title="Marketing sends' dispatch" ownerApp="Marketing"
+            targetKind="ServiceJob" targetKey="run_MarketingDueSends" retryMode="native" managePermission="MARKETING_DISPATCH"
+            idempotencyNote="Each recipient is handed to the ledger once, keyed by its execution key: a run again claims only the recipients not yet handed off (a lease that ended frees a page a stopped run held) and the ledger answers the delivery it already holds for a key, so nothing is sent twice."
+            sequenceNum="72"/>
+
+    <!-- Marketing P13 (impl-marketing P13; design-marketing §15.3 Capture handoff): the lead capture job, its registration for Admin's Jobs
+        and its recovery, seed-initial so a deployment's schedule and pause are kept. -->
+    <!-- The capture handoff (design §15.3): the accepted answers of a lead form with no capture yet are captured once per rule, and each
+        pending or due failed capture is handed to Sales' store#LeadIntake as the system with the publication's organization, the
+        rule's team and source and Marketing's own verification, each capture in a transaction of its own; a failure is kept on its
+        capture and tried again later, the answer untouched. -->
+    <moqui.service.job.ServiceJob jobName="run_MarketingLeadCaptures" description="Hand Marketing's lead form answers to Sales"
+            serviceName="mantle.marketing.MarketingFormServices.run#LeadCaptures" cronExpression="0 0/5 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <moqui.server.JobRegistration jobName="run_MarketingLeadCaptures" ownerApp="Marketing" title="Hand leads to Sales"
+            description="Captures each accepted lead form answer once per lead rule and hands it to Sales' lead intake under the capture's operation key, in the rule's team queue; a failed handoff is tried again with a growing wait and the answer is kept"
+            managePermission="MARKETING_CONTENT_EDIT" scheduleEditable="Y" minIntervalMinutes="1" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="MARKETING_CONTENT_EDIT" sequenceNum="75"/>
+    <moqui.server.RecoveryDescriptor descriptorKey="marketingLeadCaptures" title="Marketing lead handoffs" ownerApp="Marketing"
+            targetKind="ServiceJob" targetKey="run_MarketingLeadCaptures" retryMode="native" managePermission="MARKETING_CONTENT_EDIT"
+            idempotencyNote="Each answer is captured once per rule (a unique rule and source event) and handed to Sales under the capture's operation key, which answers the first result for a repeat: a run again hands off only what is waiting or due and never makes a second lead."
+            sequenceNum="75"/>
+
+    <!-- Marketing P20 (impl-marketing P20; design-marketing §15.3 Attribution, Reporting and retention): the attribution retry, the
+        campaigns' summaries and retention, their registrations for Admin's Jobs and their recovery, seed-initial so a deployment's schedule
+        and pause are kept. Each run does only what is left: an order decided once, a campaign's summaries recomputed whole, an item removed
+        once. -->
+    <!-- Attribution: the sales orders placed in the last 30 days that the SECA's call left without a decision -->
+    <moqui.service.job.ServiceJob jobName="run_MarketingOrderAttributions" description="Attribute placed orders to Marketing campaigns"
+            serviceName="mantle.marketing.TrackingServices.run#OrderAttributions" cronExpression="0 0/15 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <moqui.server.JobRegistration jobName="run_MarketingOrderAttributions" ownerApp="Marketing" title="Attribute placed orders"
+            description="Decides the primary campaign of each sales order placed in the last 30 days whose decision the placement did not record, once an order"
+            managePermission="MARKETING_CONFIGURE" scheduleEditable="Y" minIntervalMinutes="5" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="MARKETING_CONFIGURE" sequenceNum="80"/>
+    <moqui.server.RecoveryDescriptor descriptorKey="marketingOrderAttributions" title="Marketing's order attribution" ownerApp="Marketing"
+            targetKind="ServiceJob" targetKey="run_MarketingOrderAttributions" retryMode="native" managePermission="MARKETING_CONFIGURE"
+            idempotencyNote="An order has one decision in force: a run again decides only the orders still without one."
+            sequenceNum="80"/>
+    <!-- The campaigns' summaries (numSent, qualifiedLeadCount): hourly, the stalest first -->
+    <moqui.service.job.ServiceJob jobName="run_MarketingAggregation" description="Summarize Marketing campaigns' sends and leads"
+            serviceName="mantle.marketing.MarketingReportServices.run#MarketingAggregation" cronExpression="0 20 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <moqui.server.JobRegistration jobName="run_MarketingAggregation" ownerApp="Marketing" title="Summarize campaigns"
+            description="Recomputes each open or recently closed campaign's accepted sends and qualified leads, the reports' summaries and their freshness"
+            managePermission="MARKETING_CONFIGURE" scheduleEditable="Y" minIntervalMinutes="15" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="MARKETING_CONFIGURE" sequenceNum="81"/>
+    <!-- Retention: nightly at 3:10 am -->
+    <moqui.service.job.ServiceJob jobName="run_MarketingRetention" description="Remove Marketing records past their retention"
+            serviceName="mantle.marketing.MarketingReportServices.run#MarketingRetention" cronExpression="0 10 3 * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <moqui.server.JobRegistration jobName="run_MarketingRetention" ownerApp="Marketing" title="Marketing retention"
+            description="Clears purged audience imports' row names and addresses, removes unconfirmed subscription requests a week past their expiry, tracking events past the organization's statistics retention (never one an attribution names) and expired link tokens"
+            managePermission="MARKETING_CONFIGURE" scheduleEditable="Y" minIntervalMinutes="60" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="MARKETING_CONFIGURE" sequenceNum="82"/>
+
+    <!-- Customer agreements past their thru date (impl-sales P15), beside Purchasing's expire_PurchaseAgreements: once a day an
+        active sales or product agreement whose thru date has passed is set Expired
+        (mantle.party.SalesAgreementServices.expire#SalesAgreements). The price resolver stops its prices at the date itself, so an
+        agreement the job has not reached yet prices nothing new either; its orders stay. -->
+    <moqui.service.job.ServiceJob jobName="expire_SalesAgreements" description="Expire customer agreements past their dates"
+            serviceName="mantle.party.SalesAgreementServices.expire#SalesAgreements" cronExpression="0 10 0 * * ?" paused="N"
+            transactionTimeout="1800"/>
+
+    <!-- Misc data for sales force automation -->
+
+    <!-- Lead Status -->
+    <moqui.basic.StatusType statusTypeId="LeadStatus" description="Lead Status"/>
+    <moqui.basic.StatusItem description="Assigned" sequenceNum="1" statusId="LEAD_ASSIGNED" statusTypeId="LeadStatus"/>
+    <moqui.basic.StatusItem description="Converted" sequenceNum="2" statusId="LEAD_CONVERTED" statusTypeId="LeadStatus"/>
+    <moqui.basic.StatusItem description="Qualified" sequenceNum="3" statusId="LEAD_QUALIFIED" statusTypeId="LeadStatus"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="LEAD_ASSIGNED" toStatusId="LEAD_CONVERTED" transitionName="Converted"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="LEAD_ASSIGNED" toStatusId="LEAD_QUALIFIED" transitionName="Qualified"/>
+
+    <!-- Lead Sources (DataSourceType) -->
+    <moqui.basic.Enumeration description="Lead Source" enumId="LEAD_SOURCE" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="OTHER" description="Other" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="COLD_CALL" description="Cold Call" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="EXISTING_CUSTOMER" description="Existing Customer" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="SELF_GENERATED" description="Self Generated" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="EMPLOYEE" description="Employee" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="PARTNER" description="Partner" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="PUBLIC_RELATIONS" description="Public Relations" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="DIRECT_MAIL" description="Direct Mail" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="CONFERENCE" description="Conference" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="TRADE_SHOW" description="Trade Show" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="WEB_SITE" description="Web Site" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="WORD_OF_MOUTH" description="Word of Mouth" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="EMAIL" description="Email" enumTypeId="DataSourceType"/>
+    <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="CAMPAIGN" description="Campaign" enumTypeId="DataSourceType"/>
+    <!-- impl-sales P2 (design-sales §9 Stages and TypesAndReasons): the editable initial setup, not demo. The instance's shared
+        default pipeline (no organization: every organization's until it sets a default of its own) with Qualified, Discovery,
+        Proposal and Negotiation; Won and Lost are outcomes (SalesOpportunity.statusId), not stages. The lost reasons and the
+        recurring plans (enumCode: months). The fixed values are 10-seed/Sales.xml's, named to load before this file. -->
+    <mantle.sales.opportunity.SalesPipeline salesPipelineId="SalesDefault" pipelineName="Sales pipeline" defaultFlag="Y"
+            description="The default pipeline of every organization that has not set its own"/>
+    <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SalesQualified" salesPipelineId="SalesDefault"
+            description="Qualified" defaultProbability="10" sequenceNum="10"/>
+    <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SalesDiscovery" salesPipelineId="SalesDefault"
+            description="Discovery" defaultProbability="25" sequenceNum="20"/>
+    <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SalesProposal" salesPipelineId="SalesDefault"
+            description="Proposal" defaultProbability="50" sequenceNum="30"/>
+    <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SalesNegotiation" salesPipelineId="SalesDefault"
+            description="Negotiation" defaultProbability="75" sequenceNum="40"/>
+
+    <moqui.basic.Enumeration enumId="SlrPrice" enumTypeId="SalesLostReason" description="Price" sequenceNum="10"/>
+    <moqui.basic.Enumeration enumId="SlrCompetitor" enumTypeId="SalesLostReason" description="Chose a competitor" sequenceNum="20"/>
+    <moqui.basic.Enumeration enumId="SlrNoBudget" enumTypeId="SalesLostReason" description="No budget" sequenceNum="30"/>
+    <moqui.basic.Enumeration enumId="SlrNoDecision" enumTypeId="SalesLostReason" description="No decision" sequenceNum="40"/>
+    <moqui.basic.Enumeration enumId="SlrTiming" enumTypeId="SalesLostReason" description="Timing" sequenceNum="50"/>
+    <moqui.basic.Enumeration enumId="SlrOther" enumTypeId="SalesLostReason" description="Other" sequenceNum="90"/>
+
+    <moqui.basic.Enumeration enumId="SrpMonthly" enumTypeId="SalesRecurringPlan" description="Monthly" enumCode="1" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SrpQuarterly" enumTypeId="SalesRecurringPlan" description="Quarterly" enumCode="3" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="SrpHalfYearly" enumTypeId="SalesRecurringPlan" description="Every six months" enumCode="6" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="SrpYearly" enumTypeId="SalesRecurringPlan" description="Yearly" enumCode="12" sequenceNum="4"/>
+</entity-facade-xml>

@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- People's guarded entry over the HR records (IronStone People design §1.1, §16.2 PeopleServices; People.js): the caller's
     scope, which every People service checks first and then reads and writes with authorization off, Home's counts and the setup
-    readiness Admin's registry reads. Each checks the People permissions itself (data/MantleSetupData.xml seeds them, each granted
+    readiness Admin's registry reads. Each checks the People permissions itself (data/15-seed-initial/Access.xml seeds them, each granted
     to ADMIN) and names no application group. P2 adds the employee record over Employees.js: the directory, Employee360's
     regions, the employment history, the personal information correction and the employment content host. P5 adds People's HR
     vocabularies over Lookups.js (find#Lookups, store#Lookup). P6 adds the hire and the employment change over Employment.js
@@ -1145,7 +1145,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <!-- The employees import target (data/PeopleLifecycleSetupData.xml; design §12 EmployeeImport, Admin §11, F16): the row services
+    <!-- The employees import target (data/10-seed/PeopleAndPayroll.xml; design §12 EmployeeImport, Admin §11, F16): the row services
         of the framework's org.moqui.admin.DataTransferServices, called for each row of a staged file as the importer -->
     <service verb="validate" noun="EmployeeImportRow" allow-remote="false">
         <implements service="org.moqui.admin.DataTransferServices.validate#TargetRow"/>

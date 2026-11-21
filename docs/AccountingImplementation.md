@@ -566,7 +566,7 @@ retry answers the first.
   that transaction (F38, F260). `preview#Depreciation` (a class or assets), `get#DepreciationPreview` (each asset's
   cost, residual, depreciation before, the month and the net book after) and `post#Depreciation` are the screen's calls
   over `PeriodRunServices`.
-- **Seed.** `FixedAssetData.xml`: the event types (`AbeCapitalize`, `AbeAdjust`, `AbeDispose`, `AbeReversal`,
+- **Seed.** `10-seed/Accounting.xml`: the event types (`AbeCapitalize`, `AbeAdjust`, `AbeDispose`, `AbeReversal`,
   `AbeCostRepair`), the disposal types, the two transaction types and the run kind. DefaultSettings assigns the fixed
   asset accounts its type mappings name (F250).
 

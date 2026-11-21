@@ -1081,7 +1081,7 @@ function earlierAnswer(change, operationKey) {
 }
 // ===== the identity operators told (the user's call, Nov 11) =====
 // A People request whose steps wait for an identity operator (OPERATOR_REQUIRED) notifies the employer's operators on the
-// IdentityOperatorRequest topic (data/PartyLifecycleData.xml), so they act from the tray or LifecycleOperations: each user holding
+// IdentityOperatorRequest topic (data/10-seed/PartyAndIdentity.xml), so they act from the tray or LifecycleOperations: each user holding
 // ADMIN_IDENTITY_MANAGE through a group granted it (not ADMIN's every permission), whose account is usable and whose organizations
 // (PartyServices.get#PartyInternalOrgIds, as the MANTLE_USER_ORG filter has them) include the employer, never the requester or the
 // person. The title names the person and the employer only, which an operator reads on the operation; no email, reason or terms.

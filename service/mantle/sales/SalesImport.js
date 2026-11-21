@@ -1,6 +1,6 @@
 // The opportunity import (mantle.sales.OpportunityServices validate#OpportunityImportRow, apply#OpportunityImportRow and
 // find#OpportunityImportScopes; IronStone Sales design §3 OpportunityImport, §16; impl-sales P6, F24, F44): the row services of the
-// framework's import target `opportunities` (data/SalesWorkspaceData.xml), called by org.moqui.admin.DataTransferServices for each
+// framework's import target `opportunities` (data/10-seed/Sales.xml), called by org.moqui.admin.DataTransferServices for each
 // row of a staged file, as the importer.
 //
 // A row is one lead or opportunity of the batch's organization (its scope), kept by its source system and row key

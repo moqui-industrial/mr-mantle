@@ -1,0 +1,479 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="install">
+    <!-- the migration clearing account of accounting setup -->
+    <mantle.ledger.account.GlAccountOrganization glAccountId="913000000" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="913000000" glAccountTypeEnumId="GatMigrationClearing"
+            organizationPartyId="DefaultSettings"/>
+    <!-- the realized exchange gain and loss of base-currency posting (post#PaymentApplication) -->
+    <mantle.ledger.account.GlAccountOrganization glAccountId="797000000" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.account.GlAccountOrganization glAccountId="817000000" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="817000000" glAccountTypeEnumId="GatForExGain"
+            organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="797000000" glAccountTypeEnumId="GatForExLoss"
+            organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="121000000" glAccountTypeEnumId="GatAccountsReceivable" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="121500000" glAccountTypeEnumId="GatInterestIncomeRec" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="125000000" glAccountTypeEnumId="GatRecInventoryTranOut" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="126000000" glAccountTypeEnumId="GatAccReceivableUnapplied" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="141000000" glAccountTypeEnumId="GatInventory" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="141200000" glAccountTypeEnumId="GatWipInventory" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="149000000" glAccountTypeEnumId="GatUnreceivedInventory" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="139000000" glAccountTypeEnumId="GatUnreceivedFixedAsset" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="150000000" glAccountTypeEnumId="GatPrepaidExpenses" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="160000000" glAccountTypeEnumId="GatAccruedRevenue" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="180000000" glAccountTypeEnumId="GatFaAccumDepreciation" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="212000000" glAccountTypeEnumId="GatAccountsPayable" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="214000000" glAccountTypeEnumId="GatUninvoicedShpmntRcpts" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="215000000" glAccountTypeEnumId="GatPayInventoryTranIn" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="216000000" glAccountTypeEnumId="GatAccPayableUnapplied" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="221100000" glAccountTypeEnumId="GatCommissionsAccrued" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="251000000" glAccountTypeEnumId="GatCustomerCredits" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="251300000" glAccountTypeEnumId="GatCustomerDeposits" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="252000000" glAccountTypeEnumId="GatSupplierDeposits" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="253000000" glAccountTypeEnumId="GatUnissuedFixedAsset" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="260000000" glAccountTypeEnumId="GatUnearnedRevenue" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="335000000" glAccountTypeEnumId="GatRetainedEarnings" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="410000000" glAccountTypeEnumId="GatSales" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="511000000" glAccountTypeEnumId="GatCogs" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="527000000" glAccountTypeEnumId="GatInvShrinkage" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="525000000" glAccountTypeEnumId="GatInvValueAdj" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="782000000" glAccountTypeEnumId="GatWriteOff" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="782100000" glAccountTypeEnumId="GatAccRecWriteOff" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="862000000" glAccountTypeEnumId="GatAccPayWriteOff" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="600000000" glAccountTypeEnumId="GatOperatingExpense" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="670000000" glAccountTypeEnumId="GatFaDepreciation" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="814200000" glAccountTypeEnumId="GatFaFound" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="814300000" glAccountTypeEnumId="GatInvFound" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="793200000" glAccountTypeEnumId="GatFaShrinkage" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="850000000" glAccountTypeEnumId="GatProfitLoss" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="730000000" glAccountTypeEnumId="GatTax" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.InvoiceTypeTransType invoiceTypeEnumId="InvoiceSales" organizationPartyId="DefaultSettings"
+            isPayable="N" acctgTransTypeEnumId="AttSalesInvoice" glAccountId="121000000"/>
+    <mantle.ledger.config.InvoiceTypeTransType invoiceTypeEnumId="InvoiceSales" organizationPartyId="DefaultSettings"
+            isPayable="Y" acctgTransTypeEnumId="AttPurchaseInvoice" glAccountId="212000000"/>
+    <mantle.ledger.config.InvoiceTypeTransType invoiceTypeEnumId="InvoiceCreditMemo" organizationPartyId="DefaultSettings"
+            isPayable="N" acctgTransTypeEnumId="AttVendCreditMemo" glAccountId="121000000"/>
+    <mantle.ledger.config.InvoiceTypeTransType invoiceTypeEnumId="InvoiceCreditMemo" organizationPartyId="DefaultSettings"
+            isPayable="Y" acctgTransTypeEnumId="AttCreditMemo" glAccountId="212000000"/>
+    <mantle.ledger.config.InvoiceTypeTransType invoiceTypeEnumId="InvoiceReturn" organizationPartyId="DefaultSettings"
+            isPayable="N" acctgTransTypeEnumId="AttVendRtnInvoice" glAccountId="121000000"/>
+    <mantle.ledger.config.InvoiceTypeTransType invoiceTypeEnumId="InvoiceReturn" organizationPartyId="DefaultSettings"
+            isPayable="Y" acctgTransTypeEnumId="AttCustRtnInvoice" glAccountId="212000000"/>
+    <mantle.ledger.config.InvoiceTypeTransType invoiceTypeEnumId="InvoicePayroll" organizationPartyId="DefaultSettings"
+            isPayable="Y" acctgTransTypeEnumId="AttPayrollInvoice" glAccountId="212100000"/>
+    <!-- People P27 review: a receivable from a person who left (an overpayment the employer recovers, PayrollObligations.js
+        recoveryOf) is an InvoicePayroll from the organization; an existing database gets it from migrate#PayrollOrigin -->
+    <mantle.ledger.config.InvoiceTypeTransType invoiceTypeEnumId="InvoicePayroll" organizationPartyId="DefaultSettings"
+            isPayable="N" acctgTransTypeEnumId="AttPayrollInvoice" glAccountId="121000000"/>
+    <mantle.ledger.config.InvoiceTypeTransType invoiceTypeEnumId="InvoiceCommission" organizationPartyId="DefaultSettings"
+            isPayable="Y" acctgTransTypeEnumId="AttCommissionInvoice" glAccountId="212200000"/>
+    <mantle.ledger.config.InvoiceTypeTransType invoiceTypeEnumId="InvoiceTax" organizationPartyId="DefaultSettings"
+            isPayable="Y" acctgTransTypeEnumId="AttTaxInvoice" glAccountId="212300000"/>
+    <mantle.ledger.config.InvoiceTypeTransType invoiceTypeEnumId="InvoiceGarnishment" organizationPartyId="DefaultSettings"
+            isPayable="Y" acctgTransTypeEnumId="AttGarnishmentInvoice" glAccountId="212400000"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="410000000" direction="O" itemTypeEnumId="ItemSales" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="412000000" direction="O" itemTypeEnumId="ItemWorkEffort" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="412000000" direction="O" itemTypeEnumId="ItemTimeEntry" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="413000000" direction="O" itemTypeEnumId="ItemRental" organizationPartyId="DefaultSettings"/>
+    <!-- rental deposit to FinancialAccount, return of deposit as FA withdrawal -->
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="258100000" direction="O" itemTypeEnumId="ItemRentalDeposit" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="258200000" direction="I" itemTypeEnumId="ItemRentalDeposit" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="522000000" direction="O" itemTypeEnumId="ItemReplacement" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="522200000" direction="O" itemTypeEnumId="ItemDiscount" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="865000000" direction="I" itemTypeEnumId="ItemDiscount" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="522300000" direction="O" itemTypeEnumId="ItemDiscountAppease" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="865000000" direction="I" itemTypeEnumId="ItemDiscountAppease" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="522400000" direction="O" itemTypeEnumId="ItemSupplierDiscount" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="865000000" direction="I" itemTypeEnumId="ItemSupplierDiscount" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="254000000" direction="E" itemTypeEnumId="ItemDonation" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="834000000" direction="O" itemTypeEnumId="ItemFee" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="798000000" direction="I" itemTypeEnumId="ItemFee" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="419000000" direction="O" itemTypeEnumId="ItemMiscCharge" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="798000000" direction="I" itemTypeEnumId="ItemMiscCharge" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="224000000" direction="O" itemTypeEnumId="ItemSalesTax" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="745000000" direction="I" itemTypeEnumId="ItemSalesTax" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="224000000" direction="O" itemTypeEnumId="ItemVatTax" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="745000000" direction="I" itemTypeEnumId="ItemVatTax" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="419000000" direction="O" itemTypeEnumId="ItemSurcharge" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="419000000" direction="O" itemTypeEnumId="ItemAddtlFeature" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="419000000" direction="O" itemTypeEnumId="ItemWarranty" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="419000000" direction="O" itemTypeEnumId="ItemMkgtPkgAdj" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="412000000" direction="O" itemTypeEnumId="ItemServiceProduct" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="450000000" direction="O" itemTypeEnumId="ItemSalesThirdParty" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="500000000" direction="I" itemTypeEnumId="ItemSales" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="550000000" direction="I" itemTypeEnumId="ItemWorkEffort" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="550000000" direction="I" itemTypeEnumId="ItemTimeEntry" organizationPartyId="DefaultSettings"/>
+
+    <!-- For shipping of incoming inventory (a COGS account) -->
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="519100000" direction="I" itemTypeEnumId="ItemShipping" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="441000000" direction="O" itemTypeEnumId="ItemShipping" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="653100000" direction="I" itemTypeEnumId="ItemShippingOther" organizationPartyId="DefaultSettings"/>
+
+    <!-- NOTE: ItemProduct, ItemInventory, and ItemAsset are overridden by more specific accounts from AssetTypeGlAccount -->
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="149000000" direction="I" itemTypeEnumId="ItemProduct" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="411000000" direction="O" itemTypeEnumId="ItemProduct" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="149000000" direction="I" itemTypeEnumId="ItemInventory" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="411000000" direction="O" itemTypeEnumId="ItemInventory" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="139000000" direction="I" itemTypeEnumId="ItemAsset" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="814100000" direction="O" itemTypeEnumId="ItemAsset" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="789000000" direction="E" itemTypeEnumId="ItemExpense" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="621000000" direction="E" itemTypeEnumId="ItemExpAdvertising" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="796000000" direction="E" itemTypeEnumId="ItemExpCharitable" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="614110000" direction="E" itemTypeEnumId="ItemExpCommTelephone" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="614140000" direction="E" itemTypeEnumId="ItemExpCommCellular" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="614200000" direction="E" itemTypeEnumId="ItemExpCommNetwork" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631700000" direction="E" itemTypeEnumId="ItemExpCommissionFee" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="616300000" direction="E" itemTypeEnumId="ItemExpHosting" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="642000000" direction="E" itemTypeEnumId="ItemExpServAccount" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="641000000" direction="E" itemTypeEnumId="ItemExpServLegal" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="649000000" direction="E" itemTypeEnumId="ItemExpServLabor" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="652100000" direction="E" itemTypeEnumId="ItemExpOfficeSup" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="652100000" direction="E" itemTypeEnumId="ItemExpOfficePostage" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="612300000" direction="E" itemTypeEnumId="ItemExpLeaseVehicle" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="612400000" direction="E" itemTypeEnumId="ItemExpLeaseEquip" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="611110000" direction="E" itemTypeEnumId="ItemExpLeaseRealEst" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="612400000" direction="E" itemTypeEnumId="ItemExpLeaseOther" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="613400000" direction="E" itemTypeEnumId="ItemExpMaintVehicle" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="613200000" direction="E" itemTypeEnumId="ItemExpMaintEquip" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="613100000" direction="E" itemTypeEnumId="ItemExpMaintRealEst" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="613900000" direction="E" itemTypeEnumId="ItemExpMaintOther" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="791000000" direction="E" itemTypeEnumId="ItemExpInterestOther" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="791100000" direction="E" itemTypeEnumId="ItemExpInterestEquip" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="791200000" direction="E" itemTypeEnumId="ItemExpInterestVehi" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="791300000" direction="E" itemTypeEnumId="ItemExpInterestReal" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="691000000" direction="E" itemTypeEnumId="ItemExpInsBusiness" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="634100000" direction="E" itemTypeEnumId="ItemExpInsHealth" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="693000000" direction="E" itemTypeEnumId="ItemExpInsVehicle" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="694000000" direction="E" itemTypeEnumId="ItemExpInsEquipment" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="692000000" direction="E" itemTypeEnumId="ItemExpInsRealEst" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="694000000" direction="E" itemTypeEnumId="ItemExpInsOther" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="611210000" direction="E" itemTypeEnumId="ItemExpUtilHeating" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="611220000" direction="E" itemTypeEnumId="ItemExpUtilElec" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="611230000" direction="E" itemTypeEnumId="ItemExpUtilWater" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="611240000" direction="E" itemTypeEnumId="ItemExpUtilTrash" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="611250000" direction="E" itemTypeEnumId="ItemExpUtilVehFuel" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="652900000" direction="E" itemTypeEnumId="ItemExpSupplies" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="744000000" direction="E" itemTypeEnumId="ItemExpTaxesLic" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="789000000" direction="E" itemTypeEnumId="ItemExpOther" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="681200000" direction="E" itemTypeEnumId="ItemExpTravMealsEnt" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="681100000" direction="E" itemTypeEnumId="ItemExpTravLocal" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="681100000" direction="E" itemTypeEnumId="ItemExpTravAir" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="681100000" direction="E" itemTypeEnumId="ItemExpTravCarRental" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="681100000" direction="E" itemTypeEnumId="ItemExpTravOther" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="681100000" direction="E" itemTypeEnumId="ItemExpTravLodging" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631700000" direction="E" itemTypeEnumId="ItemCommission" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631800000" direction="E" itemTypeEnumId="ItemCommissionAdj" organizationPartyId="DefaultSettings"/>
+
+    <!-- Accounts Receivable Write-off -->
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="782100000" direction="O" itemTypeEnumId="ItemWriteOff" organizationPartyId="DefaultSettings"/>
+    <!-- Accounts Payable Write-off -->
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="862000000" direction="I" itemTypeEnumId="ItemWriteOff" organizationPartyId="DefaultSettings"/>
+    <!-- Prompt Payment Discount (on Receivable, applied after invoice as opposed to ItemDiscount item type) -->
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="521000000" direction="O" itemTypeEnumId="ItemPromptDiscount" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="864000000" direction="I" itemTypeEnumId="ItemPromptDiscount" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="442000000" direction="O" itemTypeEnumId="ItemLateCharge" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="517000000" direction="I" itemTypeEnumId="ItemLateCharge" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="421000000" direction="O" itemTypeEnumId="ItemReturnAdjust" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="532000000" direction="I" itemTypeEnumId="ItemReturnAdjust" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="522100000" direction="E" itemTypeEnumId="ItemCouponCredit" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="522200000" direction="E" itemTypeEnumId="ItemPromoDiscount" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="523100000" direction="E" itemTypeEnumId="ItemSlottingFees" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="525100000" direction="E" itemTypeEnumId="ItemFreeFills" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="621000000" direction="E" itemTypeEnumId="ItemAdjAdvertising" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="624000000" direction="E" itemTypeEnumId="ItemAdjJointAdv" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="522100000" direction="E" itemTypeEnumId="ItemChargebackAdjust" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="527000000" direction="E" itemTypeEnumId="ItemShrinkage" organizationPartyId="DefaultSettings"/>
+
+    <!-- Payroll Item Types -->
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemPayrollIncome" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemHourlyEarnings" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemPieceworkEarnings" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemPieceOrHourlyEarnings" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemPiecePlusHourlyEarnings" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemPieceMinWageAdj" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemShiftPremiumEarnings" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemBreakHourlyEarnings" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemBreakRrpEarnings" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemNonproductiveEarnings" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemOvertimePremium" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemDoubleTimePremium" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="632100000" direction="I" itemTypeEnumId="ItemVacationHourly" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="632300000" direction="I" itemTypeEnumId="ItemSickHourly" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="632500000" direction="I" itemTypeEnumId="ItemPtoHourly" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="632700000" direction="I" itemTypeEnumId="ItemHolidayHourly" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemSalary" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="632100000" direction="I" itemTypeEnumId="ItemVacationSalary" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="632300000" direction="I" itemTypeEnumId="ItemSickSalary" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="632500000" direction="I" itemTypeEnumId="ItemPtoSalary" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="632700000" direction="I" itemTypeEnumId="ItemHolidaySalary" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631900000" direction="I" itemTypeEnumId="ItemBonusDisc" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemBonusNonDisc" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631600000" direction="I" itemTypeEnumId="ItemPrlCommission" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="151400000" direction="I" itemTypeEnumId="ItemAdvancePay" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemPayAdjOverpay" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="631100000" direction="I" itemTypeEnumId="ItemPayAdjPay" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="260000000" direction="O" itemTypeEnumId="ItemAdvancePay" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="260000000" direction="O" itemTypeEnumId="ItemPayAdjPay" organizationPartyId="DefaultSettings"/>
+
+    <!-- NOTE: may want to consider not mapping a default for ItemReimbursement, should generally be more specific expense type -->
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="789000000" direction="E" itemTypeEnumId="ItemReimbursement" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="" direction="E" itemTypeEnumId="ItemPayrollDeduct" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222800000" direction="E" itemTypeEnumId="ItemDed125Compy" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222800000" direction="E" itemTypeEnumId="ItemDed125Ppo" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222800000" direction="E" itemTypeEnumId="ItemDed125Hsa" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="151400000" direction="E" itemTypeEnumId="ItemDedAdvRepay" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="254000000" direction="E" itemTypeEnumId="ItemDedCharity" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222700000" direction="E" itemTypeEnumId="ItemDedChildGarnish" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="" direction="E" itemTypeEnumId="ItemDedMisc" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222600000" direction="E" itemTypeEnumId="ItemDed401kEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222600000" direction="E" itemTypeEnumId="ItemDedRoth401kEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222600000" direction="E" itemTypeEnumId="ItemDedRothIraEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222600000" direction="E" itemTypeEnumId="ItemDedSimpleIraEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="" direction="E" itemTypeEnumId="ItemDedUnion" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="" direction="E" itemTypeEnumId="ItemDedUnpaidTimeOff" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222700000" direction="E" itemTypeEnumId="ItemDedWageGarnish" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222000000" direction="E" itemTypeEnumId="ItemPayrollTaxes" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222110000" direction="E" itemTypeEnumId="ItemTaxFederalWhold" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222120000" direction="E" itemTypeEnumId="ItemTaxSocialSecEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222130000" direction="E" itemTypeEnumId="ItemTaxMedEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222130000" direction="E" itemTypeEnumId="ItemTaxAddtlMedEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222140000" direction="E" itemTypeEnumId="ItemTaxFedPensionEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222150000" direction="E" itemTypeEnumId="ItemTaxFutaEmpe" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222410000" direction="E" itemTypeEnumId="ItemTaxStateWhold" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222420000" direction="E" itemTypeEnumId="ItemTaxStateDisInsEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222430000" direction="E" itemTypeEnumId="ItemTaxStateMiscEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222440000" direction="E" itemTypeEnumId="ItemTaxStatePensionEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222450000" direction="E" itemTypeEnumId="ItemTaxStateUnInsEmpe" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222510000" direction="E" itemTypeEnumId="ItemTaxCountyWhold" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222510000" direction="E" itemTypeEnumId="ItemTaxCbt" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222520000" direction="E" itemTypeEnumId="ItemTaxOccPrivEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222520000" direction="E" itemTypeEnumId="ItemTaxHeadEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222520000" direction="E" itemTypeEnumId="ItemTaxSchoolDistEmpe" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="222520000" direction="E" itemTypeEnumId="ItemTaxSurtaxEmpe" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="633710000" direction="E" itemTypeEnumId="ItemPrlExpTaxFutaEmpr" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="633210000" direction="E" itemTypeEnumId="ItemPrlExpTaxSocialSecEmpr" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="633220000" direction="E" itemTypeEnumId="ItemPrlExpTaxMedEmpr" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="633230000" direction="E" itemTypeEnumId="ItemPrlExpTaxFedPensionEmpr" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="633270000" direction="E" itemTypeEnumId="ItemPrlExpTaxStatePensionEmpr" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="633720000" direction="E" itemTypeEnumId="ItemPrlExpTaxStateUnInsEmpr" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="633250000" direction="E" itemTypeEnumId="ItemPrlExpTaxStateDisInsEmpr" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="633260000" direction="E" itemTypeEnumId="ItemPrlExpTaxStateMiscEmpr" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="633290000" direction="E" itemTypeEnumId="ItemPrlExpTaxOccPrivEmpr" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="633290000" direction="E" itemTypeEnumId="ItemPrlExpTaxHeadEmpr" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="633290000" direction="E" itemTypeEnumId="ItemPrlExpTaxSchoolDistEmpr" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.ItemTypeGlAccount glAccountId="633290000" direction="E" itemTypeEnumId="ItemPrlExpTaxSurtaxEmpr" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="335000000" isApplied="E" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtDisbursement"/><!-- Retained Earnings -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="126000000" isApplied="N" isPayable="N" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtRefund"/><!-- AR Unapplied -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="216000000" isApplied="N" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtRefund"/><!-- AP Unapplied -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="258300000" isApplied="N" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtInternalTransfer"/><!-- Outgoing cash in transit -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="258300000" isApplied="N" isPayable="N" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtInternalTransfer"/><!-- Incoming cash in transit -->
+
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="121000000" isApplied="Y" isPayable="N" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtInvoicePayment"/><!-- AR (applied) -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="126000000" isApplied="N" isPayable="N" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtInvoicePayment"/><!-- AR Unapplied -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="212000000" isApplied="Y" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtInvoicePayment"/><!-- AP (applied) -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="216000000" isApplied="N" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtInvoicePayment"/><!-- AP Unapplied -->
+    <!-- People P27 (F69): a payment run pays a payroll invoice as PtPayrollPayment, as create#InvoicePayment does: the payroll
+        payable applied, the payables unapplied account until a bank file delivers it (an existing database: migrate#PayrollOrigin,
+        data/10-seed/UpgradePayrollPosting.xml) -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="212100000" isApplied="Y" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtPayrollPayment"/><!-- Payroll payable (applied) -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="216000000" isApplied="N" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtPayrollPayment"/><!-- AP Unapplied -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="258100000" isApplied="E" isPayable="N" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtFinancialAccount"/><!-- Financial Account In Transit Deposits -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="258200000" isApplied="E" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtFinancialAccount"/><!-- Financial Account In Transit Withdrawals -->
+
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="121000000" isApplied="Y" isPayable="N" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtPrePayment"/><!-- AR (applied) -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="126000000" isApplied="N" isPayable="N" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtPrePayment"/><!-- AR Unapplied -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="212000000" isApplied="Y" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtPrePayment"/><!-- AP (applied) -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="151000000" isApplied="N" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtPrePayment"/><!-- Prepaid Expense -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="121000000" isApplied="Y" isPayable="N" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtPrePaymentInventory"/><!-- AR (applied) -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="126000000" isApplied="N" isPayable="N" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtPrePaymentInventory"/><!-- AR Unapplied -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="212000000" isApplied="Y" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtPrePaymentInventory"/><!-- AP (applied) -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="147000000" isApplied="N" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtPrePaymentInventory"/><!-- Prepaid Inventory -->
+
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="111100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiAch" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="111100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiAmazonPay" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="110000000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiBitcoinWallet" isPayable="E"/><!-- currency issue, possible special account -->
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="111100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiCreditCard" isPayable="E"/><!-- NOTE: to use the CC In Transit account set to 122000000 -->
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="111100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiDebitCard" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="251000000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiGiftCard" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="251000000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiGiftCertificate" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="111100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiCash" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="111100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiFinancialAccount" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="111100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiPersonalCheck" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="111100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiCompanyCheck" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="111100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiCertifiedCheck" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="111100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiMoneyOrder" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="111100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiCompanyAccount" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="251000000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiBillingAccount" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="111100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiCod" isPayable="E"/>
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="111100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiWireTransfer" isPayable="E"/>
+
+    <!-- Using Payment for these is messy, use adjust#Invoice with appropriate item type instead:
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="782100000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiWriteOff" isPayable="N"/><!- - Accounts Receivable Write-off - ->
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="862000000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiWriteOff" isPayable="Y"/><!- - Accounts Payable Write-off - ->
+    <mantle.ledger.config.PaymentInstrumentGlAccount glAccountId="521000000" organizationPartyId="DefaultSettings"
+            paymentInstrumentEnumId="PiDiscount" isPayable="N"/><!- - Prompt Payment Discount (on Receivable, applied after invoice as opposed to ItemDiscount item type) - ->
+    -->
+
+    <!-- <mantle.ledger.config.CreditCardTypeGlAccount creditCardTypeEnumId="CctVisa" organizationPartyId="DefaultSettings" glAccountId="122000000"/> -->
+
+    <mantle.ledger.config.FinancialAccountTypeGlAccount glAccountId="251100000" finAccountTypeId="CustomerCredit" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.FinancialAccountTypeGlAccount glAccountId="251200000" finAccountTypeId="GiftCard" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.FinancialAccountTypeGlAccount glAccountId="251200000" finAccountTypeId="GiftCertificate" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.FinancialAccountTypeGlAccount glAccountId="251500000" finAccountTypeId="DepositAccount" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.FinancialAccountTypeGlAccount glAccountId="252000000" finAccountTypeId="SupplierDeposit" organizationPartyId="DefaultSettings"/>
+    <!-- <mantle.ledger.config.FinancialAccountTypeGlAccount glAccountId="251500000" finAccountTypeId="BankAccount" organizationPartyId="DefaultSettings"/> -->
+    <!-- <mantle.ledger.config.FinancialAccountTypeGlAccount glAccountId="251500000" finAccountTypeId="Investment" organizationPartyId="DefaultSettings"/> -->
+    <mantle.ledger.config.FinancialAccountTypeGlAccount glAccountId="151400000" finAccountTypeId="EmployeeAdvance" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.FinancialAccountReasonGlAccount glAccountId="121000000" reasonEnumId="FatrPurchase" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.FinancialAccountReasonGlAccount glAccountId="258100000" reasonEnumId="FatrInitDeposit" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.FinancialAccountReasonGlAccount glAccountId="258100000" reasonEnumId="FatrReplenish" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.FinancialAccountReasonGlAccount glAccountId="258200000" reasonEnumId="FatrRefund" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.FinancialAccountReasonGlAccount glAccountId="258200000" reasonEnumId="FatrDisbursement" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.FinancialAccountReasonGlAccount glAccountId="258300000" reasonEnumId="FatrTransfer" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.FinancialAccountReasonGlAccount glAccountId="430000000" reasonEnumId="FatrCsCredit" organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.FinancialAccountReasonGlAccount glAccountId="784000000" reasonEnumId="FatrErrorAdjust" organizationPartyId="DefaultSettings"/>
+
+    <mantle.ledger.config.AssetTypeGlAccount assetTypeEnumId="AstTpInventory" classEnumId="" organizationPartyId="DefaultSettings"
+            assetGlAccountId="141000000" wipAssetGlAccountId="141200000" receiptGlAccountId="149000000" issuanceGlAccountId="512000000"
+            transferGlAccountId="142000000" profitGlAccountId="411000000" lossGlAccountId="525000000"
+            receiptTransTypeEnumId="AttInventoryReceipt" issuanceTransTypeEnumId="AttInventoryIssuance"
+            shrinkageGlAccountId="527000000" foundGlAccountId="814300000"/>
+    <mantle.ledger.config.AssetTypeGlAccount assetTypeEnumId="AstTpInventory" classEnumId="AsClsInventoryRaw" organizationPartyId="DefaultSettings"
+            assetGlAccountId="141100000" wipAssetGlAccountId="141200000" receiptGlAccountId="149100000" issuanceGlAccountId="512000000"
+            transferGlAccountId="142000000" profitGlAccountId="411000000" lossGlAccountId="525000000"
+            receiptTransTypeEnumId="AttInventoryReceipt" issuanceTransTypeEnumId="AttInventoryIssuance"
+            shrinkageGlAccountId="527000000" foundGlAccountId="814300000"/>
+    <!-- NOTE: sub-assemblies are tracked in the same account as raw materials (WIP is for inventory consumed in a run and moved to finished good or back to raw materials when produced from a run) -->
+    <mantle.ledger.config.AssetTypeGlAccount assetTypeEnumId="AstTpInventory" classEnumId="AsClsInventorySub" organizationPartyId="DefaultSettings"
+            assetGlAccountId="141100000" wipAssetGlAccountId="141200000" receiptGlAccountId="149100000" issuanceGlAccountId="512000000"
+            transferGlAccountId="142000000" profitGlAccountId="411000000" lossGlAccountId="525000000"
+            receiptTransTypeEnumId="AttInventoryReceipt" issuanceTransTypeEnumId="AttInventoryIssuance"
+            shrinkageGlAccountId="527000000" foundGlAccountId="814300000"/>
+    <mantle.ledger.config.AssetTypeGlAccount assetTypeEnumId="AstTpInventory" classEnumId="AsClsInventoryFin" organizationPartyId="DefaultSettings"
+            assetGlAccountId="141300000" wipAssetGlAccountId="141200000" receiptGlAccountId="149300000" issuanceGlAccountId="512000000"
+            transferGlAccountId="142000000" profitGlAccountId="411000000" lossGlAccountId="525000000"
+            receiptTransTypeEnumId="AttInventoryReceipt" issuanceTransTypeEnumId="AttInventoryIssuance"
+            shrinkageGlAccountId="527000000" foundGlAccountId="814300000"/>
+
+    <!-- TODO: better handle supplies that are tracked (expensed but with Asset records)
+    <mantle.ledger.config.AssetTypeGlAccount assetTypeEnumId="AstTpSupplies" classEnumId="" organizationPartyId="DefaultSettings"
+            assetGlAccountId="" receiptGlAccountId="" issuanceGlAccountId="" transferGlAccountId=""
+            depreciationGlAccountId="" profitGlAccountId="" lossGlAccountId=""
+            receiptTransTypeEnumId="" issuanceTransTypeEnumId=""/>
+    -->
+
+    <mantle.ledger.config.AssetTypeGlAccount assetTypeEnumId="AstTpFixed" classEnumId="" organizationPartyId="DefaultSettings"
+            assetGlAccountId="131000000" receiptGlAccountId="139000000" issuanceGlAccountId="253000000" transferGlAccountId=""
+            accDepreciationGlAccountId="182000000" depreciationGlAccountId="672000000" profitGlAccountId="814100000" lossGlAccountId="793100000"
+            receiptTransTypeEnumId="AttAssetReceipt" issuanceTransTypeEnumId="AttAssetIssuance"
+            shrinkageGlAccountId="793200000" foundGlAccountId="814200000"/>
+
+    <!-- TODO more detailed mappings for various Equipment classes -->
+    <mantle.ledger.config.AssetTypeGlAccount assetTypeEnumId="AstTpEquipment" classEnumId="" organizationPartyId="DefaultSettings"
+            assetGlAccountId="131100000" receiptGlAccountId="139100000" issuanceGlAccountId="253100000" transferGlAccountId=""
+            accDepreciationGlAccountId="182000000" depreciationGlAccountId="672000000" profitGlAccountId="814100000" lossGlAccountId="793100000"
+            receiptTransTypeEnumId="AttAssetReceipt" issuanceTransTypeEnumId="AttAssetIssuance"
+            shrinkageGlAccountId="793200000" foundGlAccountId="814200000"/>
+
+    <mantle.ledger.config.AssetTypeGlAccount assetTypeEnumId="AstTpRental" classEnumId="" organizationPartyId="DefaultSettings"
+            assetGlAccountId="131100000" receiptGlAccountId="139100000" issuanceGlAccountId="253100000" transferGlAccountId=""
+            accDepreciationGlAccountId="182000000" depreciationGlAccountId="672000000" profitGlAccountId="814100000" lossGlAccountId="793100000"
+            receiptTransTypeEnumId="AttAssetReceipt" issuanceTransTypeEnumId="AttAssetIssuance"
+            shrinkageGlAccountId="793200000" foundGlAccountId="814200000"/>
+    <!-- NOTE: rental of assets profit goes to 403000000, handled through ItemRental invoice item mapping -->
+
+    <mantle.ledger.config.AssetTypeGlAccount assetTypeEnumId="AstTpRealEstate" classEnumId="" organizationPartyId="DefaultSettings"
+            assetGlAccountId="132000000" receiptGlAccountId="139200000" issuanceGlAccountId="253200000" transferGlAccountId=""
+            accDepreciationGlAccountId="181000000" depreciationGlAccountId="671000000" profitGlAccountId="814100000" lossGlAccountId="793100000"
+            receiptTransTypeEnumId="AttAssetReceipt" issuanceTransTypeEnumId="AttAssetIssuance"
+            shrinkageGlAccountId="793200000" foundGlAccountId="814200000"/>
+    <mantle.ledger.config.AssetTypeGlAccount assetTypeEnumId="AstTpInvRealEstate" classEnumId="" organizationPartyId="DefaultSettings"
+            assetGlAccountId="132800000" receiptGlAccountId="139200000" issuanceGlAccountId="253200000" transferGlAccountId=""
+            accDepreciationGlAccountId="181800000" depreciationGlAccountId="671800000" profitGlAccountId="814100000" lossGlAccountId="793100000"
+            receiptTransTypeEnumId="AttAssetReceipt" issuanceTransTypeEnumId="AttAssetIssuance"
+            shrinkageGlAccountId="793200000" foundGlAccountId="814200000"/>
+
+    <mantle.ledger.config.AssetTypeGlAccount assetTypeEnumId="AstTpBearerBiological" classEnumId="" organizationPartyId="DefaultSettings"
+            assetGlAccountId="134600000" receiptGlAccountId="139300000" issuanceGlAccountId="253300000" transferGlAccountId=""
+            accDepreciationGlAccountId="183500000" depreciationGlAccountId="673500000" profitGlAccountId="814100000" lossGlAccountId="793100000"
+            receiptTransTypeEnumId="AttAssetReceipt" issuanceTransTypeEnumId="AttAssetIssuance"
+            shrinkageGlAccountId="793200000" foundGlAccountId="814200000"/>
+    <mantle.ledger.config.AssetTypeGlAccount assetTypeEnumId="AstTpBiological" classEnumId="" organizationPartyId="DefaultSettings"
+            assetGlAccountId="134500000" receiptGlAccountId="139300000" issuanceGlAccountId="253300000" transferGlAccountId=""
+            accDepreciationGlAccountId="183500000" depreciationGlAccountId="673500000" profitGlAccountId="814100000" lossGlAccountId="793100000"
+            receiptTransTypeEnumId="AttAssetReceipt" issuanceTransTypeEnumId="AttAssetIssuance"
+            shrinkageGlAccountId="793200000" foundGlAccountId="814200000"/>
+
+    <!-- The default accounts of project cost posting (OtherAutoPostServices.post#WorkEffortCost): cost of services sold, and as
+        the labor clearing account the employee wage expense that payroll debits (631100000, where the payroll earnings items
+        post), so the reclass moves approved project time from wage expense to project cost. An organization whose payroll
+        posts elsewhere, or that keeps an absorbed-labor account, maps its own in PostingDefaults. -->
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="550000000" glAccountTypeEnumId="GatProjectLaborCost"
+            organizationPartyId="DefaultSettings"/>
+    <mantle.ledger.config.GlAccountTypeDefault glAccountId="631100000" glAccountTypeEnumId="GatLaborClearing"
+            organizationPartyId="DefaultSettings"/>
+</entity-facade-xml>

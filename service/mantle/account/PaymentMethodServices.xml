@@ -622,7 +622,7 @@ along with this software (see the LICENSE.md file). If not, see
             whole number gets its last four digits in its place (create#BankAccount's label). A stored value that starts
             with a colon is encrypted already, so this does nothing once done, on a new database, or with no crypt pass
             (the facade then stores plain text). Until it runs, a plain number of an even count of digits reads as
-            _DECRYPT_FAILED_ (it looks like legacy hex ciphertext). A data load calls it (data/AccountingPaymentSeedData.xml).
+            _DECRYPT_FAILED_ (it looks like legacy hex ciphertext). A data load calls it (data/10-seed/Accounting.xml).
             Each row on its own: one that fails is logged and counted, and the rest go on.</description>
         <out-parameters>
             <parameter name="migratedCount" type="Integer"/>

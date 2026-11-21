@@ -842,7 +842,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="disabled" type="text-indicator"/>
         <relationship type="one" related="moqui.service.message.SystemMessageType" short-alias="type"/>
         <seed-data>
-            <!-- the registered connectors are data/StoreChannelSetupData.xml's, after their message types -->
+            <!-- the registered connectors are data/10-seed/MarketingAndCommerce.xml's, after their message types -->
             <moqui.basic.EnumerationType description="Store channel import format" enumTypeId="StoreChannelImportFormat"/>
             <moqui.basic.Enumeration enumId="SciCsv" description="Channel orders, CSV (one row per line)" enumTypeId="StoreChannelImportFormat"/>
             <moqui.basic.Enumeration enumId="SciJson" description="Channel orders, JSON (as the API takes them)" enumTypeId="StoreChannelImportFormat"/>

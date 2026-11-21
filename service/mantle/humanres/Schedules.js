@@ -14,7 +14,7 @@
 // - an employment follows a schedule from a date through its assignment (EmploymentAssignment.workingScheduleId, with
 //   holidayCategoryId in place of the schedule's calendar), so the history of what a person was planned to work stays readable;
 // - a holiday calendar is a WorkEffortCategory of type WcatHoliday, an employer's (ownerPartyId) or shared by every employer (no
-//   owner, as the US calendars of HolidayUsaData; none is assigned to anyone by default, F31); a holiday is an all-day WepHoliday
+//   owner, as the US calendars in 20-install/GeographyNorthAmerica.xml; none is assigned to anyone by default, F31); a holiday is an all-day WepHoliday
 //   WorkEffort on its day (allDayStart) in the calendar (WorkEffortCategoryAppl), with no owner, so the employer-owned holiday
 //   convention (a WepHoliday owned by the organization, which Projects' capacity and BusinessTime read for everyone of it) does
 //   not read it: a calendar's holidays take the days of the schedules that name it.

@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="demo">
+    <!-- NOTE 1265184000000 = 2010-02-03 00:00:00 US/Pacific -->
+
+    <!-- Demo Features -->
+    <mantle.product.feature.ProductFeature productFeatureId="ColorBlue" productFeatureTypeEnumId="PftColor" description="Blue" abbrev="BU"/>
+    <mantle.product.feature.ProductFeature productFeatureId="ColorBlack" productFeatureTypeEnumId="PftColor" description="Black" abbrev="BL"/>
+    <mantle.product.feature.ProductFeature productFeatureId="ColorRed" productFeatureTypeEnumId="PftColor" description="Red" abbrev="RD"/>
+    <mantle.product.feature.ProductFeature productFeatureId="ColorGreen" productFeatureTypeEnumId="PftColor" description="Green" abbrev="GR"/>
+    <mantle.product.feature.ProductFeature productFeatureId="ColorYellow" productFeatureTypeEnumId="PftColor" description="Yellow" abbrev="YL"/>
+    <mantle.product.feature.ProductFeature productFeatureId="ColorWhite" productFeatureTypeEnumId="PftColor" description="White" abbrev="WH"/>
+
+    <mantle.product.feature.ProductFeature productFeatureId="SizeSmall" productFeatureTypeEnumId="PftSize" description="Small" abbrev="SM"/>
+    <mantle.product.feature.ProductFeature productFeatureId="SizeMedium" productFeatureTypeEnumId="PftSize" description="Medium" abbrev="MD"/>
+    <mantle.product.feature.ProductFeature productFeatureId="SizeLarge" productFeatureTypeEnumId="PftSize" description="Large" abbrev="LG"/>
+    <mantle.product.feature.ProductFeature productFeatureId="SizeXL" productFeatureTypeEnumId="PftSize" description="Extra Large" abbrev="XL"/>
+
+    <!-- Ziziwork Retail Wiki/Content -->
+    <moqui.resource.DbResource filename="Ziziwork" isFile="N" resourceId="Ziziwork" parentResourceId=""/>
+    <moqui.resource.DbResource filename="retail" isFile="N" resourceId="zzw_retail" parentResourceId="Ziziwork"/>
+    <moqui.resource.DbResource filename="content.html" isFile="Y" resourceId="zzw_content" parentResourceId="zzw_retail">
+        <file mimeType="text/html" versionName="01" rootVersionName="01">
+            <fileData><![CDATA[<h3>Welcome to Ziziwork Retail</h3>]]></fileData>
+            <histories versionName="01" versionDate="1485028800000" isDiff="N"/>
+        </file>
+    </moqui.resource.DbResource>
+    <!-- this is the directory to put all site content under -->
+    <moqui.resource.DbResource filename="content" isFile="N" resourceId="zzw_content_dir" parentResourceId="zzw_retail"/>
+    <!-- WikiSpace and root page: its published pages are knowledge articles, shown by the Support app's CustomerArticle on the
+        demo Shop site (impl-shop P3, impl-commerce F17 and F56; there is no PopRestStore /popc mount); its files have no
+        public address -->
+    <moqui.resource.wiki.WikiSpace wikiSpaceId="ZZW_RETAIL" description="Content for Ziziwork Retail" restrictView="N" allowAnyHtml="Y"
+            rootPageLocation="dbresource://Ziziwork/retail/content.html" decoratorScreenLocation=""
+            publicPageUrl="https://shop.zizi.localhost/support/CustomerArticle?wikiPageId=${wikiPageId}" publicAttachmentUrl=""/>
+    <moqui.resource.wiki.WikiPage wikiPageId="zzw_content" wikiSpaceId="ZZW_RETAIL" pagePath="">
+        <histories historySeqId="01" versionName="01" changeDateTime="1485028800000"/>
+    </moqui.resource.wiki.WikiPage>
+    <!-- About Us -->
+    <moqui.resource.DbResource filename="about.html" isFile="Y" resourceId="zzw_about" parentResourceId="zzw_content_dir">
+        <file mimeType="text/html" versionName="01" rootVersionName="01">
+            <fileData><![CDATA[
+            <h1>About Us</h1>
+            <p>Ziziwork Retail takes busy work to the Z! Innovative products since 2010 to make your work and life easier.</p>
+            ]]></fileData>
+            <histories versionName="01" versionDate="1485028800000" isDiff="N"/>
+        </file>
+    </moqui.resource.DbResource>
+    <moqui.resource.wiki.WikiPage wikiPageId="zzw_about" wikiSpaceId="ZZW_RETAIL" pagePath="about" publishedVersionName="01">
+        <histories historySeqId="01" versionName="01" changeDateTime="1485028800000"/>
+    </moqui.resource.wiki.WikiPage>
+    <moqui.resource.wiki.WikiPageAlias wikiSpaceId="ZZW_RETAIL" aliasPath="about_alias" wikiPageId="zzw_about"/>
+    <!-- Contact Us -->
+    <moqui.resource.DbResource filename="contact.html" isFile="Y" resourceId="zzw_contact" parentResourceId="zzw_content_dir">
+        <file mimeType="text/html" versionName="01" rootVersionName="01">
+            <fileData><![CDATA[
+            <h1>Contact Us</h1>
+            <p>Ziziwork Retail is an imaginary demonstration company. To contact us close your eyes and imagine.</p>
+            ]]></fileData>
+            <histories versionName="01" versionDate="1485028800000" isDiff="N"/>
+        </file>
+    </moqui.resource.DbResource>
+    <moqui.resource.wiki.WikiPage wikiPageId="zzw_contact" wikiSpaceId="ZZW_RETAIL" pagePath="contact" publishedVersionName="01">
+        <histories historySeqId="01" versionName="01" changeDateTime="1485028800000"/>
+    </moqui.resource.wiki.WikiPage>
+
+    <!-- Ziziwork Retail Template Wiki Space -->
+    <moqui.resource.DbResource filename="templates.html" isFile="Y" resourceId="zzwr_templates" parentResourceId="zzw_retail">
+        <file mimeType="text/html" versionName="01" rootVersionName="01">
+            <fileData><![CDATA[<h3>Ziziwork Retail eCommerce Templates</h3>]]></fileData>
+            <histories versionName="01" versionDate="1485028800000" isDiff="N"/>
+        </file>
+    </moqui.resource.DbResource>
+    <!-- this is the directory to put all site templates under -->
+    <moqui.resource.DbResource filename="templates" isFile="N" resourceId="zzwr_templates_dir" parentResourceId="zzw_retail"/>
+    <!-- WikiSpace and root page -->
+    <moqui.resource.wiki.WikiSpace wikiSpaceId="ZZWR_TMP" description="Templates for Ziziwork Retail eCommerce" restrictView="N" allowAnyHtml="Y"
+            rootPageLocation="dbresource://Ziziwork/retail/templates.html" decoratorScreenLocation=""/>
+    <moqui.resource.wiki.WikiPage wikiPageId="zzwr_templates" wikiSpaceId="ZZWR_TMP" pagePath="">
+        <histories historySeqId="01" versionName="01" changeDateTime="1485028800000"/></moqui.resource.wiki.WikiPage>
+
+    <!-- server and client pages -->
+    <moqui.resource.DbResource filename="server" isFile="N" resourceId="zzwrt_server_dir" parentResourceId="zzwr_templates_dir"/>
+    <moqui.resource.DbResource filename="server.html" isFile="Y" resourceId="zzwrt_server" parentResourceId="zzwr_templates_dir">
+        <file mimeType="text/html" versionName="01" rootVersionName="01">
+            <fileData><![CDATA[<h3>Ziziwork Retail eCommerce Templates - Server</h3>]]></fileData>
+            <histories versionName="01" versionDate="1485028800000" isDiff="N"/>
+        </file>
+    </moqui.resource.DbResource>
+    <moqui.resource.wiki.WikiPage wikiPageId="zzwrt_server" wikiSpaceId="ZZWR_TMP" pagePath="server">
+        <histories historySeqId="01" versionName="01" changeDateTime="1485028800000"/></moqui.resource.wiki.WikiPage>
+    <moqui.resource.DbResource filename="client" isFile="N" resourceId="zzwrt_client_dir" parentResourceId="zzwr_templates_dir"/>
+    <moqui.resource.DbResource filename="client.html" isFile="Y" resourceId="zzwrt_client" parentResourceId="zzwr_templates_dir">
+        <file mimeType="text/html" versionName="01" rootVersionName="01">
+            <fileData><![CDATA[<h3>Ziziwork Retail eCommerce Templates - Client</h3>]]></fileData>
+            <histories versionName="01" versionDate="1485028800000" isDiff="N"/>
+        </file>
+    </moqui.resource.DbResource>
+    <moqui.resource.wiki.WikiPage wikiPageId="zzwrt_client" wikiSpaceId="ZZWR_TMP" pagePath="client">
+        <histories historySeqId="01" versionName="01" changeDateTime="1485028800000"/></moqui.resource.wiki.WikiPage>
+
+    <!-- demo override server and client footer pages -->
+    <!-- the server footer is an html page as the client one is: a wiki page renders by its type, never as a template
+        (plans/Security-Review.md SEC-SCR-81), so it names no signed-in user -->
+    <moqui.resource.DbResource filename="footer.html" isFile="Y" resourceId="zzwr_srv_footer" parentResourceId="zzwrt_server_dir">
+        <file mimeType="text/html" versionName="01" rootVersionName="01">
+            <fileData><![CDATA[
+            <footer class="footer"><div class="container">
+                <p class="text-center">Built on Moqui Framework</p>
+                <p class="text-right text-muted"><small>from wiki server content, clear store config to see default</small></p>
+            </div></footer>
+            ]]></fileData>
+            <histories versionName="01" versionDate="1485028800000" isDiff="N"/>
+        </file>
+    </moqui.resource.DbResource>
+    <moqui.resource.wiki.WikiPage wikiPageId="zzwr_srv_footer" wikiSpaceId="ZZWR_TMP" pagePath="server/footer" publishedVersionName="01">
+        <histories historySeqId="01" versionName="01" changeDateTime="1485028800000"/></moqui.resource.wiki.WikiPage>
+    <moqui.resource.DbResource filename="footer.html" isFile="Y" resourceId="zzwr_clt_footer" parentResourceId="zzwrt_client_dir">
+        <file mimeType="text/html" versionName="01" rootVersionName="01">
+            <fileData><![CDATA[
+            <footer class="footer"><div class="container">
+                <p class="text-center">Built on Moqui Framework</p>
+                <p class="text-right text-muted"><small>from wiki client content, clear store config to see default</small></p>
+            </div></footer>
+            ]]></fileData>
+            <histories versionName="01" versionDate="1485028800000" isDiff="N"/>
+        </file>
+    </moqui.resource.DbResource>
+    <moqui.resource.wiki.WikiPage wikiPageId="zzwr_clt_footer" wikiSpaceId="ZZWR_TMP" pagePath="client/footer" publishedVersionName="01">
+        <histories historySeqId="01" versionName="01" changeDateTime="1485028800000"/></moqui.resource.wiki.WikiPage>
+
+    <!-- Ziziwork Retail Warehouse Facility -->
+    <mantle.facility.Facility facilityId="ZIRET_WH" facilityTypeEnumId="FcTpWarehouse" assetAllowIssueOverQoh="Y"
+            ownerPartyId="ORG_ZIZI_RETAIL" facilityName="Ziziwork Retail Warehouse">
+        <contactMechs contactMechId="ORG_ZIZI_RTL_SA" contactMechPurposeId="PostalPrimary"/>
+        <contactMechs contactMechId="ORG_ZIZI_RTL_PT" contactMechPurposeId="PhonePrimary"/>
+
+        <locations locationTypeEnumId="FltPick" locationSeqId="01010101" sequenceNum="1" areaId="01" aisleId="01" sectionId="01" levelId="01" positionId=""/>
+        <locations locationTypeEnumId="FltPick" locationSeqId="01010201" sequenceNum="2" areaId="01" aisleId="01" sectionId="02" levelId="01" positionId=""/>
+        <locations locationTypeEnumId="FltPick" locationSeqId="01010301" sequenceNum="3" areaId="01" aisleId="01" sectionId="03" levelId="01" positionId=""/>
+        <locations locationTypeEnumId="FltPick" locationSeqId="01010401" sequenceNum="4" areaId="01" aisleId="01" sectionId="04" levelId="01" positionId=""/>
+        <locations locationTypeEnumId="FltPick" locationSeqId="01010501" sequenceNum="5" areaId="01" aisleId="01" sectionId="05" levelId="01" positionId=""/>
+        <locations locationTypeEnumId="FltPick" locationSeqId="01020101" sequenceNum="6" areaId="01" aisleId="02" sectionId="01" levelId="01" positionId=""/>
+        <locations locationTypeEnumId="FltPick" locationSeqId="01020201" sequenceNum="7" areaId="01" aisleId="02" sectionId="02" levelId="01" positionId=""/>
+        <locations locationTypeEnumId="FltPick" locationSeqId="01020301" sequenceNum="8" areaId="01" aisleId="02" sectionId="03" levelId="01" positionId=""/>
+        <locations locationTypeEnumId="FltPick" locationSeqId="01020401" sequenceNum="9" areaId="01" aisleId="02" sectionId="04" levelId="01" positionId=""/>
+        <locations locationTypeEnumId="FltPick" locationSeqId="01020501" sequenceNum="10" areaId="01" aisleId="02" sectionId="05" levelId="01" positionId=""/>
+
+        <locations locationTypeEnumId="FltBulk" locationSeqId="01010102" sequenceNum="59" areaId="01" aisleId="01" sectionId="01" levelId="02" positionId=""/>
+        <locations locationTypeEnumId="FltBulk" locationSeqId="01010202" sequenceNum="58" areaId="01" aisleId="01" sectionId="02" levelId="02" positionId=""/>
+        <locations locationTypeEnumId="FltBulk" locationSeqId="01010302" sequenceNum="57" areaId="01" aisleId="01" sectionId="03" levelId="02" positionId=""/>
+        <locations locationTypeEnumId="FltBulk" locationSeqId="01010402" sequenceNum="56" areaId="01" aisleId="01" sectionId="04" levelId="02" positionId=""/>
+        <locations locationTypeEnumId="FltBulk" locationSeqId="01010502" sequenceNum="55" areaId="01" aisleId="01" sectionId="05" levelId="02" positionId=""/>
+        <locations locationTypeEnumId="FltBulk" locationSeqId="01020102" sequenceNum="54" areaId="01" aisleId="02" sectionId="01" levelId="02" positionId=""/>
+        <locations locationTypeEnumId="FltBulk" locationSeqId="01020202" sequenceNum="53" areaId="01" aisleId="02" sectionId="02" levelId="02" positionId=""/>
+        <locations locationTypeEnumId="FltBulk" locationSeqId="01020302" sequenceNum="52" areaId="01" aisleId="02" sectionId="03" levelId="02" positionId=""/>
+        <locations locationTypeEnumId="FltBulk" locationSeqId="01020402" sequenceNum="51" areaId="01" aisleId="02" sectionId="04" levelId="02" positionId=""/>
+        <locations locationTypeEnumId="FltBulk" locationSeqId="01020502" sequenceNum="50" areaId="01" aisleId="02" sectionId="05" levelId="02" positionId=""/>
+
+        <locations locationTypeEnumId="FltReceiving" locationSeqId="0801" sequenceNum="80" areaId="08" aisleId="01" sectionId="" levelId="" positionId=""/>
+    </mantle.facility.Facility>
+    <mantle.facility.FacilityLocationType facilityId="ZIRET_WH" locationTypeEnumId="FltPick" autoStatusId="AstAvailable"/>
+    <mantle.facility.FacilityLocationType facilityId="ZIRET_WH" locationTypeEnumId="FltReceiving" autoStatusId="AstOnHold"/>
+    <mantle.facility.FacilityLocationType facilityId="ZIRET_WH" locationTypeEnumId="FltQuarantine" autoStatusId="AstQuarantine"/>
+    <mantle.facility.FacilityLocationType facilityId="ZIRET_WH" locationTypeEnumId="FltMorgue" autoStatusId="AstMorgue"/>
+
+    <mantle.product.asset.Container containerId="ZWH_1234" containerTypeEnumId="CtBinShelf" serialNumber="1234"
+            description="Test container 1234" facilityId="ZIRET_WH" locationSeqId="01010101"/>
+    <mantle.product.asset.Container containerId="ZWH_1235" containerTypeEnumId="CtBinShelf" serialNumber="1235"
+            description="Test container 1235" facilityId="ZIRET_WH" locationSeqId="01010101"/>
+    <mantle.product.asset.Container containerId="ZWH_2234" containerTypeEnumId="CtBinShelf" serialNumber="2234"
+            description="Test container 2234" facilityId="ZIRET_WH" locationSeqId="01020101"/>
+    <mantle.product.asset.Container containerId="ZWH_2235" containerTypeEnumId="CtBinShelf" serialNumber="2235"
+            description="Test container 2235" facilityId="ZIRET_WH" locationSeqId="01020201"/>
+
+    <mantle.product.asset.Container containerId="ZWH_P123" containerTypeEnumId="CtPalletUs4048" serialNumber="P123"
+            description="Test pallet P123" facilityId="ZIRET_WH" locationSeqId="01010102"/>
+    <mantle.product.asset.Container containerId="ZWH_P199" containerTypeEnumId="CtPalletUs4048" serialNumber="P199"
+            description="Test pallet P199" facilityId="ZIRET_WH" locationSeqId="01010502"/>
+
+
+    <!-- Ziziwork Retail ProductStore -->
+    <mantle.product.store.ProductStore productStoreId="POPC_DEFAULT" storeName="Ziziwork Retail Store"
+            organizationPartyId="ORG_ZIZI_RETAIL" inventoryFacilityId="ZIRET_WH" reservationOrderEnumId="AsResOrdFifoRec"
+            wikiSpaceId="ZZW_RETAIL" defaultLocale="en_US" defaultCurrencyUomId="USD" taxGatewayConfigId="LOCAL" requireInventory="Y">
+        <!-- use these to limit options for store, defaults to all CarrierShipmentMethod options for each carrier there is a shipping gateway for:
+        <shipOptions carrierPartyId="_NA_" shipmentMethodEnumId="ShMthGround" sequenceNum="1"/>
+        <shipOptions carrierPartyId="_NA_" shipmentMethodEnumId="ShMthNextDay" sequenceNum="2"/>
+        -->
+        <shippingGateways carrierPartyId="_NA_" shippingGatewayConfigId="NA_LOCAL"/>
+        <paymentGateways paymentInstrumentEnumId="PiCreditCard" paymentGatewayConfigId="TEST_APPROVE"/>
+    </mantle.product.store.ProductStore>
+
+    <mantle.product.store.ProductStorePromotion storePromotionId="PopcBuyGet" productStoreId="POPC_DEFAULT"
+            itemDescription="Buy 1 Get 1 Half Off" serviceRegisterId="BuyGetDiscount" sequenceNum="10" requireCode="Y"
+            useLimitPerOrder="2" useLimitPerCustomer="4" useLimitPerPromotion="10">
+        <parameters parameterName="buyQuantity" parameterValue="1"/>
+        <parameters parameterName="getQuantity" parameterValue="1"/>
+        <parameters parameterName="discountPercent" parameterValue="50"/>
+        <codes promoCodeId="TEST1" promoCode="TEST1" userEntered="Y" requireParty="Y" useLimitPerCustomer="2">
+            <parties partyId="CustJqp"/></codes>
+        <codes promoCodeId="TEST2" promoCode="TEST2" userEntered="Y" requireParty="N" useLimitPerCode="5" useLimitPerCustomer="1"/>
+    </mantle.product.store.ProductStorePromotion>
+    <mantle.product.store.ProductStorePromotion storePromotionId="PopcNewCustomer" productStoreId="POPC_DEFAULT"
+            itemDescription="20% Discount for New Customers" serviceRegisterId="NewCustomerDiscount" sequenceNum="99">
+        <parameters parameterName="discountPercent" parameterValue="20"/>
+    </mantle.product.store.ProductStorePromotion>
+
+    <!-- Default Home Page and Root Browse Categories -->
+    <mantle.product.category.ProductCategory productCategoryId="PopcHome" productCategoryTypeEnumId="PctCatalog"
+            categoryName="Home Page Category"/>
+    <mantle.product.store.ProductStoreCategory productStoreId="POPC_DEFAULT" productCategoryId="PopcHome"
+            storeCategoryTypeEnumId="PsctHomePage" fromDate="1265184000000" thruDate=""/>
+    <mantle.product.category.ProductCategory productCategoryId="PopcBrowseRoot"
+            productCategoryTypeEnumId="PctCatalog" categoryName="Browse Root Category"/>
+    <mantle.product.store.ProductStoreCategory productStoreId="POPC_DEFAULT" productCategoryId="PopcBrowseRoot"
+            storeCategoryTypeEnumId="PsctBrowseRoot" fromDate="1265184000000" thruDate=""/>
+
+    <mantle.product.category.ProductCategory productCategoryId="PopcAllProducts"
+            productCategoryTypeEnumId="PctCatalog" categoryName="POPC All Products Category"/>
+    <mantle.product.store.ProductStoreCategory productStoreId="POPC_DEFAULT" productCategoryId="PopcAllProducts"
+            storeCategoryTypeEnumId="PsctSearch" fromDate="1265184000000" thruDate=""/>
+    <mantle.product.store.ProductStoreCategory productStoreId="POPC_DEFAULT" productCategoryId="PopcAllProducts"
+            storeCategoryTypeEnumId="PsctViewAllow" fromDate="1265184000000" thruDate=""/>
+    <mantle.product.store.ProductStoreCategory productStoreId="POPC_DEFAULT" productCategoryId="PopcAllProducts"
+            storeCategoryTypeEnumId="PsctPurchaseAllow" fromDate="1265184000000" thruDate=""/>
+    <mantle.ledger.config.ProductCategoryGlAccount productCategoryId="PopcAllProducts"
+            organizationPartyId="ORG_ZIZI_RETAIL" glAccountTypeEnumId="GatInventory" glAccountId="141300000"/>
+
+    <mantle.product.category.ProductCategory productCategoryId="PopcDeals"
+            productCategoryTypeEnumId="PctCatalog" categoryName="Deals"/>
+    <mantle.product.store.ProductStoreCategory productStoreId="POPC_DEFAULT" productCategoryId="PopcDeals"
+            storeCategoryTypeEnumId="PsctPromotions" fromDate="1265184000000" thruDate=""/>
+
+    <mantle.product.category.ProductCategory productCategoryId="PopcNew"
+            productCategoryTypeEnumId="PctCatalog" categoryName="New"/>
+    <mantle.product.store.ProductStoreCategory productStoreId="POPC_DEFAULT" productCategoryId="PopcNew"
+            storeCategoryTypeEnumId="PsctNewProducts" fromDate="1265184000000" thruDate=""/>
+
+    <mantle.product.category.ProductCategory productCategoryId="PopcFeatured"
+            productCategoryTypeEnumId="PctCatalog" categoryName="Featured Best Sellers"/>
+    <mantle.product.store.ProductStoreCategory productStoreId="POPC_DEFAULT" productCategoryId="PopcFeatured"
+            storeCategoryTypeEnumId="PsctFeatured" fromDate="1265184000000" thruDate=""/>
+
+    <!-- Demo Categories -->
+    <mantle.product.category.ProductCategory productCategoryId="DEMO_ONE" productCategoryTypeEnumId="PctCatalog"
+            categoryName="Demo Category One" description="" ownerPartyId="ORG_ZIZI_RETAIL"/>
+    <mantle.product.category.ProductCategoryRollup productCategoryId="DEMO_ONE"
+            parentProductCategoryId="PopcBrowseRoot" fromDate="1265184000000" sequenceNum="11"/>
+
+    <mantle.product.category.ProductCategory productCategoryId="DEMO_TWO" productCategoryTypeEnumId="PctCatalog"
+            categoryName="Demo Category Two" description="" ownerPartyId="ORG_ZIZI_RETAIL"/>
+    <mantle.product.category.ProductCategoryRollup productCategoryId="DEMO_TWO"
+            parentProductCategoryId="PopcBrowseRoot" fromDate="1265184000000" sequenceNum="12"/>
+
+    <mantle.product.category.ProductCategory productCategoryId="DEMO_THREE" productCategoryTypeEnumId="PctCatalog"
+            categoryName="Demo Category Three" description="" ownerPartyId="ORG_ZIZI_RETAIL"/>
+    <mantle.product.category.ProductCategoryRollup productCategoryId="DEMO_THREE"
+            parentProductCategoryId="PopcBrowseRoot" fromDate="1265184000000" sequenceNum="13"/>
+
+    <!-- Demo Sub Assembly and Raw Materials Categories -->
+    <mantle.product.category.ProductCategory productCategoryId="DEMO_SA" productCategoryTypeEnumId="PctMaterials"
+            categoryName="Demo Sub Assemblies" description="" ownerPartyId="ORG_ZIZI_RETAIL"/>
+    <mantle.product.category.ProductCategory productCategoryId="DEMO_RM" productCategoryTypeEnumId="PctMaterials"
+            categoryName="Demo Raw Materials" description="" ownerPartyId="ORG_ZIZI_RETAIL"/>
+    <!-- Demo Equipment Categories -->
+    <mantle.product.category.ProductCategory productCategoryId="DEMO_EQUIP" productCategoryTypeEnumId="PctMaterials"
+            categoryName="Demo Equipment" description="" ownerPartyId="ORG_ZIZI_RETAIL"/>
+
+    <!-- Demo wiki based template settings, use for both PswstTemplateInfo and PswstTemplateInteractive -->
+    <mantle.product.store.ProductStoreWikiSpace storeWikiSpaceId="POPCD_TMP_SRV" productStoreId="POPC_DEFAULT"
+            spaceTypeEnumId="PstTmpSrv" locale="" fromDate="1265184000000" thruDate="" wikiSpaceId="ZZWR_TMP"/>
+    <mantle.product.store.ProductStoreWikiSpace storeWikiSpaceId="POPCD_TMP_CLT" productStoreId="POPC_DEFAULT"
+            spaceTypeEnumId="PstTmpClt" locale="" fromDate="1265184000000" thruDate="" wikiSpaceId="ZZWR_TMP"/>
+
+    <mantle.product.store.ProductStoreWikiContent storeWikiContentId="POPCD_SRV_FOOTER" productStoreId="POPC_DEFAULT"
+            contentTypeEnumId="PsctFooterTemplateServer" fromDate="1265184000000" thruDate="" spaceTypeEnumId="PstTmpSrv" pagePath="server/footer"/>
+    <mantle.product.store.ProductStoreWikiContent storeWikiContentId="POPCD_CLT_FOOTER" productStoreId="POPC_DEFAULT"
+            contentTypeEnumId="PsctFooterTemplate" fromDate="1265184000000" thruDate="" spaceTypeEnumId="PstTmpClt" pagePath="client/footer"/>
+
+    <!-- ========== Demo Asset Pools ========== -->
+
+    <mantle.product.asset.AssetPool assetPoolId="ZIRET_JJD" description="ZIRET Pool for J&amp;J Distributing" ownerPartyId="ORG_ZIZI_RETAIL">
+        <poolParties partyId="JoeDist" roleTypeId="Customer"/></mantle.product.asset.AssetPool>
+    <mantle.product.asset.AssetPool assetPoolId="ZIRET_POPC" description="ZIRET Pool for POPC Default Store" ownerPartyId="ORG_ZIZI_RETAIL">
+        <poolStores productStoreId="POPC_DEFAULT"/></mantle.product.asset.AssetPool>
+</entity-facade-xml>

@@ -686,7 +686,7 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="get" noun="OrganizationRowFilter" allow-remote="false">
         <description>The report engine's row filter for a business dataset's organization field (a framework rowFilterService,
-            registered as the ReportScopePolicy MantleOrganization in MonitoringSalesSecurityData.xml): the dataset names the field
+            registered as the ReportScopePolicy MantleOrganization in 15-seed-initial/SalesDocumentsAndReports.xml): the dataset names the field
             in its rowFilterParameters (organizationField, organizationPartyId by default), and the filter keeps the rows of the
             viewer's organizations as get#PartyOrganizationInfo computes them (their agent, employee and member organizations and
             the direct children, MANTLE_USER_ORG), only the active organization when one is set; a system administrator sees every

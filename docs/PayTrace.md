@@ -15,7 +15,7 @@ v1. The plan and its implementation record are [plan/payments-shipping-edi.md](.
 | `SystemMessageRemote` | `sendUrl` the API base (`https://api.sandbox.paytrace.com` sandbox, `https://api.paytrace.com` production), `usageCode` `T` or `P` (it picks the Protect.js host), `username` the PayTrace API user, `password` its password. The password is an encrypted field |
 | `PaymentGatewayPayTrace` | Non-secret options: `merchantId`, `integratorId` (issued by PayTrace for the integration, sent as `X-Integrator-Id`, at most 12 characters), `currencyUomId` (the merchant account's currency; a payment in another is refused), `lookupGraceSeconds`, `sendEnhancedData`, `commodityCode` and `defaultUnitOfMeasure` for level 3 lines, `customerLabelPrefix` (for instances sharing one account) |
 
-`data/PayTraceDemoData.xml` names a sandbox gateway `PayTraceDemo` and remote `PayTraceSandbox` without credentials,
+`data/30-demo/10Integrations.xml` names a sandbox gateway `PayTraceDemo` and remote `PayTraceSandbox` without credentials,
 merchant id or integrator id. Enter them in the System Message Remote screen or a deployment's own data file, never in
 seed data. The API user's password expires every 90 days at PayTrace (error 979): change it on the remote too.
 

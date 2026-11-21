@@ -1526,7 +1526,7 @@ function commitChannelImport(p) {
 
 // ===== recovery registration =====
 // Store channel messages as a registered recovery of the framework's operational recovery (moqui.server.RecoveryDescriptor
-// rows in data/StoreChannelSetupData.xml; org.moqui.admin.OperationServices preview#Recovery and execute#Recovery; mr-boss
+// rows in data/10-seed/MarketingAndCommerce.xml; org.moqui.admin.OperationServices preview#Recovery and execute#Recovery; mr-boss
 // impl-admin P13, design-commerce §9): an administrator's queue offers the same retry as IntegrationDetail, through
 // retry#StoreMessages, with nothing added. The registration gives no right: both services answer by this caller's own
 // COMMERCE_VIEW, COMMERCE_CHANNEL_OPERATE and store scope.

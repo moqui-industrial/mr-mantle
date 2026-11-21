@@ -46,7 +46,7 @@ along with this software (see the LICENSE.md file). If not, see
   <!-- ===== end of Marketing P9 ===== -->
 <!-- Comms' text messages (mr-boss impl-marketing P22; design-marketing §12 SendingProfiles; service/mantle/party/MessageSms.js): a
     sending profile's messaging number and its cost a segment. The channel, consent source, suppression reason and source of a text
-    and the Send SMS step are seed data/MessageSmsSeedData.xml (their types are defined by entity files that load after this one). -->
+    and the Send SMS step are seed data/10-seed/Collaboration.xml (their types are defined by entity files that load after this one). -->
   <extend-entity entity-name="MessageSendingProfile" package="mantle.party">
     <field name="fromPhoneNumber" type="text-short" enable-audit-log="true"><description>An SMS profile's number (E.164): one of the
       organization's messaging numbers (a current telecom number of the organization that is one of our numbers with a messaging

@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed">
+    <!-- Maintenance intake (IronStone Maintenance design §1.4 Mail intake, §3 Requests, MT-15; impl-maintenance P4). RqtMaintenance
+        is Manufacturing's (10-seed/Production.xml), seeded once. -->
+
+    <!-- the mail rule action beside ErActCreateRequest and ErActCreateWorkItem (15-seed-initial/Notifications.xml; impl-maintenance F39): a
+        message to a maintenance team's plus-tag address (or the team the rule's value names) becomes a maintenance request, the
+        sender its reporter (mantle.work.MaintenanceServices.create#MaintenanceRequestFromEmail) -->
+    <moqui.basic.Enumeration enumId="ErActCreateMaintenanceRequest" enumTypeId="EmailRuleAction" enumCode="createMaintenanceRequest"
+            sequenceNum="3" description="Make a maintenance request"
+            optionValue="mantle.work.MaintenanceServices.create#MaintenanceRequestFromEmail"/>
+    <!-- a maintenance team's intake plus tag (the "facilities" of maintenance+facilities@...), a PartySetting of the team (an
+        OrgTeam party its organization owns) -->
+    <mantle.party.PartySettingType partySettingTypeId="MntIntakePlusTag" description="Maintenance intake plus tag"/>
+
+    <!-- Preventive generation (IronStone Maintenance design §5.1, DueMaintenance, §1.2 notification topics; impl-maintenance P14):
+        the MaintenanceDue topic and the registrations of the generate_MaintenanceWorkOrders job (data/15-seed-initial/Operations.xml)
+        for Admin's Jobs, Topics and recovery (owner contracts, impl-maintenance F52, F117), as the framework registers its own
+        message jobs (framework data/AdminConfigurationData.xml). Each ownerRoute is a key of mr-boss's Admin mount
+        (service/ironstone/admin/Admin.js mountRoutes: maintenanceDue, Maintenance's due list). -->
+
+    <!-- MaintenanceDue: preventive work made from a plan, told to the organization's maintenance planners (the one who made it
+        is not told). Its title names the plan, the due date and the work order, never a cost; an app sets its link. Its audience
+        is who plans maintenance work. -->
+    <moqui.security.user.NotificationTopic topic="MaintenanceDue" inboxEnumId="NinNotifications" description="Preventive work made from a plan"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Preventive work order ${workEffortId} made: ${scheduleName}${dueText ? ', due ' + dueText : ''}"/>
+    <moqui.server.TopicRegistration topic="MaintenanceDue" ownerApp="Maintenance" purpose="Preventive work made from a maintenance plan"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="MAINTENANCE_PLAN" sequenceNum="11"/>
+
+    <!-- The job: its schedule, pause, priority and wait after an error, and its batch size, changed by an operations manager who
+        also holds MAINTENANCE_SETTINGS_EDIT; a recipient of its notification holds MAINTENANCE_SETTINGS_EDIT too (a run's
+        results and errors name plans). A run outside the schedule is safe to repeat: an obligation is generated once (its key is
+        unique) and a plan has at most one unresolved execution. -->
+    <moqui.server.JobRegistration jobName="generate_MaintenanceWorkOrders" ownerApp="Maintenance" title="Make preventive maintenance work"
+            description="Makes the work orders of the active preventive plans whose next obligation is due, each plan on its own"
+            managePermission="MAINTENANCE_SETTINGS_EDIT" scheduleEditable="Y" minIntervalMinutes="60" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="MAINTENANCE_SETTINGS_EDIT" ownerRoute="maintenanceDue"
+            sequenceNum="40"/>
+    <moqui.server.JobParameterDefinition jobName="generate_MaintenanceWorkOrders" parameterName="batchSize"
+            title="Plans taken per batch" description="Each plan is its own transaction; a run takes at most 5000 plans"
+            valueType="integer" minValue="1" maxValue="1000" sequenceNum="1"/>
+    <moqui.server.RecoveryDescriptor descriptorKey="maintenanceGenerationJob" title="Make preventive maintenance work" ownerApp="Maintenance"
+            targetKind="ServiceJob" targetKey="generate_MaintenanceWorkOrders" retryMode="native"
+            managePermission="MAINTENANCE_SETTINGS_EDIT" ownerRoute="maintenanceDue"
+            idempotencyNote="An obligation of a plan is generated once (its key is unique) and a plan has at most one open execution, so a run again makes only what is due and not yet made."
+            sequenceNum="40"/>
+
+    <!-- Maintenance procedures (IronStone Maintenance design §4.1, §4.2, §12; impl-maintenance P6): the template status flow and
+        the WorkProcessApproval topic. A procedure is a template root (isTemplate Y, WetTask, WepMaintenance) with its steps and a
+        WorkEffortProcessPolicy of WppMaintenanceProcedure that guards execution (entity/work/EffortEntities.xml), changed only
+        through mantle.work.ProcessServices (MaintenanceProcedures.js). -->
+
+    <!-- The template's states: Draft (WeInPlanning), Approved (WeApproved), Retired (WeClosed). The framework admits a move any
+        flow's row admits (impl-maintenance F65): Approve, the two Retire moves and the Default flow's rows are open moves already
+        (Default, WorkEffortOther), so they widen nothing; Amend (an approved definition changed goes back to Draft) is had only
+        by Manufacturing's production flow with PRODUCTION_SUPERVISE, so its row here needs WORK_PROCESS_EDIT. The services are the
+        gate: approve#WorkProcess (WORK_PROCESS_APPROVE, not the last author), retire#WorkProcess, and an author's change. -->
+    <moqui.basic.StatusFlow statusFlowId="WorkEffortProcedure" statusTypeId="WorkEffort" description="Maintenance procedure (template)"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProcedure" statusId="WeInPlanning" toStatusId="WeApproved" transitionName="Approve"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProcedure" statusId="WeApproved" toStatusId="WeInPlanning" transitionName="Amend"
+            userPermissionId="WORK_PROCESS_EDIT"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProcedure" statusId="WeApproved" toStatusId="WeClosed" transitionName="Retire"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProcedure" statusId="WeInPlanning" toStatusId="WeClosed" transitionName="Retire"/>
+
+    <!-- WorkProcessApproval (design §1.2, design-drawers-commons §4): a procedure waiting for approval, sent to the approvers of its
+        organization (WORK_PROCESS_APPROVE; not its last author unless the organization's policy allows self-approval) when
+        request#WorkProcessApproval asks. Commons' approvals inbox shows it first; approve#NotificationMessage and
+        refuse#NotificationMessage call ProcessServices approve#WorkProcess and refuse#WorkProcess as the user deciding, which
+        check their own permission and scope (a notice is no authority). The message holds workEffortId, workEffortName,
+        workEffortApprovalId and organizationName; no cost. Registered for Admin's Topics (impl-maintenance F52). -->
+    <moqui.security.user.NotificationTopic topic="WorkProcessApproval" inboxEnumId="NinNotifications" description="Maintenance procedure to approve"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.work.ProcessServices.approve#WorkProcess"
+            refuseServiceName="mantle.work.ProcessServices.refuse#WorkProcess" refuseReasonRequired="Y"
+            titleTemplate="Approve procedure ${workEffortName} (${organizationName})"/>
+    <moqui.server.TopicRegistration topic="WorkProcessApproval" ownerApp="Maintenance" purpose="A maintenance procedure waiting for the user's approval"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="WORK_PROCESS_APPROVE" sequenceNum="20"/>
+
+    <!-- Maintenance purchases (IronStone Maintenance design §3 PurchaseLinks and CompleteWork; impl-maintenance P10): a work order's
+        file attached to the purchase order line its outside service was accepted on (mantle.work.MaintenanceServices
+        accept#MaintenanceService; Purchasing's accept#ServiceItem names it as the acceptance's evidence) -->
+    <moqui.basic.Enumeration enumId="OctServiceEvidence" description="Service acceptance evidence" enumTypeId="OrderContentType"/>
+
+    <!-- Maintenance's setup of impl-maintenance P18 (IronStone Maintenance design §6 EquipmentImport, §9 Settings, §12 the equipment
+        import and outcome file; MT-12): the equipment import target, the identification its rows are kept by, and the grants of the
+        services the framework calls as the user from outside Maintenance's screens.
+
+        The import target `equipment` is a `rows` target of the framework's org.moqui.admin.DataTransferServices with no batch of its
+        own, on the pattern of staff invitations (10-seed/PartyAndIdentity.xml) and People's employees (10-seed/PeopleAndPayroll.xml). A row
+        is one piece of equipment of the batch's organization, kept by its source system and key (AssetIdentification of type
+        AitMntSourceKey, one asset a source key): registered through store#MaintenanceEquipment, its custodian through
+        change#MaintenanceCustody and its starting reading through record#MaintenanceMeter, as the importer, each row in a transaction
+        of its own; a row repeated changes the same asset and records no second reading. It imports no cost, book value, posting,
+        warranty decision or maintenance history. It asks MAINTENANCE_IMPORT and MAINTENANCE_RESOURCE_EDIT to import and
+        MAINTENANCE_RESOURCE_VIEW to view, and no ADMIN_* permission (impl-maintenance §4, F51: a target's permissions are all required,
+        so ADMIN_TRANSFER_RUN beside them would shut the resource administrator out of EquipmentImport); Admin's Imports lists a run for
+        a data operator who also holds MAINTENANCE_RESOURCE_VIEW. Its owner place is the key maintenanceEquipmentImport, which the app
+        showing the run maps (IronStone: Admin.js mountRoutes). -->
+    <moqui.basic.Enumeration enumId="AitMntSourceKey" enumTypeId="AssetIdentificationType"
+            description="Maintenance import source and key"/>
+    <moqui.server.TransferTarget targetId="equipment" direction="import" targetMode="rows" title="Equipment"
+            description="Equipment registered in an organization, with its location, custodian, supplier warranty and starting meter reading"
+            effectsNote="Each row registers one piece of equipment, or changes the one its source key or ID names, as New equipment does: its location, custodian and starting reading. No cost, book value or maintenance history is imported."
+            ownerApp="Maintenance" targetVersion="1" fieldLabel="Equipment field" scopeLabel="Organization"
+            columnsJson="[{&quot;name&quot;:&quot;externalSource&quot;,&quot;label&quot;:&quot;Source system&quot;},{&quot;name&quot;:&quot;externalKey&quot;,&quot;label&quot;:&quot;Source key&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;assetId&quot;,&quot;label&quot;:&quot;Existing equipment ID&quot;},{&quot;name&quot;:&quot;assetName&quot;,&quot;label&quot;:&quot;Name&quot;},{&quot;name&quot;:&quot;serialNumber&quot;,&quot;label&quot;:&quot;Serial number&quot;},{&quot;name&quot;:&quot;classEnumId&quot;,&quot;label&quot;:&quot;Asset class ID&quot;},{&quot;name&quot;:&quot;productId&quot;,&quot;label&quot;:&quot;Model ID&quot;},{&quot;name&quot;:&quot;facilityId&quot;,&quot;label&quot;:&quot;Location ID&quot;},{&quot;name&quot;:&quot;custodianPartyId&quot;,&quot;label&quot;:&quot;Custodian ID&quot;},{&quot;name&quot;:&quot;warrantyThruDate&quot;,&quot;label&quot;:&quot;Supplier warranty until&quot;},{&quot;name&quot;:&quot;warrantyPartyId&quot;,&quot;label&quot;:&quot;Warrantor ID&quot;},{&quot;name&quot;:&quot;productMeterTypeId&quot;,&quot;label&quot;:&quot;Meter type ID&quot;},{&quot;name&quot;:&quot;meterValue&quot;,&quot;label&quot;:&quot;Starting reading&quot;},{&quot;name&quot;:&quot;readingDate&quot;,&quot;label&quot;:&quot;Reading date&quot;},{&quot;name&quot;:&quot;comments&quot;,&quot;label&quot;:&quot;Comments&quot;},{&quot;name&quot;:&quot;organizationPartyId&quot;,&quot;label&quot;:&quot;Organization ID&quot;}]"
+            keyFields="externalSource,externalKey"
+            refusedColumns="password,group,permission,authz,userid,cost,price,bookvalue,depreciation,glaccount,acquirecost"
+            validateRowService="mantle.product.MaintenanceImportServices.validate#EquipmentImportRow"
+            applyRowService="mantle.product.MaintenanceImportServices.apply#EquipmentImportRow"
+            scopeService="mantle.product.MaintenanceImportServices.find#EquipmentImportScopes"
+            maxBytes="262144" maxRows="1000" retentionDays="30"
+            importPermission="MAINTENANCE_IMPORT,MAINTENANCE_RESOURCE_EDIT" viewPermission="MAINTENANCE_RESOURCE_VIEW"
+            ownerRoute="maintenanceEquipmentImport" sequenceNum="45"/>
+    <!-- The row and scope services, the setup readiness and the policy's and lookups' reads run as the user wherever they are
+        called (the wizard under Maintenance, Admin's Imports and Health, an apply carried on after the request): every user may
+        call them, as People's import services, and each checks the maintenance permission and organization itself. -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantleMaintenanceSetupServices" description="Maintenance's import, readiness and settings services"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleMaintenanceSetupServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            nameIsPattern="Y" artifactName="mantle\.product\.MaintenanceImportServices\.(validate#EquipmentImportRow|apply#EquipmentImportRow|find#EquipmentImportScopes)"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleMaintenanceSetupServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            artifactName="mantle.work.MaintenanceSettingsServices.check#MaintenanceReadiness"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleMaintenanceSetupServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleMaintenanceSetupServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+
+    <!-- Maintenance's projected CalDAV collections (IronStone Maintenance design §1.4 Sync, CX-SYNC, MT-16; impl-maintenance P19), on
+        People's projected kind (impl-people P12; mantle.work.CalendarDavServices: collectionId projected-{projectionId}, read
+        only, a PUT or DELETE refused), each answered by its owner service in mantle.work.MaintenanceServices as the user -->
+    <mantle.work.calendar.CalendarProjection projectionId="MaintenanceMyWork" title="My work orders"
+            description="The maintenance work orders assigned to you, by their planned window" sequenceNum="20"
+            ownerServiceName="mantle.work.MaintenanceServices.get#MaintenanceWorkProjection"/>
+    <mantle.work.calendar.CalendarProjection projectionId="MaintenanceTeamDue" title="Due maintenance"
+            description="The next preventive maintenance due for your teams" sequenceNum="21"
+            ownerServiceName="mantle.work.MaintenanceServices.get#MaintenanceDueProjection"/>
+
+    <!-- Maintenance work orders (IronStone Maintenance design §3, §9 Lookups; impl-maintenance P3): the core lookups as
+        enumerations (Settings' Lookups maintain them from P18), the maintenance status flow over the existing WorkEffort statuses,
+        the AssetMaintenance transitions the synchronization needs, and the MaintenanceWork topic. -->
+
+    <!-- the kind of work, above the AssetMaintenance's MaintenanceType -->
+    <moqui.basic.EnumerationType description="Maintenance Kind" enumTypeId="MaintenanceKind"/>
+    <moqui.basic.Enumeration enumId="MkCorrective" description="Corrective" sequenceNum="1" enumTypeId="MaintenanceKind"/>
+    <moqui.basic.Enumeration enumId="MkPreventive" description="Preventive" sequenceNum="2" enumTypeId="MaintenanceKind"/>
+    <moqui.basic.Enumeration enumId="MntTpPreventive" description="Preventive Maintenance" enumTypeId="MaintenanceType"/>
+    <moqui.basic.Enumeration enumId="MntTpInspection" description="Inspection" enumTypeId="MaintenanceType"/>
+    <!-- how the work came -->
+    <moqui.basic.EnumerationType description="Maintenance Source" enumTypeId="MaintenanceSource"/>
+    <moqui.basic.Enumeration enumId="MsrcPlanned" description="Planned" sequenceNum="1" enumTypeId="MaintenanceSource"/>
+    <moqui.basic.Enumeration enumId="MsrcReport" description="Reported problem" sequenceNum="2" enumTypeId="MaintenanceSource"/>
+    <moqui.basic.Enumeration enumId="MsrcProduction" description="Production request" sequenceNum="3" enumTypeId="MaintenanceSource"/>
+    <moqui.basic.Enumeration enumId="MsrcAdopted" description="Adopted record" sequenceNum="4" enumTypeId="MaintenanceSource"/>
+    <moqui.basic.Enumeration enumId="MsrcSchedule" description="Preventive schedule" sequenceNum="5" enumTypeId="MaintenanceSource"/>
+    <!-- P12: a warranty repair Customer Service linked, made a managed work order; its intervention report and the customer's
+        acknowledgment are its own files (MaintenanceRepairs.js) -->
+    <moqui.basic.Enumeration enumId="MsrcWarranty" description="Customer repair" sequenceNum="6" enumTypeId="MaintenanceSource"/>
+    <moqui.basic.Enumeration enumId="WectInterventionReport" description="Intervention report" enumTypeId="WorkEffortContentType"/>
+    <moqui.basic.Enumeration enumId="WectAcknowledgment" description="Customer acknowledgment" enumTypeId="WorkEffortContentType"/>
+    <!-- severity -->
+    <moqui.basic.EnumerationType description="Maintenance Severity" enumTypeId="MaintenanceSeverity"/>
+    <moqui.basic.Enumeration enumId="MsevLow" description="Low" sequenceNum="1" enumTypeId="MaintenanceSeverity"/>
+    <moqui.basic.Enumeration enumId="MsevMedium" description="Medium" sequenceNum="2" enumTypeId="MaintenanceSeverity"/>
+    <moqui.basic.Enumeration enumId="MsevHigh" description="High" sequenceNum="3" enumTypeId="MaintenanceSeverity"/>
+    <moqui.basic.Enumeration enumId="MsevSafety" description="Safety" sequenceNum="4" enumTypeId="MaintenanceSeverity"/>
+    <!-- hold and cancel reasons -->
+    <moqui.basic.EnumerationType description="Maintenance Hold Reason" enumTypeId="MaintenanceHoldReason"/>
+    <moqui.basic.Enumeration enumId="MhrParts" description="Waiting for parts" sequenceNum="1" enumTypeId="MaintenanceHoldReason"/>
+    <moqui.basic.Enumeration enumId="MhrAccess" description="Waiting for access" sequenceNum="2" enumTypeId="MaintenanceHoldReason"/>
+    <moqui.basic.Enumeration enumId="MhrVendor" description="Waiting for a vendor" sequenceNum="3" enumTypeId="MaintenanceHoldReason"/>
+    <moqui.basic.Enumeration enumId="MhrOther" description="Other" sequenceNum="9" enumTypeId="MaintenanceHoldReason"/>
+    <moqui.basic.EnumerationType description="Maintenance Cancel Reason" enumTypeId="MaintenanceCancelReason"/>
+    <moqui.basic.Enumeration enumId="McrDuplicate" description="Duplicate" sequenceNum="1" enumTypeId="MaintenanceCancelReason"/>
+    <moqui.basic.Enumeration enumId="McrNotNeeded" description="No longer needed" sequenceNum="2" enumTypeId="MaintenanceCancelReason"/>
+    <moqui.basic.Enumeration enumId="McrReplaced" description="Equipment replaced" sequenceNum="3" enumTypeId="MaintenanceCancelReason"/>
+    <moqui.basic.Enumeration enumId="McrOther" description="Other" sequenceNum="9" enumTypeId="MaintenanceCancelReason"/>
+    <!-- failure mode, a seeded type an organization's lookups extend -->
+    <moqui.basic.EnumerationType description="Maintenance Failure Mode" enumTypeId="MaintenanceFailureMode"/>
+    <moqui.basic.Enumeration enumId="MfmWear" description="Wear" sequenceNum="1" enumTypeId="MaintenanceFailureMode"/>
+    <moqui.basic.Enumeration enumId="MfmLeak" description="Leak" sequenceNum="2" enumTypeId="MaintenanceFailureMode"/>
+    <moqui.basic.Enumeration enumId="MfmElectrical" description="Electrical" sequenceNum="3" enumTypeId="MaintenanceFailureMode"/>
+    <moqui.basic.Enumeration enumId="MfmOperator" description="Operator error" sequenceNum="4" enumTypeId="MaintenanceFailureMode"/>
+    <moqui.basic.Enumeration enumId="MfmUnknown" description="Unknown" sequenceNum="9" enumTypeId="MaintenanceFailureMode"/>
+    <!-- completion: the outcome and the resource's state the technician declares (completion does not imply restoration) -->
+    <moqui.basic.EnumerationType description="Maintenance Outcome" enumTypeId="MaintenanceOutcome"/>
+    <moqui.basic.Enumeration enumId="MoutRepaired" description="Repaired" sequenceNum="1" enumTypeId="MaintenanceOutcome"/>
+    <moqui.basic.Enumeration enumId="MoutDone" description="Done as planned" sequenceNum="2" enumTypeId="MaintenanceOutcome"/>
+    <moqui.basic.Enumeration enumId="MoutNoFault" description="No fault found" sequenceNum="3" enumTypeId="MaintenanceOutcome"/>
+    <moqui.basic.Enumeration enumId="MoutNotRepaired" description="Not repaired" sequenceNum="4" enumTypeId="MaintenanceOutcome"/>
+    <moqui.basic.EnumerationType description="Maintenance Disposition" enumTypeId="MaintenanceDisposition"/>
+    <moqui.basic.Enumeration enumId="MdispAvailable" description="Available for use" sequenceNum="1" enumTypeId="MaintenanceDisposition"/>
+    <moqui.basic.Enumeration enumId="MdispRestricted" description="Usable with restrictions" sequenceNum="2" enumTypeId="MaintenanceDisposition"/>
+    <moqui.basic.Enumeration enumId="MdispUnavailable" description="Still unavailable" sequenceNum="3" enumTypeId="MaintenanceDisposition"/>
+    <!-- the closure policy of an organization's MaintenancePolicy -->
+    <moqui.basic.EnumerationType description="Maintenance Closure Policy" enumTypeId="MaintenanceClosurePolicy"/>
+    <moqui.basic.Enumeration enumId="MclSupervisor" description="A supervisor closes completed work" sequenceNum="1" enumTypeId="MaintenanceClosurePolicy"/>
+    <moqui.basic.Enumeration enumId="MclOnComplete" description="Completion closes the work" sequenceNum="2" enumTypeId="MaintenanceClosurePolicy"/>
+
+    <!-- The maintenance status flow over the existing WorkEffort statuses (design §3's lifecycle table): its labels and
+        get#TaskStatusFlow read it. The framework matches a transition by its from and to statuses over every flow
+        (impl-maintenance F65), so the flow gates nothing: transition#MaintenanceWorkOrder is the gate. A transition's permission
+        refuses only when every flow's row of the same move needs one the user lacks: Manufacturing's WeApproved and WeOnHold rows
+        need PRODUCTION_SUPERVISE, so this flow's need MAINTENANCE_SUPERVISE (a supervisor holds approved work and resumes it as
+        approved), and a user with neither is still refused the move on its own. A move no other flow has (In Planning to and
+        from On Hold) would otherwise be open to every user on every work effort, a production run or a project task among them,
+        through a raw update#WorkEffort: its rows need MAINTENANCE_PLAN here and MAINTENANCE_SUPERVISE in the second flow below
+        (one permission a row; a planner or a supervisor holds and resumes planned work; impl-maintenance P3 review). -->
+    <moqui.basic.StatusFlow statusFlowId="WorkEffortMaintenance" statusTypeId="WorkEffort" description="Maintenance work order"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInPlanning" toStatusId="WeApproved" transitionName="Approve"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInPlanning" toStatusId="WeOnHold" transitionName="Hold"
+            userPermissionId="MAINTENANCE_PLAN"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInPlanning" toStatusId="WeCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeApproved" toStatusId="WeInProgress" transitionName="Start"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeApproved" toStatusId="WeOnHold" transitionName="Hold"
+            userPermissionId="MAINTENANCE_SUPERVISE"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeApproved" toStatusId="WeCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInProgress" toStatusId="WeOnHold" transitionName="Hold"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInProgress" toStatusId="WeComplete" transitionName="Complete"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInProgress" toStatusId="WeCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeOnHold" toStatusId="WeInPlanning" transitionName="Resume"
+            userPermissionId="MAINTENANCE_PLAN"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeOnHold" toStatusId="WeApproved" transitionName="Resume"
+            userPermissionId="MAINTENANCE_SUPERVISE"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeOnHold" toStatusId="WeInProgress" transitionName="Resume"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeOnHold" toStatusId="WeCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeComplete" toStatusId="WeClosed" transitionName="Close"/>
+    <!-- the supervisor's rows of the moves a planner also makes (above); no work order names this flow -->
+    <moqui.basic.StatusFlow statusFlowId="WorkEffortMaintenanceSupervise" statusTypeId="WorkEffort" description="Maintenance work order (a supervisor's moves)"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenanceSupervise" statusId="WeInPlanning" toStatusId="WeOnHold" transitionName="Hold"
+            userPermissionId="MAINTENANCE_SUPERVISE"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenanceSupervise" statusId="WeOnHold" toStatusId="WeInPlanning" transitionName="Resume"
+            userPermissionId="MAINTENANCE_SUPERVISE"/>
+
+    <!-- the AssetMaintenance transitions the synchronization with its root needs and the Default flow lacks (impl-maintenance
+        F10): in process to cancelled, completed back to in process, scheduled back to created -->
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntInProcess" toStatusId="AsMntCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntCompleted" toStatusId="AsMntInProcess" transitionName="Reopen"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntScheduled" toStatusId="AsMntCreated" transitionName="Unschedule"/>
+
+    <!-- MaintenanceWork (design §1.2): a work order assigned to the user, told on this topic only (the generic WorkItemAssigned
+        notice leaves managed work out). Its title names the work order and its target, never a cost or a reporter; an app sets
+        its link. Registered for Admin's Topics (impl-maintenance F52): its audience is who executes maintenance work. -->
+    <moqui.security.user.NotificationTopic topic="MaintenanceWork" inboxEnumId="NinNotifications" description="Maintenance work assigned to you"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Work order ${workEffortId} assigned to you: ${workEffortName}${targetName ? ' (' + targetName + ')' : ''}"/>
+    <moqui.server.TopicRegistration topic="MaintenanceWork" ownerApp="Maintenance" purpose="A maintenance work order assigned to the user"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="MAINTENANCE_EXECUTE" sequenceNum="10"/>
+
+    <!-- Downtime and restoration (IronStone Maintenance design §6 Downtime, §7.1; impl-maintenance P5, F14): the reasons of a
+        resource's unavailability, each planned (optionIndicator Y: planned maintenance, an inspection) or unplanned (a fault, a
+        safety stop, a utility loss, damage); an equipment-fault ProductionDowntime records RurEquipmentFault. And the source of a
+        follow-up work order, which a completion that leaves its resource down may create. -->
+    <moqui.basic.EnumerationType description="Resource Unavailability Reason (optionIndicator Y: planned)"
+            enumTypeId="ResourceUnavailabilityReason"/>
+    <moqui.basic.Enumeration enumId="RurEquipmentFault" description="Equipment fault" sequenceNum="1" optionIndicator="N"
+            enumTypeId="ResourceUnavailabilityReason"/>
+    <moqui.basic.Enumeration enumId="RurSafety" description="Safety stop" sequenceNum="2" optionIndicator="N"
+            enumTypeId="ResourceUnavailabilityReason"/>
+    <moqui.basic.Enumeration enumId="RurUtility" description="Utility or supply failure" sequenceNum="3" optionIndicator="N"
+            enumTypeId="ResourceUnavailabilityReason"/>
+    <moqui.basic.Enumeration enumId="RurDamage" description="Damage" sequenceNum="4" optionIndicator="N"
+            enumTypeId="ResourceUnavailabilityReason"/>
+    <moqui.basic.Enumeration enumId="RurMaintenance" description="Planned maintenance" sequenceNum="5" optionIndicator="Y"
+            enumTypeId="ResourceUnavailabilityReason"/>
+    <moqui.basic.Enumeration enumId="RurInspection" description="Inspection or calibration" sequenceNum="6" optionIndicator="Y"
+            enumTypeId="ResourceUnavailabilityReason"/>
+
+    <moqui.basic.Enumeration enumId="MsrcFollowUp" description="Follow-up" sequenceNum="6" enumTypeId="MaintenanceSource"/>
+
+    <!-- Resource policy and blackouts (IronStone Maintenance design §7.1, ResourcePolicyDetail, Blackouts; impl-maintenance P15):
+        how a managed resource's booking is approved, and the planned reasons of a blackout and of Manufacturing's offline time of a
+        work center (both planned blocks, RukPlanned, written by record#ResourceUnavailability). Loads after
+        10-seed/Maintenance.xml, whose enumeration type the reasons are of. -->
+    <moqui.basic.EnumerationType description="Resource Booking Approval Mode" enumTypeId="ResourceBookingApprovalMode"/>
+    <moqui.basic.Enumeration enumId="RbamAutomatic" description="Booked at once" sequenceNum="1"
+            enumTypeId="ResourceBookingApprovalMode"/>
+    <moqui.basic.Enumeration enumId="RbamApprovers" description="Approved by its approvers" sequenceNum="2"
+            enumTypeId="ResourceBookingApprovalMode"/>
+    <moqui.basic.Enumeration enumId="RurClosure" description="Closed (blackout)" sequenceNum="7" optionIndicator="Y"
+            enumTypeId="ResourceUnavailabilityReason"/>
+    <moqui.basic.Enumeration enumId="RurOffline" description="Planned offline (production)" sequenceNum="8" optionIndicator="Y"
+            enumTypeId="ResourceUnavailabilityReason"/>
+
+    <!-- Booking decisions (impl-maintenance P16; design §7.1, BookingRequests; design-drawers-commons' ResourceBooking approval kind):
+        ResourceBooking puts a booking waiting for approval in its approvers' approvals inbox (Commons' card), sent by book#Resource and
+        by a move that asks again (check#ResourceBookings; ResourceBookingDecisions.js notifyRequested), with the span it asks for;
+        approve#NotificationMessage and refuse#NotificationMessage call ResourceBookingServices approve#ResourceBooking and
+        refuse#ResourceBooking as the user deciding, which decide the booking on that span and state through decide#ResourceBooking
+        (a moved meeting is refused SPAN_CHANGED: its new notice decides it). The message holds the event, the resource, the span, its
+        words and the requester's name; no title or attendee. ResourceBookingNotice tells an organizer what became of a booking
+        (approved, denied) or that an outage or blackout now covers it: no approval topic, since every message of a topic with an
+        approve service is an approval in the inbox. Both registered for Admin's Topics (impl-maintenance F52). -->
+    <moqui.security.user.NotificationTopic topic="ResourceBooking" inboxEnumId="NinNotifications" description="Room or equipment booking to approve"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.work.ResourceBookingServices.approve#ResourceBooking"
+            refuseServiceName="mantle.work.ResourceBookingServices.refuse#ResourceBooking" refuseReasonRequired="Y"
+            titleTemplate="Approve booking of ${resourceName}: ${whenText}"/>
+    <moqui.server.TopicRegistration topic="ResourceBooking" ownerApp="Maintenance" purpose="A room or equipment booking waiting for the user's approval"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="RESOURCE_BOOKING_APPROVE" sequenceNum="30"/>
+    <moqui.security.user.NotificationTopic topic="ResourceBookingNotice" inboxEnumId="NinNotifications" description="Room or equipment booking update"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${resourceName}: ${outcomeText}"/>
+    <moqui.server.TopicRegistration topic="ResourceBookingNotice" ownerApp="Maintenance" purpose="What became of the user's room or equipment booking"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault" sequenceNum="31"/>
+</entity-facade-xml>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed">
+    <!-- Accounting data updates, run on every seed load and with nothing to do once done. -->
+    <!-- payroll's posting mappings (PtPayrollPayment, a receivable InvoicePayroll) that 20-install/60PostingDefaults.xml has for a new
+        database, added to DefaultSettings and the organizations of an existing one where missing, and the payroll payments made
+        before the payrollOrigin mark marked (People P27 and its review, AC-23: migrate#PayrollOrigin) -->
+    <mantle.account.PayrollOriginServices.migrate-PayrollOrigin/>
+</entity-facade-xml>

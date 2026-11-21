@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
     drop-ship facility (facility type FcTpDropShip, owned by the supplier, assetAllowOtherOwner Y) names the
     SystemMessageRemote of the supplier's integration in dropShipRemoteId. A drop-ship purchase order line keeps the customer
     order line it ships (salesOrderId, salesOrderItemSeqId): the stored link the delivery, the match and the screens read,
-    in place of the branch's match by product or sequence id. The enumerations and roles are in DropShipSetupData.xml. -->
+    in place of the branch's match by product or sequence id. The enumerations and roles are in 10-seed/Sales.xml. -->
     <extend-entity entity-name="Facility" package="mantle.facility">
         <field name="dropShipRemoteId" type="id"><description>For a drop-ship facility (FcTpDropShip), the
             SystemMessageRemote of the supplier's integration: its sendServiceName implements

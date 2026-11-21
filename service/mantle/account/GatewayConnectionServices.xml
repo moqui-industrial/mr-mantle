@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     Connections, ConnectionDetail, §14 "Connection adapter"; impl-admin P11, F10). The framework's
     org.moqui.admin.ConfigurationServices (find#Connections, get#Connection, store#Connection, test#Connection,
     find#ConnectionConsumers) reaches the payment, shipping and tax gateway configurations through run#GatewayConnectionAdapter,
-    registered in data/PaymentGatewayConnectionData.xml, which no group is authorized to call directly: it checks
+    registered in data/10-seed/Integrations.xml, which no group is authorized to call directly: it checks
     ADMIN_CONNECTION_VIEW or ADMIN_CONNECTION_MANAGE itself. store#PaymentGatewayOrganization is the one writer of
     PaymentGatewayOrganization; ALL_USERS may call it, and it refuses without ADMIN_CONNECTION_MANAGE and for an organization
     the caller does not administer (the organization filters of the authorization the call runs under, as

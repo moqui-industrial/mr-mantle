@@ -1,4 +1,4 @@
-// The local test payment gateways (PaymentGatewayConfig of type PgtTest, data/AccountConfigData.xml), which approve without a
+// The local test payment gateways (PaymentGatewayConfig of type PgtTest, data/20-install/BankingAndPayments.xml), which approve without a
 // charge (SEC-BOS-129): on a production instance (instance@purpose) a gateway operation through one is refused, and none is
 // permitted for an organization, unless the operator allows them (mantle@allow-test-gateways, a public demo's conf). Mantle's
 // gateway dispatch (PaymentServices.xml *#SinglePayment) and store#PaymentGatewayOrganization ask refusal.

@@ -1,7 +1,7 @@
 // Marketing's scope (IronStone Marketing design §1.1; impl-marketing P1, §2): the one module the marketing services call to learn
 // what the caller may do and in which organizations, before they read or write a campaign, a list, a segment, a send or an
 // event, and before a marketing report answers. The organization filters (X12: MarketingCampaign by organizationPartyId,
-// MarketSegment and ContactList by ownerPartyId, in MANTLE_USER_ORG and MANTLE_ACTIVE_ORG, data/MantleSetupData.xml) bound what
+// MarketSegment and ContactList by ownerPartyId, in MANTLE_USER_ORG and MANTLE_ACTIVE_ORG, data/15-seed-initial/OrganizationFilters.xml) bound what
 // an app root's user reads; the services check the organization here again, as the filters do not reach a service that reads
 // with authorization disabled.
 //

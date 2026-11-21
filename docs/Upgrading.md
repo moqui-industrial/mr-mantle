@@ -107,7 +107,7 @@ once its rows carry a `sitePageId`.
 
 ## ZZW_RETAIL's public page address (Shop P3, November 2026; demo data only)
 
-The demo wiki space `ZZW_RETAIL` (`data/ZcaProductDemoData.xml`) no longer points at PopRestStore's `/popc` pages: its
+The demo wiki space `ZZW_RETAIL` (`data/30-demo/30Store.xml`) no longer points at PopRestStore's `/popc` pages: its
 `publicPageUrl` is the demo Shop site's article page (`https://shop.zizi.localhost/support/CustomerArticle?wikiPageId=...`),
 its `publicAttachmentUrl` is empty (PASS serves no wiki file), and the `/pcontact` screen path alias is gone. Data files
 load only into a new database, so a demo database made before keeps the old values. Nothing breaks: Knowledge.js links an
@@ -137,9 +137,7 @@ equipment-fault stop is refused (`REASON_INVALID`, no `RurEquipmentFault`), and 
 work center (no `RurOffline`). A new database needs nothing.
 
 Stop the server and take a backup ([Upgrading](https://github.com/moqui/mr-moqui/blob/master/docs/Run-Deploy.md#upgrading)
-step 1). Load the seed files: mr-mantle's `MaintenanceWorkData`, `MaintenanceWorkOutageData`, `MaintenanceWorkResourceData`
-(after the outage file, whose reason type it uses), `MaintenanceIntakeData`, `MaintenanceProcedureData`,
-`MaintenancePurchaseData`, `MaintenanceSettingsData`, `MaintenanceStackData` and `MaintenancePlanData`: the lookups and
+step 1). Load the maintenance seed data (`data/10-seed/Maintenance.xml`): the lookups and
 status flow, the outage and blackout reasons, the mail intake action, the procedure flow, the equipment import target, the
 projected calendars, and the topic and Admin registrations of the generation job.
 
@@ -152,16 +150,15 @@ again by a later seed load), BOSS's groups, grants, bundles and registrations, a
 feed:
 
 ```sh
-moqui load location=runtime/components/addon/mr-mantle/data/MaintenanceSetupData.xml
-moqui load location=runtime/components/addon/mr-mantle/data/MaintenancePlanSetupData.xml
+moqui load location=runtime/components/addon/mr-mantle/data/15-seed-initial/Operations.xml
 moqui load location=runtime/components/addon/mr-boss/data/BossSetupMaintenanceData.xml
 moqui load location=runtime/components/addon/mr-boss/data/BossMaintenanceReportData.xml
 ```
 
-These four are initial data: loading one again puts back its rows as shipped, over what the deployment has changed since
+These three files contain initial data: loading one again puts back its rows as shipped, over what the deployment has changed since
 (a resumed job paused again, a group's changed grant). On a database made during the build, load only the files it lacks,
 or the rows it lacks by hand. The last phases, dispatch (P8) and customer repair (P12), added rows to
-`MaintenanceWorkData` (loaded again by `types=seed`) and to `BossSetupMaintenanceData` (Teams' grant to planners and
+`10-seed/Maintenance.xml` (loaded again by `types=seed`) and to `BossSetupMaintenanceData` (Teams' grant to planners and
 supervisors among them), so a database made before them takes those rows too. mr-boss `BossSetupData.xml` also gained
 `maintenance` in the client deny patterns of `BOSS_PROJECTS_INTERNAL` (Maintenance P1), and the `RequestTriage` topic's
 link opens Maintenance's RequestDetail for a maintenance request (Maintenance P4; before it the planners' triage notice
@@ -182,11 +179,11 @@ Sales P20 (mr-boss `plan/impl-sales.md`) adds the quote dataset (`mantle-sales-q
 the quote-expiring alert template) and types the pipeline document's derived owner, team and stage label as keywords, so a
 split by owner or team (the stalled-deal alert, the pipeline dashboard's owner panel) finds its rows. A new database needs
 nothing. On a database made before it, with the server stopped, load the seed row of the quote dataset's scope policy
-(`MantleSalesQuoteScope` in `SalesWorkspaceData`, `moqui load types=seed`) and the two initial files again, the document
+(`MantleSalesQuoteScope` in `10-seed/Sales.xml`, `moqui load types=seed`) and the two initial files again, the document
 file first:
 
 ```sh
-moqui load location=runtime/components/addon/mr-mantle/data/SalesPipelineReportData.xml
+moqui load location=runtime/components/addon/mr-mantle/data/15-seed-initial/SalesDocumentsAndReports.xml
 moqui load location=runtime/components/addon/mr-boss/data/BossSetupSalesData.xml
 ```
 
@@ -197,4 +194,4 @@ quotes already written.
 
 The same phase's review adds the request for quote acknowledgement (two SalesPolicy columns, which the table check adds on
 start, off until an organization turns it on in Sales' defaults) and its delivery source and mail template, seed rows in
-`SalesQuoteIssueData` that the `moqui load types=seed` above loads too.
+`10-seed/Sales.xml` that the `moqui load types=seed` above loads too.

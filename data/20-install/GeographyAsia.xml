@@ -1,0 +1,476 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="install">
+    <!-- see https://en.wikipedia.org/wiki/ISO_3166-2:CN -->
+    <!-- see http://www.stats.gov.cn/tjsj/tjbz/xzqhdm/201504/t20150415_712722.html -->
+    <!-- 省级数据-->
+    <Geo geoCodeNumeric="110000" geoId="CHN_11" geoNameLocal="北京市" geoTypeEnumId="GEOT_PROVINCE" geoName="Beijing"/>
+    <Geo geoCodeNumeric="120000" geoId="CHN_12" geoNameLocal="天津市" geoTypeEnumId="GEOT_PROVINCE" geoName="Tianjin"/>
+    <Geo geoCodeNumeric="130000" geoId="CHN_13" geoNameLocal="河北省" geoTypeEnumId="GEOT_PROVINCE" geoName="Hebei"/>
+    <Geo geoCodeNumeric="140000" geoId="CHN_14" geoNameLocal="山西省" geoTypeEnumId="GEOT_PROVINCE" geoName="Shanxi"/>
+    <Geo geoCodeNumeric="150000" geoId="CHN_15" geoNameLocal="内蒙古自治区" geoTypeEnumId="GEOT_PROVINCE" geoName="Inner Mongolia"/>
+    <Geo geoCodeNumeric="210000" geoId="CHN_21" geoNameLocal="辽宁省" geoTypeEnumId="GEOT_PROVINCE" geoName="Liaoning"/>
+    <Geo geoCodeNumeric="220000" geoId="CHN_22" geoNameLocal="吉林省" geoTypeEnumId="GEOT_PROVINCE" geoName="Jilin"/>
+    <Geo geoCodeNumeric="230000" geoId="CHN_23" geoNameLocal="黑龙江省" geoTypeEnumId="GEOT_PROVINCE" geoName="Heilongjiang"/>
+    <Geo geoCodeNumeric="310000" geoId="CHN_31" geoNameLocal="上海市" geoTypeEnumId="GEOT_PROVINCE" geoName="Shanghai"/>
+    <Geo geoCodeNumeric="320000" geoId="CHN_32" geoNameLocal="江苏省" geoTypeEnumId="GEOT_PROVINCE" geoName="Jiangsu"/>
+    <Geo geoCodeNumeric="330000" geoId="CHN_33" geoNameLocal="浙江省" geoTypeEnumId="GEOT_PROVINCE" geoName="Zhejiang"/>
+    <Geo geoCodeNumeric="340000" geoId="CHN_34" geoNameLocal="安徽省" geoTypeEnumId="GEOT_PROVINCE" geoName="Anhui"/>
+    <Geo geoCodeNumeric="350000" geoId="CHN_35" geoNameLocal="福建省" geoTypeEnumId="GEOT_PROVINCE" geoName="Fujian"/>
+    <Geo geoCodeNumeric="360000" geoId="CHN_36" geoNameLocal="江西省" geoTypeEnumId="GEOT_PROVINCE" geoName="Jiangxi"/>
+    <Geo geoCodeNumeric="370000" geoId="CHN_37" geoNameLocal="山东省" geoTypeEnumId="GEOT_PROVINCE" geoName="Shandong"/>
+    <Geo geoCodeNumeric="410000" geoId="CHN_41" geoNameLocal="河南省" geoTypeEnumId="GEOT_PROVINCE" geoName="Henan"/>
+    <Geo geoCodeNumeric="420000" geoId="CHN_42" geoNameLocal="湖北省" geoTypeEnumId="GEOT_PROVINCE" geoName="Hubei"/>
+    <Geo geoCodeNumeric="430000" geoId="CHN_43" geoNameLocal="湖南省" geoTypeEnumId="GEOT_PROVINCE" geoName="Hunan"/>
+    <Geo geoCodeNumeric="440000" geoId="CHN_44" geoNameLocal="广东省" geoTypeEnumId="GEOT_PROVINCE" geoName="Guangdong"/>
+    <Geo geoCodeNumeric="450000" geoId="CHN_45" geoNameLocal="广西壮族自治区" geoTypeEnumId="GEOT_PROVINCE" geoName="Guangxi"/>
+    <Geo geoCodeNumeric="460000" geoId="CHN_46" geoNameLocal="海南省" geoTypeEnumId="GEOT_PROVINCE" geoName="Hainan"/>
+    <Geo geoCodeNumeric="500000" geoId="CHN_50" geoNameLocal="重庆市" geoTypeEnumId="GEOT_PROVINCE" geoName="Chongqing"/>
+    <Geo geoCodeNumeric="510000" geoId="CHN_51" geoNameLocal="四川省" geoTypeEnumId="GEOT_PROVINCE" geoName="Sichuan"/>
+    <Geo geoCodeNumeric="520000" geoId="CHN_52" geoNameLocal="贵州省" geoTypeEnumId="GEOT_PROVINCE" geoName="Guizhou"/>
+    <Geo geoCodeNumeric="530000" geoId="CHN_53" geoNameLocal="云南省" geoTypeEnumId="GEOT_PROVINCE" geoName="Yunnan"/>
+    <Geo geoCodeNumeric="540000" geoId="CHN_54" geoNameLocal="西藏自治区" geoTypeEnumId="GEOT_PROVINCE" geoName="Xizang"/>
+    <Geo geoCodeNumeric="610000" geoId="CHN_61" geoNameLocal="陕西省" geoTypeEnumId="GEOT_PROVINCE" geoName="Shaanxi"/>
+    <Geo geoCodeNumeric="620000" geoId="CHN_62" geoNameLocal="甘肃省" geoTypeEnumId="GEOT_PROVINCE" geoName="Gansu"/>
+    <Geo geoCodeNumeric="630000" geoId="CHN_63" geoNameLocal="青海省" geoTypeEnumId="GEOT_PROVINCE" geoName="Qinghai"/>
+    <Geo geoCodeNumeric="640000" geoId="CHN_64" geoNameLocal="宁夏回族自治区" geoTypeEnumId="GEOT_PROVINCE" geoName="Ningxia"/>
+    <Geo geoCodeNumeric="650000" geoId="CHN_65" geoNameLocal="新疆维吾尔自治区" geoTypeEnumId="GEOT_PROVINCE" geoName="Xinjiang"/>
+    <Geo geoCodeNumeric="710000" geoId="CHN_71" geoNameLocal="台湾省" geoTypeEnumId="GEOT_PROVINCE" geoName="Taiwan"/>
+    <Geo geoCodeNumeric="810000" geoId="CHN_91" geoNameLocal="香港特别行政区" geoTypeEnumId="GEOT_PROVINCE" geoName="HongKong"/>
+    <Geo geoCodeNumeric="820000" geoId="CHN_92" geoNameLocal="澳门特别行政区" geoTypeEnumId="GEOT_PROVINCE" geoName="Macao"/>
+
+    <GeoAssoc geoId="CHN" toGeoId="CHN_11" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 北京市  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_12" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 天津市  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_13" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 河北省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_14" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 山西省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_15" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 内蒙古自治区  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_21" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 辽宁省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_22" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 吉林省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_23" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 黑龙江省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_31" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 上海市  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_32" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 江苏省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_33" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 浙江省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_34" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 安徽省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_35" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 福建省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_36" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 江西省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_37" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 山东省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_41" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 河南省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_42" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 湖北省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_43" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 湖南省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_44" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 广东省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_45" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 广西壮族自治区  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_46" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 海南省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_50" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 重庆市  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_51" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 四川省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_52" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 贵州省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_53" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 云南省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_54" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 西藏自治区  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_61" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 陕西省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_62" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 甘肃省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_63" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 青海省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_64" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 宁夏回族自治区  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_65" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 新疆维吾尔自治区  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_71" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 台湾省  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_91" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 香港特别行政区  -->
+    <GeoAssoc geoId="CHN" toGeoId="CHN_92" geoAssocTypeEnumId="GAT_REGIONS"/><!-- China ==- 澳门特别行政区  -->
+
+    <!-- see https://www.iso.org/obp/ui/#iso:code:3166:IN -->
+    <Geo geoId="IND_AN" geoCodeAlpha2="AN" geoName="Andaman and Nicobar Islands" geoTypeEnumId="GEOT_TERRITORY"/>
+    <Geo geoId="IND_AP" geoCodeAlpha2="AP" geoName="Andhra Pradesh" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_AR" geoCodeAlpha2="AR" geoName="Arunāchal Pradesh" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_AS" geoCodeAlpha2="AS" geoName="Assam" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_BR" geoCodeAlpha2="BR" geoName="Bihār" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_CH" geoCodeAlpha2="CH" geoName="Chandigarh" geoTypeEnumId="GEOT_TERRITORY"/>
+    <Geo geoId="IND_CT" geoCodeAlpha2="CG" geoName="Chhattīsgarh" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_DH" geoCodeAlpha2="DH" geoName="Dādra and Nagar Haveli and Damān and Diu" geoTypeEnumId="GEOT_TERRITORY"/>
+    <Geo geoId="IND_DL" geoCodeAlpha2="DL" geoName="Delhi" geoTypeEnumId="GEOT_TERRITORY"/>
+    <Geo geoId="IND_GA" geoCodeAlpha2="GA" geoName="Goa" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_GJ" geoCodeAlpha2="GJ" geoName="Gujarāt" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_HR" geoCodeAlpha2="HR" geoName="Haryāna" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_HP" geoCodeAlpha2="HP" geoName="Himāchal Pradesh" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_JK" geoCodeAlpha2="JK" geoName="Jammu and Kashmīr" geoTypeEnumId="GEOT_TERRITORY"/>
+    <Geo geoId="IND_JH" geoCodeAlpha2="JH" geoName="Jhārkhand" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_KA" geoCodeAlpha2="KA" geoName="Karnātaka" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_KL" geoCodeAlpha2="KL" geoName="Kerala" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND-LA" geoCodeAlpha2="LA" geoName="Ladākh" geoTypeEnumId="GEOT_TERRITORY"/>
+    <Geo geoId="IND_LD" geoCodeAlpha2="LD" geoName="Lakshadweep" geoTypeEnumId="GEOT_TERRITORY"/>
+    <Geo geoId="IND_MP" geoCodeAlpha2="MP" geoName="Madhya Pradesh" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_MH" geoCodeAlpha2="MH" geoName="Mahārāshtra" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_MN" geoCodeAlpha2="MN" geoName="Manipur" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_ML" geoCodeAlpha2="ML" geoName="Meghālaya" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_MZ" geoCodeAlpha2="MZ" geoName="Mizoram" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_NL" geoCodeAlpha2="NL" geoName="Nāgāland" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_OR" geoCodeAlpha2="OD" geoName="Odisha" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_PY" geoCodeAlpha2="PY" geoName="Puducherry" geoNameLocal="Pondicherry" geoTypeEnumId="GEOT_TERRITORY"/>
+    <Geo geoId="IND_PB" geoCodeAlpha2="PB" geoName="Punjab" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_RJ" geoCodeAlpha2="RJ" geoName="Rājasthān" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_SK" geoCodeAlpha2="SK" geoName="Sikkim" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_TN" geoCodeAlpha2="TN" geoName="Tamil Nādu" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_TG" geoCodeAlpha2="TS" geoName="Telangāna" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_TR" geoCodeAlpha2="TR" geoName="Tripura" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_UP" geoCodeAlpha2="UP" geoName="Uttar Pradesh" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_UT" geoCodeAlpha2="UK" geoName="Uttarākhand" geoTypeEnumId="GEOT_STATE"/>
+    <Geo geoId="IND_WB" geoCodeAlpha2="WB" geoName="West Bengal" geoTypeEnumId="GEOT_STATE"/>
+
+    <GeoAssoc geoId="IND" toGeoId="IND_AN" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_AP" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_AR" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_AS" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_BR" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_CH" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_CT" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_DH" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_DL" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_GA" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_GJ" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_HR" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_HP" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_JK" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_JH" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_KA" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_KL" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND-LA" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_LD" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_MP" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_MH" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_MN" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_ML" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_MZ" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_NL" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_OR" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_PY" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_PB" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_RJ" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_SK" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_TN" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_TG" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_TR" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_UP" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_UT" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="IND" toGeoId="IND_WB" geoAssocTypeEnumId="GAT_REGIONS"/>
+
+    <!-- see http://en.wikipedia.org/wiki/Prefectures_of_Japan and http://en.wikipedia.org/wiki/ISO_3166-2:JP -->
+    <Geo geoCodeNumeric="01" geoId="JPN_01" geoNameLocal="北海道" geoTypeEnumId="GEOT_PROVINCE" geoName="Hokkaido"/>
+    <Geo geoCodeNumeric="02" geoId="JPN_02" geoNameLocal="青森県" geoTypeEnumId="GEOT_PROVINCE" geoName="Aomori"/>
+    <Geo geoCodeNumeric="03" geoId="JPN_03" geoNameLocal="岩手県" geoTypeEnumId="GEOT_PROVINCE" geoName="Iwate"/>
+    <Geo geoCodeNumeric="04" geoId="JPN_04" geoNameLocal="宮城県" geoTypeEnumId="GEOT_PROVINCE" geoName="Miyagi"/>
+    <Geo geoCodeNumeric="05" geoId="JPN_05" geoNameLocal="秋田県" geoTypeEnumId="GEOT_PROVINCE" geoName="Akita"/>
+    <Geo geoCodeNumeric="06" geoId="JPN_06" geoNameLocal="山形県" geoTypeEnumId="GEOT_PROVINCE" geoName="Yamagata"/>
+    <Geo geoCodeNumeric="07" geoId="JPN_07" geoNameLocal="福島県" geoTypeEnumId="GEOT_PROVINCE" geoName="Fukushima"/>
+    <Geo geoCodeNumeric="08" geoId="JPN_08" geoNameLocal="茨城県" geoTypeEnumId="GEOT_PROVINCE" geoName="Ibaraki"/>
+    <Geo geoCodeNumeric="09" geoId="JPN_09" geoNameLocal="栃木県" geoTypeEnumId="GEOT_PROVINCE" geoName="Tochigi"/>
+    <Geo geoCodeNumeric="10" geoId="JPN_10" geoNameLocal="群馬県" geoTypeEnumId="GEOT_PROVINCE" geoName="Gunma"/>
+    <Geo geoCodeNumeric="11" geoId="JPN_11" geoNameLocal="埼玉県" geoTypeEnumId="GEOT_PROVINCE" geoName="Saitama"/>
+    <Geo geoCodeNumeric="12" geoId="JPN_12" geoNameLocal="千葉県" geoTypeEnumId="GEOT_PROVINCE" geoName="Chiba"/>
+    <Geo geoCodeNumeric="13" geoId="JPN_13" geoNameLocal="東京都" geoTypeEnumId="GEOT_PROVINCE" geoName="Tokyo"/>
+    <Geo geoCodeNumeric="14" geoId="JPN_14" geoNameLocal="神奈川県" geoTypeEnumId="GEOT_PROVINCE" geoName="Kanagawa"/>
+    <Geo geoCodeNumeric="15" geoId="JPN_15" geoNameLocal="新潟県" geoTypeEnumId="GEOT_PROVINCE" geoName="Niigata"/>
+    <Geo geoCodeNumeric="16" geoId="JPN_16" geoNameLocal="富山県" geoTypeEnumId="GEOT_PROVINCE" geoName="Toyama"/>
+    <Geo geoCodeNumeric="17" geoId="JPN_17" geoNameLocal="石川県" geoTypeEnumId="GEOT_PROVINCE" geoName="Ishikawa"/>
+    <Geo geoCodeNumeric="18" geoId="JPN_18" geoNameLocal="福井県" geoTypeEnumId="GEOT_PROVINCE" geoName="Fukui"/>
+    <Geo geoCodeNumeric="19" geoId="JPN_19" geoNameLocal="山梨県" geoTypeEnumId="GEOT_PROVINCE" geoName="Yamanashi"/>
+    <Geo geoCodeNumeric="20" geoId="JPN_20" geoNameLocal="長野県" geoTypeEnumId="GEOT_PROVINCE" geoName="Nagano"/>
+    <Geo geoCodeNumeric="21" geoId="JPN_21" geoNameLocal="岐阜県" geoTypeEnumId="GEOT_PROVINCE" geoName="Gifu"/>
+    <Geo geoCodeNumeric="22" geoId="JPN_22" geoNameLocal="静岡県" geoTypeEnumId="GEOT_PROVINCE" geoName="Shizuoka"/>
+    <Geo geoCodeNumeric="23" geoId="JPN_23" geoNameLocal="愛知県" geoTypeEnumId="GEOT_PROVINCE" geoName="Aichi"/>
+    <Geo geoCodeNumeric="24" geoId="JPN_24" geoNameLocal="三重県" geoTypeEnumId="GEOT_PROVINCE" geoName="Mie"/>
+    <Geo geoCodeNumeric="25" geoId="JPN_25" geoNameLocal="滋賀県" geoTypeEnumId="GEOT_PROVINCE" geoName="Shiga"/>
+    <Geo geoCodeNumeric="26" geoId="JPN_26" geoNameLocal="京都府" geoTypeEnumId="GEOT_PROVINCE" geoName="Kyoto"/>
+    <Geo geoCodeNumeric="27" geoId="JPN_27" geoNameLocal="大阪府" geoTypeEnumId="GEOT_PROVINCE" geoName="Osaka"/>
+    <Geo geoCodeNumeric="28" geoId="JPN_28" geoNameLocal="兵庫県" geoTypeEnumId="GEOT_PROVINCE" geoName="Hyogo"/>
+    <Geo geoCodeNumeric="29" geoId="JPN_29" geoNameLocal="奈良県" geoTypeEnumId="GEOT_PROVINCE" geoName="Nara"/>
+    <Geo geoCodeNumeric="30" geoId="JPN_30" geoNameLocal="和歌山県" geoTypeEnumId="GEOT_PROVINCE" geoName="Wakayama"/>
+    <Geo geoCodeNumeric="31" geoId="JPN_31" geoNameLocal="鳥取県" geoTypeEnumId="GEOT_PROVINCE" geoName="Tottori"/>
+    <Geo geoCodeNumeric="32" geoId="JPN_32" geoNameLocal="島根県" geoTypeEnumId="GEOT_PROVINCE" geoName="Shimane"/>
+    <Geo geoCodeNumeric="33" geoId="JPN_33" geoNameLocal="岡山県" geoTypeEnumId="GEOT_PROVINCE" geoName="Okayama"/>
+    <Geo geoCodeNumeric="34" geoId="JPN_34" geoNameLocal="広島県" geoTypeEnumId="GEOT_PROVINCE" geoName="Hiroshima"/>
+    <Geo geoCodeNumeric="35" geoId="JPN_35" geoNameLocal="山口県" geoTypeEnumId="GEOT_PROVINCE" geoName="Yamaguchi"/>
+    <Geo geoCodeNumeric="36" geoId="JPN_36" geoNameLocal="徳島県" geoTypeEnumId="GEOT_PROVINCE" geoName="Tokushima"/>
+    <Geo geoCodeNumeric="37" geoId="JPN_37" geoNameLocal="香川県" geoTypeEnumId="GEOT_PROVINCE" geoName="Kagawa"/>
+    <Geo geoCodeNumeric="38" geoId="JPN_38" geoNameLocal="愛媛県" geoTypeEnumId="GEOT_PROVINCE" geoName="Ehime"/>
+    <Geo geoCodeNumeric="39" geoId="JPN_39" geoNameLocal="高知県" geoTypeEnumId="GEOT_PROVINCE" geoName="Kochi"/>
+    <Geo geoCodeNumeric="40" geoId="JPN_40" geoNameLocal="福岡県" geoTypeEnumId="GEOT_PROVINCE" geoName="Fukuoka"/>
+    <Geo geoCodeNumeric="41" geoId="JPN_41" geoNameLocal="佐賀県" geoTypeEnumId="GEOT_PROVINCE" geoName="Saga"/>
+    <Geo geoCodeNumeric="42" geoId="JPN_42" geoNameLocal="長崎県" geoTypeEnumId="GEOT_PROVINCE" geoName="Nagasaki"/>
+    <Geo geoCodeNumeric="43" geoId="JPN_43" geoNameLocal="熊本県" geoTypeEnumId="GEOT_PROVINCE" geoName="Kumamoto"/>
+    <Geo geoCodeNumeric="44" geoId="JPN_44" geoNameLocal="大分県" geoTypeEnumId="GEOT_PROVINCE" geoName="Oita"/>
+    <Geo geoCodeNumeric="45" geoId="JPN_45" geoNameLocal="宮崎県" geoTypeEnumId="GEOT_PROVINCE" geoName="Miyazaki"/>
+    <Geo geoCodeNumeric="46" geoId="JPN_46" geoNameLocal="鹿児島県" geoTypeEnumId="GEOT_PROVINCE" geoName="Kagoshima"/>
+    <Geo geoCodeNumeric="47" geoId="JPN_47" geoNameLocal="沖縄県" geoTypeEnumId="GEOT_PROVINCE" geoName="Okinawa"/>
+
+    <GeoAssoc geoId="JPN" toGeoId="JPN_01" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_02" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_03" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_04" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_05" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_06" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_07" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_08" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_09" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_10" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_11" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_12" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_13" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_14" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_15" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_16" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_17" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_18" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_19" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_20" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_21" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_22" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_23" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_24" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_25" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_26" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_27" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_28" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_29" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_30" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_31" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_32" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_33" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_34" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_35" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_36" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_37" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_38" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_39" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_40" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_41" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_42" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_43" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_44" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_45" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_46" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="JPN" toGeoId="JPN_47" geoAssocTypeEnumId="GAT_REGIONS"/>
+
+    <!-- Japan Regions -->
+    <Geo geoId="JPN_HOKKAIDO" geoName="Hokkaido" geoTypeEnumId="GEOT_GROUP" geoCodeNumeric="1"/>
+    <GeoAssoc geoId="JPN_HOKKAIDO" toGeoId="JPN_01" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+
+    <Geo geoId="JPN_TOHUKU" geoName="Tohuku" geoTypeEnumId="GEOT_GROUP" geoCodeNumeric="2"/>
+    <GeoAssoc geoId="JPN_TOHUKU" toGeoId="JPN_02" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_TOHUKU" toGeoId="JPN_03" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_TOHUKU" toGeoId="JPN_04" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_TOHUKU" toGeoId="JPN_05" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_TOHUKU" toGeoId="JPN_06" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_TOHUKU" toGeoId="JPN_07" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+
+    <Geo geoId="JPN_KANTO" geoName="Kanto" geoTypeEnumId="GEOT_GROUP" geoCodeNumeric="3"/>
+    <GeoAssoc geoId="JPN_KANTO" toGeoId="JPN_08" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KANTO" toGeoId="JPN_09" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KANTO" toGeoId="JPN_10" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KANTO" toGeoId="JPN_11" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KANTO" toGeoId="JPN_12" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KANTO" toGeoId="JPN_13" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KANTO" toGeoId="JPN_14" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+
+    <Geo geoId="JPN_CHUBU" geoName="Chubu" geoTypeEnumId="GEOT_GROUP" geoCodeNumeric="4"/>
+    <GeoAssoc geoId="JPN_CHUBU" toGeoId="JPN_15" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_CHUBU" toGeoId="JPN_16" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_CHUBU" toGeoId="JPN_17" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_CHUBU" toGeoId="JPN_18" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_CHUBU" toGeoId="JPN_19" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_CHUBU" toGeoId="JPN_20" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_CHUBU" toGeoId="JPN_21" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_CHUBU" toGeoId="JPN_22" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_CHUBU" toGeoId="JPN_23" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+
+    <Geo geoId="JPN_KANSAI" geoName="Kansai" geoTypeEnumId="GEOT_GROUP" geoCodeNumeric="5"/>
+    <GeoAssoc geoId="JPN_KANSAI" toGeoId="JPN_24" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KANSAI" toGeoId="JPN_25" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KANSAI" toGeoId="JPN_26" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KANSAI" toGeoId="JPN_27" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KANSAI" toGeoId="JPN_28" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KANSAI" toGeoId="JPN_29" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KANSAI" toGeoId="JPN_30" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+
+    <Geo geoId="JPN_CHUGOKU" geoName="Chugoku" geoTypeEnumId="GEOT_GROUP" geoCodeNumeric="6"/>
+    <GeoAssoc geoId="JPN_CHUGOKU" toGeoId="JPN_31" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_CHUGOKU" toGeoId="JPN_32" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_CHUGOKU" toGeoId="JPN_33" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_CHUGOKU" toGeoId="JPN_34" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_CHUGOKU" toGeoId="JPN_35" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+
+    <Geo geoId="JPN_SHIKOKU" geoName="Shikoku" geoTypeEnumId="GEOT_GROUP" geoCodeNumeric="7"/>
+    <GeoAssoc geoId="JPN_SHIKOKU" toGeoId="JPN_36" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_SHIKOKU" toGeoId="JPN_37" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_SHIKOKU" toGeoId="JPN_38" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_SHIKOKU" toGeoId="JPN_39" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+
+    <Geo geoId="JPN_KYUSHU_OKINASA" geoName="Kyushu and Okinawa" geoTypeEnumId="GEOT_GROUP" geoCodeNumeric="8"/>
+    <GeoAssoc geoId="JPN_KYUSHU_OKINASA" toGeoId="JPN_40" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KYUSHU_OKINASA" toGeoId="JPN_41" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KYUSHU_OKINASA" toGeoId="JPN_42" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KYUSHU_OKINASA" toGeoId="JPN_43" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KYUSHU_OKINASA" toGeoId="JPN_44" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KYUSHU_OKINASA" toGeoId="JPN_45" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KYUSHU_OKINASA" toGeoId="JPN_46" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+    <GeoAssoc geoId="JPN_KYUSHU_OKINASA" toGeoId="JPN_47" geoAssocTypeEnumId="GAT_GROUP_MEMBER"/>
+
+    <!-- see http://en.wikipedia.org/wiki/ISO_3166-2:KR -->
+    <Geo geoId="KR-11" geoCodeNumeric="11" geoName="Seoul" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-26" geoCodeNumeric="26" geoName="Busan" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-27" geoCodeNumeric="27" geoName="Daegu" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-30" geoCodeNumeric="30" geoName="Daejeon" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-29" geoCodeNumeric="29" geoName="Gwangju" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-28" geoCodeNumeric="28" geoName="Incheon" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-31" geoCodeNumeric="31" geoName="Ulsan" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-43" geoCodeNumeric="43" geoName="North Chungcheong" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-44" geoCodeNumeric="44" geoName="South Chungcheong" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-42" geoCodeNumeric="42" geoName="Gangwon" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-41" geoCodeNumeric="41" geoName="Gyeonggi" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-47" geoCodeNumeric="47" geoName="North Gyeongsang" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-48" geoCodeNumeric="48" geoName="South Gyeongsang" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-45" geoCodeNumeric="45" geoName="North Jeolla" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-46" geoCodeNumeric="46" geoName="South Jeolla" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-49" geoCodeNumeric="49" geoName="Jeju" geoTypeEnumId="GEOT_PROVINCE"/>
+    <Geo geoId="KR-50" geoCodeNumeric="50" geoName="Sejong" geoTypeEnumId="GEOT_PROVINCE"/>
+
+    <GeoAssoc geoId="KOR" toGeoId="KR-11" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-26" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-27" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-30" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-29" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-28" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-31" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-43" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-44" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-42" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-41" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-47" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-48" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-45" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-46" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-49" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="KOR" toGeoId="KR-50" geoAssocTypeEnumId="GAT_REGIONS"/>
+
+    <!-- See https://www.iso.org/obp/ui/#iso:code:3166:VN -->
+    <Geo geoCodeNumeric="01" geoId="VN-01" geoNameLocal="Lai Châu" geoTypeEnumId="GEOT_PROVINCE" geoName="Lai Chau"/>
+    <Geo geoCodeNumeric="02" geoId="VN-02" geoNameLocal="Lào Cai" geoTypeEnumId="GEOT_PROVINCE" geoName="Lao Cai"/>
+    <Geo geoCodeNumeric="03" geoId="VN-03" geoNameLocal="Hà Giang" geoTypeEnumId="GEOT_PROVINCE" geoName="Ha Giang"/>
+    <Geo geoCodeNumeric="04" geoId="VN-04" geoNameLocal="Cao Bằng" geoTypeEnumId="GEOT_PROVINCE" geoName="Cao Bang"/>
+    <Geo geoCodeNumeric="05" geoId="VN-05" geoNameLocal="Sơn La" geoTypeEnumId="GEOT_PROVINCE" geoName="Son La"/>
+    <Geo geoCodeNumeric="06" geoId="VN-06" geoNameLocal="Yên Bái" geoTypeEnumId="GEOT_PROVINCE" geoName="Yen Bai"/>
+    <Geo geoCodeNumeric="07" geoId="VN-07" geoNameLocal="Tuyên Quang" geoTypeEnumId="GEOT_PROVINCE" geoName="Tuyen Quang"/>
+    <Geo geoCodeNumeric="08" geoId="VN-09" geoNameLocal="Lạng Sơn" geoTypeEnumId="GEOT_PROVINCE" geoName="Lang Son"/>
+    <Geo geoCodeNumeric="13" geoId="VN-13" geoNameLocal="Quảng Ninh" geoTypeEnumId="GEOT_PROVINCE" geoName="Quang Ninh"/>
+    <Geo geoCodeNumeric="14" geoId="VN-14" geoNameLocal="Hòa Bình" geoTypeEnumId="GEOT_PROVINCE" geoName="Hoa Binh"/>
+    <Geo geoCodeNumeric="15" geoId="VN-18" geoNameLocal="Ninh Bình" geoTypeEnumId="GEOT_PROVINCE" geoName="Ninh Binh"/>
+    <Geo geoCodeNumeric="20" geoId="VN-20" geoNameLocal="Thái Bình" geoTypeEnumId="GEOT_PROVINCE" geoName="Thai Binh"/>
+    <Geo geoCodeNumeric="21" geoId="VN-21" geoNameLocal="Thanh Hóa" geoTypeEnumId="GEOT_PROVINCE" geoName="Thanh Hoa"/>
+    <Geo geoCodeNumeric="22" geoId="VN-22" geoNameLocal="Nghệ An" geoTypeEnumId="GEOT_PROVINCE" geoName="Nghe An"/>
+    <Geo geoCodeNumeric="23" geoId="VN-23" geoNameLocal="Hà Tĩnh" geoTypeEnumId="GEOT_PROVINCE" geoName="Ha Tinh"/>
+    <Geo geoCodeNumeric="24" geoId="VN-24" geoNameLocal="Quảng Bình" geoTypeEnumId="GEOT_PROVINCE" geoName="Quang Binh"/>
+    <Geo geoCodeNumeric="25" geoId="VN-25" geoNameLocal="Quảng Trị" geoTypeEnumId="GEOT_PROVINCE" geoName="Quang Tri"/>
+    <Geo geoCodeNumeric="26" geoId="VN-26" geoNameLocal="Thừa Thiên Huế" geoTypeEnumId="GEOT_PROVINCE" geoName="Thua Thien Hue"/>
+    <Geo geoCodeNumeric="27" geoId="VN-27" geoNameLocal="Quảng Nam" geoTypeEnumId="GEOT_PROVINCE" geoName="Quang Nam"/>
+    <Geo geoCodeNumeric="28" geoId="VN-28" geoNameLocal="Kon Tum" geoTypeEnumId="GEOT_PROVINCE" geoName="Kon Tum"/>
+    <Geo geoCodeNumeric="29" geoId="VN-29" geoNameLocal="Quảng Ngãi" geoTypeEnumId="GEOT_PROVINCE" geoName="Quang Ngai"/>
+    <Geo geoCodeNumeric="30" geoId="VN-30" geoNameLocal="Gia Lai" geoTypeEnumId="GEOT_PROVINCE" geoName="Gia Lai"/>
+    <Geo geoCodeNumeric="31" geoId="VN-31" geoNameLocal="Bình Định" geoTypeEnumId="GEOT_PROVINCE" geoName="Binh Dinh"/>
+    <Geo geoCodeNumeric="32" geoId="VN-32" geoNameLocal="Phú Yên" geoTypeEnumId="GEOT_PROVINCE" geoName="Phu Yen"/>
+    <Geo geoCodeNumeric="33" geoId="VN-33" geoNameLocal="Đắc Lắk" geoTypeEnumId="GEOT_PROVINCE" geoName="Dac Lak"/>
+    <Geo geoCodeNumeric="34" geoId="VN-34" geoNameLocal="Khánh Hòa" geoTypeEnumId="GEOT_PROVINCE" geoName="Khanh Hoa"/>
+    <Geo geoCodeNumeric="35" geoId="VN-35" geoNameLocal="Lâm Đồng" geoTypeEnumId="GEOT_PROVINCE" geoName="Lam Dong"/>
+    <Geo geoCodeNumeric="36" geoId="VN-36" geoNameLocal="Ninh Thuận" geoTypeEnumId="GEOT_PROVINCE" geoName="Ninh Thuan"/>
+    <Geo geoCodeNumeric="37" geoId="VN-37" geoNameLocal="Tây Ninh" geoTypeEnumId="GEOT_PROVINCE" geoName="Tay Ninh"/>
+    <Geo geoCodeNumeric="39" geoId="VN-39" geoNameLocal="Đồng Nai" geoTypeEnumId="GEOT_PROVINCE" geoName="Dong Nai"/>
+    <Geo geoCodeNumeric="40" geoId="VN-40" geoNameLocal="Bình Thuận" geoTypeEnumId="GEOT_PROVINCE" geoName="Binh Thuan"/>
+    <Geo geoCodeNumeric="41" geoId="VN-41" geoNameLocal="Long An" geoTypeEnumId="GEOT_PROVINCE" geoName="Long An"/>
+    <Geo geoCodeNumeric="43" geoId="VN-43" geoNameLocal="Bà Rịa - Vũng Tàu" geoTypeEnumId="GEOT_PROVINCE" geoName="Ba Ria - Vung Tau"/>
+    <Geo geoCodeNumeric="44" geoId="VN-44" geoNameLocal="An Giang" geoTypeEnumId="GEOT_PROVINCE" geoName="An Giang"/>
+    <Geo geoCodeNumeric="45" geoId="VN-45" geoNameLocal="Đồng Tháp" geoTypeEnumId="GEOT_PROVINCE" geoName="Dong Thap"/>
+    <Geo geoCodeNumeric="47" geoId="VN-47" geoNameLocal="Kiên Giang" geoTypeEnumId="GEOT_PROVINCE" geoName="Kien Giang"/>
+    <Geo geoCodeNumeric="49" geoId="VN-49" geoNameLocal="Vĩnh Long" geoTypeEnumId="GEOT_PROVINCE" geoName="Vinh Long"/>
+    <Geo geoCodeNumeric="50" geoId="VN-50" geoNameLocal="Bến Tre" geoTypeEnumId="GEOT_PROVINCE" geoName="Ben Tre"/>
+    <Geo geoCodeNumeric="51" geoId="VN-51" geoNameLocal="Trà Vinh" geoTypeEnumId="GEOT_PROVINCE" geoName="Tra Vinh"/>
+    <Geo geoCodeNumeric="52" geoId="VN-52" geoNameLocal="Sóc Trăng" geoTypeEnumId="GEOT_PROVINCE" geoName="Soc Trang"/>
+    <Geo geoCodeNumeric="53" geoId="VN-53" geoNameLocal="Bắc Kạn" geoTypeEnumId="GEOT_PROVINCE" geoName="Bac Kan"/>
+    <Geo geoCodeNumeric="54" geoId="VN-54" geoNameLocal="Bắc Giang" geoTypeEnumId="GEOT_PROVINCE" geoName="Bac Giang"/>
+    <Geo geoCodeNumeric="55" geoId="VN-55" geoNameLocal="Bạc Liêu" geoTypeEnumId="GEOT_PROVINCE" geoName="Bac Lieu"/>
+    <Geo geoCodeNumeric="56" geoId="VN-56" geoNameLocal="Bắc Ninh" geoTypeEnumId="GEOT_PROVINCE" geoName="Bac Ninh"/>
+    <Geo geoCodeNumeric="57" geoId="VN-57" geoNameLocal="Bình Dương" geoTypeEnumId="GEOT_PROVINCE" geoName="Binh Duong"/>
+    <Geo geoCodeNumeric="57" geoId="VN-58" geoNameLocal="Bình Phước" geoTypeEnumId="GEOT_PROVINCE" geoName="Binh Phuoc"/>
+    <Geo geoCodeNumeric="58" geoId="VN-59" geoNameLocal="Cà Mau" geoTypeEnumId="GEOT_PROVINCE" geoName="Ca Mau"/>
+    <Geo geoCodeNumeric="61" geoId="VN-61" geoNameLocal="Hải Dương" geoTypeEnumId="GEOT_PROVINCE" geoName="Hai Duong"/>
+    <Geo geoCodeNumeric="63" geoId="VN-63" geoNameLocal="Hà Nam" geoTypeEnumId="GEOT_PROVINCE" geoName="Ha Nam"/>
+    <Geo geoCodeNumeric="66" geoId="VN-66" geoNameLocal="Hưng Yên" geoTypeEnumId="GEOT_PROVINCE" geoName="Hung Yen"/>
+    <Geo geoCodeNumeric="67" geoId="VN-67" geoNameLocal="Nam Định" geoTypeEnumId="GEOT_PROVINCE" geoName="Nam Dinh"/>
+    <Geo geoCodeNumeric="68" geoId="VN-68" geoNameLocal="Phú Thọ" geoTypeEnumId="GEOT_PROVINCE" geoName="Phu Tho"/>
+    <Geo geoCodeNumeric="69" geoId="VN-69" geoNameLocal="Thái Nguyên" geoTypeEnumId="GEOT_PROVINCE" geoName="Thai Nguyen"/>
+    <Geo geoCodeNumeric="70" geoId="VN-70" geoNameLocal="Vĩnh Phúc" geoTypeEnumId="GEOT_PROVINCE" geoName="Vinh Phuc"/>
+    <Geo geoCodeNumeric="71" geoId="VN-71" geoNameLocal="Điện Biên" geoTypeEnumId="GEOT_PROVINCE" geoName="Dien Bien"/>
+    <Geo geoCodeNumeric="72" geoId="VN-72" geoNameLocal="Đắk Nông" geoTypeEnumId="GEOT_PROVINCE" geoName="Dak Nong"/>
+    <Geo geoCodeNumeric="73" geoId="VN-73" geoNameLocal="Hậu Giang" geoTypeEnumId="GEOT_PROVINCE" geoName="Bac Giang"/>
+    <Geo geoCodeNumeric="74" geoId="VN-CT" geoNameLocal="Cần Thơ" geoTypeEnumId="GEOT_PROVINCE" geoName="Can Tho"/>
+    <Geo geoCodeNumeric="75" geoId="VN-DN" geoNameLocal="Đà Nẵng" geoTypeEnumId="GEOT_PROVINCE" geoName="Da Nang"/>
+    <Geo geoCodeNumeric="76" geoId="VN-HN" geoNameLocal="Hà Nội" geoTypeEnumId="GEOT_PROVINCE" geoName="Ha Noi"/>
+    <Geo geoCodeNumeric="77" geoId="VN-HP" geoNameLocal="Hải Phòng" geoTypeEnumId="GEOT_PROVINCE" geoName="Hai Phong"/>
+    <Geo geoCodeNumeric="78" geoId="VN-SG" geoNameLocal="Hồ Chí Minh" geoTypeEnumId="GEOT_PROVINCE" geoName="Ho Chi Minh"/>
+
+    <GeoAssoc geoId="VNM" toGeoId="VN-01" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-02" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-03" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-04" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-05" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-06" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-07" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-09" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-13" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-14" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-18" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-20" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-21" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-22" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-23" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-24" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-25" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-26" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-27" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-28" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-29" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-30" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-31" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-32" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-33" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-34" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-35" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-36" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-37" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-39" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-40" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-41" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-43" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-44" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-45" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-47" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-49" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-50" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-51" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-52" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-53" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-54" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-55" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-56" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-57" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-58" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-59" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-61" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-63" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-66" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-67" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-68" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-69" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-70" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-71" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-72" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-73" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-CT" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-DN" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-HN" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-HP" geoAssocTypeEnumId="GAT_REGIONS"/>
+    <GeoAssoc geoId="VNM" toGeoId="VN-SG" geoAssocTypeEnumId="GAT_REGIONS"/>
+</entity-facade-xml>

@@ -18,8 +18,8 @@ implementation record are [plan/payments-shipping-edi.md](../plan/payments-shipp
 | `ShippingGatewayBoxType`, `ShipmentBoxType` | `gatewayBoxId` a Shippo parcel template; box dimensions and their unit, or a template, are required |
 | `ShippingGatewayOption` | `SgoLabelType` (Shippo `label_file_type`, `PDF_4x6` by default), `SgoLookupGraceSeconds` (300 by default). An `SgoApiToken` option is ignored with a warning: the token is never an option |
 
-`data/ShippoDemoData.xml` names a test gateway `SHIPPO_DEMO` and remote `ShippoSandbox` without credentials, and
-`data/ShippoSetupData.xml` the `ShippoWebhook` message type. Enter the token and secret in the System Message Remote
+`data/30-demo/10Integrations.xml` names a test gateway `SHIPPO_DEMO` and remote `ShippoSandbox` without credentials, and
+`data/10-seed/Integrations.xml` the `ShippoWebhook` message type. Enter the token and secret in the System Message Remote
 screen or a deployment's own data file, never in seed data.
 
 ## Labels

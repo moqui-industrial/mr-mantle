@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed">
+    <moqui.basic.EnumerationType description="Payroll Calc Period" enumTypeId="PayrollCalcPer"/>
+    <moqui.basic.Enumeration description="Pay Period" enumId="PcfPayPeriod" enumTypeId="PayrollCalcPer"/>
+    <moqui.basic.Enumeration description="Workweek" enumId="PcfWorkweek" enumTypeId="PayrollCalcPer"/>
+
+    <moqui.basic.EnumerationType description="Payroll Wage Grouping" enumTypeId="PayrollWageGrp"/>
+    <!-- All time entries are considered together for the calculation period. -->
+    <moqui.basic.Enumeration description="All" enumId="PwgAll" sequenceNum="1" enumTypeId="PayrollWageGrp"/>
+    <!-- All time entries for the same facility owner -->
+    <moqui.basic.Enumeration description="Facility Owner" enumId="PwgFacilityOwner" sequenceNum="2" enumTypeId="PayrollWageGrp"/>
+    <!-- All time entries for the same facility -->
+    <moqui.basic.Enumeration description="Facility" enumId="PwgFacility" sequenceNum="3" enumTypeId="PayrollWageGrp"/>
+    <!-- Time Entry grouping should evaluate each time entry separately as for whether it achieved minimum wage -->
+    <moqui.basic.Enumeration description="Time Entry" enumId="PwgTimeEntry" sequenceNum="10" enumTypeId="PayrollWageGrp"/>
+
+    <!-- An FLSA workweek is a fixed, regularly-recurring period of 168 hours – that is, seven, consecutive, 24-hour periods –
+         that the employer expressly adopts in order to maintain FLSA compliance.  It is unclear what effect daylight savings
+         time has on the 168 hours, but it appears that the weeks that are short or long one hour are treated as 167 or 169
+         hour weeks so that the following week would start at the same time. -->
+    <mantle.party.PartySettingType description="Payroll FLSA - Workweek Begins On" partySettingTypeId="PayrollFlsaWrkWkBegOn"
+                                   enumTypeId="DayOfWeek" defaultValue="DowMonday">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll FLSA - Workday Begins At" partySettingTypeId="PayrollFlsaWrkDayBegAt"
+                                   validRegexp="\d\d\:\d\d" defaultValue="00:00">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+
+    <!-- RRP:
+    Should time and associated pay for HOURLY Rest Breaks and NPT be extracted from time entries before calculating RRP?
+        If Y and Rest Breaks or NPT are not recorded for HOURLY time entries, this will have no effect.
+    Should HOURLY time entries be included in RRP calculation?
+        If N, RRP calculation is performed against PIECE, HYBRID, and ND pay only.
+    Should HOURLY Rest Breaks and NPT be paid RRP?
+        If N, HOURLY Rest Breaks and NPT are paid HOURLY rate (If breaks are not extracted for RRP, they should not be paid RRP).
+    Should PIECE/HYBRID Rest Breaks be paid the higher of RRP and the hourly rate they would have otherwise earned?
+        If N, PIECE/HYBRID Rest Breaks will be paid RRP.
+    Should Shift Differentials be included in RRP calculation?
+        This is required in the USA by the FLSA: https://www.dol.gov/whd/regs/compliance/whdfs54.htm
+    How frequently should RRP be calculated?
+    -->
+    <mantle.party.PartySettingType description="Payroll RRP - Exclude Breaks/NPT" partySettingTypeId="PayrollRrpExclBreak"
+                                   enumTypeId="BooleanYN" defaultValue="BlY">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll RRP - Include Hourly Pay" partySettingTypeId="PayrollRrpInclHourly"
+                                   enumTypeId="BooleanYN" defaultValue="BlY">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll RRP - Pay RRP on Hourly Break/NPT" partySettingTypeId="PayrollRrpPayOnHourlyBreakNpt"
+                                   enumTypeId="BooleanYN" defaultValue="BlY">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll RRP - Pay Max(Hourly/RRP) on Piece Break" partySettingTypeId="PayrollRrpPayMaxRateOnPieceBreak"
+                                   enumTypeId="BooleanYN" defaultValue="BlN">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll RRP - Include Shift Differentials" partySettingTypeId="PayrollRrpInclShDiff"
+                                   enumTypeId="BooleanYN" defaultValue="BlY">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll RRP - Calc Period" partySettingTypeId="PayrollRrpCalcPer"
+                                   enumTypeId="PayrollCalcPer" defaultValue="PcfWorkweek">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+
+    <!-- Overtime:
+    Overtime Premium Factor
+    Double time Premium Factor
+    Should HOURLY OT/DT premiums be based on HOURLY rate if RRP calculation is $0?
+        If N, OT/DT Premiums will be $0 (this only occurs if no minimum wage check is performed).
+    Should HOURLY OT/DT premiums for HOURLY jobs be based on RRP?
+        If Y, use RRP calculated rate.  FLSA allows using HOURLY wage at time of OT/DT, but employee/employer must agree.
+    -->
+    <mantle.party.PartySettingType description="Payroll OT - Overtime Premium" partySettingTypeId="PayrollOtOtPrem"
+            validRegexp="\d\.\d" defaultValue="0.5">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll OT - Double Time Premium" partySettingTypeId="PayrollOtDtPrem"
+            validRegexp="\d\.\d" defaultValue="1.0">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll OT - Hourly if no RRP" partySettingTypeId="PayrollOtHrNoRrp"
+                                   enumTypeId="BooleanYN" defaultValue="BlY">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll OT - Hourly use RRP" partySettingTypeId="PayrollOtHrUseRrp"
+                                   enumTypeId="BooleanYN" defaultValue="BlY">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+
+    <!-- Minimum Wage:
+    Is Employee Subject to minimum wage?
+        If N, no minimum wage check will be performed.
+    What is the Employee's minimum wage?
+    Should HOURLY time entries be included in minimum wage makeup calculation?
+        If N, Minimum wage test is performed against PIECE and ND hours and pay only.
+    How frequently should minimum wage be tested?
+    What is the minimum wage grouping level?
+        If a grouping level is defined, makeup pay will be assigned at this level.
+    Should minimum wage makeup group by rate?
+        If Y, treat each rate as a separate grouping level.  This allows multiple mininum wages.
+    -->
+    <mantle.party.PartySettingType description="Payroll MWG - Check Minimum Wage" partySettingTypeId="PayrollMwCheck"
+                                   enumTypeId="BooleanYN" defaultValue="BlY">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <!--<mantle.party.PartySettingType description="Payroll MWG - Default Minimum Wage" partySettingTypeId="PayrollMwDefault"-->
+                                   <!--validRegexp="\d+\.\d*" defaultValue="0">-->
+        <!--<roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>-->
+    <mantle.party.PartySettingType description="Payroll MWG - Check Hourly Entries" partySettingTypeId="PayrollMwCheckHourly"
+                                   enumTypeId="BooleanYN" defaultValue="BlY">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll MWG - Calc Period" partySettingTypeId="PayrollMwCalcPer"
+                                   enumTypeId="PayrollCalcPer" defaultValue="PcfWorkweek">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll MWG - Calc Grouping" partySettingTypeId="PayrollMwCalcGrp"
+                                   enumTypeId="PayrollWageGrp" defaultValue="PwgAll">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll MWG - Makeup Group By Rate" partySettingTypeId="PayrollMwMkpGrpByRate"
+                                   enumTypeId="BooleanYN" defaultValue="BlN">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+
+
+    <!-- Workers Compensation (Risk Class):
+        Default Risk Class defines the default risk class for an organization or an employee.
+        Default Overrides Work Type determines whether the Default Risk Class overrides the risk class (if present)
+            overrides the risk class determined by the type of work being performed.
+        Should overtime premiums be included in Workers Compensation Insurance calculations?
+            Pennsylvania, Delaware, Utah, and Nevada are the only states that included it currently.
+        Should shift differential premiums be included in Workers Compensation Insurance calculations?
+    -->
+    <mantle.party.PartySettingType description="Payroll WC - Default Risk Class" partySettingTypeId="PayrollWcRiskClass"
+                                   enumTypeId="RiskClassType">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll WC - Default Overrides Work Type" partySettingTypeId="PayrollWcDftOvrWrkTp"
+                                   enumTypeId="BooleanYN" defaultValue="BlY">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll WC - Include OT Premiums" partySettingTypeId="PayrollWcOtPrem"
+                                   enumTypeId="BooleanYN" defaultValue="BlN">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+    <mantle.party.PartySettingType description="Payroll WC - Include Shift Diff Premiums" partySettingTypeId="PayrollWcShDiffPrem"
+                                   enumTypeId="BooleanYN" defaultValue="BlY">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+
+    <!-- Pay Stub:
+    Should HOURLY Rest Breaks that are paid HOURLY rate be combined with the associated HOURLY time entry on pay stub?
+    -->
+    <mantle.party.PartySettingType description="Payroll Stub - Combine Break/Hourly" partySettingTypeId="PayrollStubCombineBrHr"
+            enumTypeId="BooleanYN" defaultValue="BlN">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+
+    <!-- Identification of Employees for tax authorities -->
+    <mantle.party.PartySettingType description="Party Identification Type to use for Employees" partySettingTypeId="PayrollEmployeePartyIdType" defaultValue="PtidSsn">
+        <roles roleTypeId="OrgEmployer"/></mantle.party.PartySettingType>
+
+    <!-- People's employee lifecycle (IronStone People design §4, §12 EmployeeImport; impl-people P7): the import target `employees`, a
+        target of the framework's org.moqui.admin.DataTransferServices with no batch of its own (the framework keeps a TransferBatch),
+        on the pattern of the staff invitations target (10-seed/PartyAndIdentity.xml). Its fields are the hire's: the person (an existing one
+        by id, else a new one by name and work email), the start and optional end, and the first assignment by id; the employer is the
+        batch's own. Each row is validated by preview#Hire's checks and applied by hire#Employee as the importer, in a transaction of
+        its own, under the row's operation key. A file with a column named like a password, a group, a permission, a user id, a wage,
+        pay, tax or a bank account is refused whole: an import never sets a password, grants a group or writes pay or tax history.
+        The one exception is a first salary (the user's call of Nov 12, 2026): the columns salaryAmount, salaryCurrencyUomId,
+        salaryPeriodTypeId and salaryFromDate, written at once for an importer who also holds PAYROLL_EDIT and PAYROLL_VIEW and
+        refused alone for anyone else (PeopleImport.js). The salary columns name PAYROLL_VIEW (the user's call of Nov 12, 2026, impl-people
+        P25 review): a staged row's salary values are shown only to a holder, masked for the batch's other readers (an HR importer, an
+        HR reader, Admin's Imports), and cleared from the staged row once it is applied (the framework's restricted columns). It asks
+        PEOPLE_IMPORT and
+        PEOPLE_HR_EDIT to import and PEOPLE_HR_VIEW to view, and no ADMIN_* permission (impl-people §4: a target's permissions are all
+        required, so ADMIN_TRANSFER_RUN beside them would shut HR out of EmployeeImport); Admin's Imports lists a run for a data
+        operator who also holds PEOPLE_HR_VIEW. Its owner place is People's EmployeeImport (the app maps ownerRoute). -->
+    <moqui.server.TransferTarget targetId="employees" direction="import" targetMode="rows" title="Employees"
+            description="Employees hired into an employer, each with the first assignment"
+            effectsNote="Each row hires one person into the employer, as Hire employee does: a new person or one People knows, one employment, its first assignment. No account is made. A first salary is set only for an importer who may change pay; for anyone else its columns are left out."
+            ownerApp="People" targetVersion="1" fieldLabel="Employee field" scopeLabel="Employer"
+            columnsJson="[{&quot;name&quot;:&quot;firstName&quot;,&quot;label&quot;:&quot;First name&quot;},{&quot;name&quot;:&quot;lastName&quot;,&quot;label&quot;:&quot;Last name&quot;},{&quot;name&quot;:&quot;preferredName&quot;,&quot;label&quot;:&quot;Preferred name&quot;},{&quot;name&quot;:&quot;workEmail&quot;,&quot;label&quot;:&quot;Work email&quot;},{&quot;name&quot;:&quot;workPhone&quot;,&quot;label&quot;:&quot;Work phone&quot;},{&quot;name&quot;:&quot;partyId&quot;,&quot;label&quot;:&quot;Existing person ID&quot;},{&quot;name&quot;:&quot;fromDate&quot;,&quot;label&quot;:&quot;Start&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;thruDate&quot;,&quot;label&quot;:&quot;End&quot;},{&quot;name&quot;:&quot;departmentPartyId&quot;,&quot;label&quot;:&quot;Department ID&quot;},{&quot;name&quot;:&quot;emplPositionId&quot;,&quot;label&quot;:&quot;Position ID&quot;},{&quot;name&quot;:&quot;managerPartyId&quot;,&quot;label&quot;:&quot;Manager ID&quot;},{&quot;name&quot;:&quot;facilityId&quot;,&quot;label&quot;:&quot;Work location ID&quot;},{&quot;name&quot;:&quot;confirmNewPerson&quot;,&quot;label&quot;:&quot;New person although someone matches&quot;},{&quot;name&quot;:&quot;organizationPartyId&quot;,&quot;label&quot;:&quot;Employer ID&quot;},{&quot;name&quot;:&quot;reason&quot;,&quot;label&quot;:&quot;Note&quot;},{&quot;name&quot;:&quot;salaryAmount&quot;,&quot;label&quot;:&quot;Salary&quot;,&quot;permission&quot;:&quot;PAYROLL_VIEW&quot;},{&quot;name&quot;:&quot;salaryCurrencyUomId&quot;,&quot;label&quot;:&quot;Salary currency&quot;,&quot;permission&quot;:&quot;PAYROLL_VIEW&quot;},{&quot;name&quot;:&quot;salaryPeriodTypeId&quot;,&quot;label&quot;:&quot;Salary frequency&quot;,&quot;permission&quot;:&quot;PAYROLL_VIEW&quot;},{&quot;name&quot;:&quot;salaryFromDate&quot;,&quot;label&quot;:&quot;Salary from&quot;,&quot;permission&quot;:&quot;PAYROLL_VIEW&quot;}]"
+            keyFields="partyId,workEmail"
+            refusedColumns="password,group,permission,authz,privilege,userid,wage,pay,tax,bank,iban"
+            validateRowService="mantle.humanres.PeopleServices.validate#EmployeeImportRow"
+            applyRowService="mantle.humanres.PeopleServices.apply#EmployeeImportRow"
+            scopeService="mantle.humanres.PeopleServices.find#EmployeeImportScopes"
+            maxBytes="262144" maxRows="500" retentionDays="30"
+            importPermission="PEOPLE_IMPORT,PEOPLE_HR_EDIT" viewPermission="PEOPLE_HR_VIEW"
+            ownerRoute="peopleEmployeeImport" sequenceNum="40"/>
+    <!-- The row and scope services run as the importer wherever the framework calls them (the wizard under People, Admin's Imports,
+        an apply carried on after the request): every user may call them, as Mantle's identity services (10-seed/PartyAndIdentity.xml), and each
+        checks PEOPLE_IMPORT with the hire's own permissions and employer scope itself, as preview#Hire and hire#Employee do again. -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantlePeopleImportServices" description="People's employees import row services"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantlePeopleImportServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            nameIsPattern="Y" artifactName="mantle\.humanres\.PeopleServices\.(validate#EmployeeImportRow|apply#EmployeeImportRow|find#EmployeeImportScopes)"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantlePeopleImportServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantlePeopleImportServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+
+    <!-- impl-people P8: a People lifecycle task assigned (a checklist step, an equipment return), told on a topic of its own rather
+        than the generic WorkItemAssigned, whose title names the task and its root ("Offboarding: <person>", "Return … from
+        <person>"): this title names nothing of the person or the change, only who assigned it and when it is due, so a lock screen
+        shows nothing private. Sent by its owning service, mantle.humanres.PeopleServices.notify#PeopleTaskAssigned, which
+        mantle.work.TaskServices.notify#TaskAssigned hands People's work to. The message holds workEffortId, assignedByName and
+        dueDateText, and the task as its record; the app that shows it sets the link (IronStone: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PeopleTaskAssigned" inboxEnumId="NinNotifications"
+            description="People task assigned to you" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION" titleTemplate="${assignedByName} assigned you a People task, due ${dueDateText}"/>
+
+    <!-- impl-people P8 (the user's call on F80, Nov 11): an employee's emergency contact is a Person party of its own, linked from
+        the employee by a dated relationship of this type (from the employee to the contact; the kind of relation, such as spouse or
+        parent, in relationshipName), with the contact's own phone. It is private contact data (People design §1.1): read and
+        changed only through mantle.humanres.PeopleServices (the person and HR of their employer), never in a directory, a contact
+        book, the palette, a contact list or search. Every such reader hides a personal contact (Party.privateOwnerUserId) from
+        everyone but its owner, so the contact party is held by the account _PEOPLE_PRIVATE_ (disabled, no password, no group: no one
+        signs in as it, no user is its owner, and no reader shows it). The account is made with the first contact
+        (Employees.js privateHolderId), not seeded here: a fresh install offers its first administrator only while no account but the
+        framework's own exists (org.moqui.impl.UserServices.create#InitialAdminAccount, the Login screen). -->
+    <moqui.basic.Enumeration enumId="PrtEmergencyContact" description="Emergency Contact" enumTypeId="PartyRelationshipType"/>
+
+    <!-- impl-people P28 (design-people §8.4, PayrollExchange, §15; design-admin §11.1; impl-people §4, F16): the payroll exchange's two
+        registrations of the framework's org.moqui.admin.DataTransferServices, owner contracts of Admin's data transfer:
+        - the export target payrollExchangeInputs (a file target, on the pattern of 10-seed/PartyAndIdentity.xml): a pay group's prepared
+          period's approved pay inputs as delimited text, for a payroll exporter (PAYROLL_VIEW and PAYROLL_EDIT, which the registration
+          asks and export#InputsTransfer checks again with the employer); each field names its permission: the amount and the source's
+          rate PAYROLL_VIEW, the rest none beyond the export's own. Its scopes are the groups' periods; its one option, an exchange batch,
+          is how People's PayrollExchange writes an export it reconciled, so Admin's Exports lists both. No ADMIN_* permission;
+        - the import target payrollExchange (a wizard target, on the pattern of the time-and-attendance target): People keeps its own
+          wizard (PayrollExchange: history and a processor's results need their scope, sign-off and reconciliation), so only its result
+          contract is registered, the imports of the employers the caller reads with the place that opens each. Its import permissions
+          are all that preview#Batch and execute#Batch require: People's own import permission PEOPLE_IMPORT with PAYROLL_VIEW and
+          PAYROLL_EDIT (the user's call of Nov 11, 2026: an app's targets name its own import permission, never an ADMIN_* one); its runs
+          are read with PAYROLL_VIEW and People's scope, which find#ExchangeRuns checks again.
+        Nothing is staged, applied or exported through a registration on anyone's behalf, and it adds no right. Their owner place is
+        People's PayrollExchange (the app maps ownerRoute). -->
+    <moqui.server.TransferTarget targetId="payrollExchangeInputs" direction="export" targetMode="file" title="Pay inputs for a payroll processor"
+            description="A pay group's period's approved pay inputs (hours, leave, pieces, reimbursements, adjustments and recoveries), each with its source key, as a file an external payroll processor reads"
+            ownerApp="People" targetVersion="1" scopeLabel="Pay group and period"
+            columnsJson="[{&quot;name&quot;:&quot;worker&quot;,&quot;label&quot;:&quot;Worker&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;workerName&quot;,&quot;label&quot;:&quot;Worker name&quot;},{&quot;name&quot;:&quot;employment&quot;,&quot;label&quot;:&quot;Employment&quot;},{&quot;name&quot;:&quot;inputKind&quot;,&quot;label&quot;:&quot;Kind of input&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;component&quot;,&quot;label&quot;:&quot;Pay component&quot;},{&quot;name&quot;:&quot;inputName&quot;,&quot;label&quot;:&quot;Formula input&quot;},{&quot;name&quot;:&quot;date&quot;,&quot;label&quot;:&quot;Day&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;quantity&quot;,&quot;label&quot;:&quot;Quantity&quot;},{&quot;name&quot;:&quot;unit&quot;,&quot;label&quot;:&quot;Unit&quot;},{&quot;name&quot;:&quot;amount&quot;,&quot;label&quot;:&quot;Amount&quot;,&quot;permission&quot;:&quot;PAYROLL_VIEW&quot;},{&quot;name&quot;:&quot;currency&quot;,&quot;label&quot;:&quot;Currency&quot;},{&quot;name&quot;:&quot;rate&quot;,&quot;label&quot;:&quot;Source rate&quot;,&quot;permission&quot;:&quot;PAYROLL_VIEW&quot;,&quot;selected&quot;:false},{&quot;name&quot;:&quot;sourceKey&quot;,&quot;label&quot;:&quot;Source key&quot;,&quot;required&quot;:true}]"
+            optionsJson="[{&quot;name&quot;:&quot;batch&quot;,&quot;label&quot;:&quot;Payroll exchange (empty: every approved input of the period)&quot;,&quot;type&quot;:&quot;text&quot;,&quot;maxLength&quot;:40}]"
+            exportService="mantle.humanres.PayrollExchangeServices.export#InputsTransfer"
+            scopeService="mantle.humanres.PayrollExchangeServices.find#ExportScopes"
+            maxRows="5000" maxBytes="2097152"
+            exportPermission="PAYROLL_VIEW,PAYROLL_EDIT" viewPermission="PAYROLL_VIEW"
+            ownerRoute="peoplePayrollExchange" sequenceNum="42"/>
+    <moqui.server.TransferTarget targetId="payrollExchange" direction="import" targetMode="wizard" title="Payroll history and processor results"
+            description="A former system's pay records before the cutover, or an external processor's signed-off results of a pay group's period, previewed, reconciled and imported in People's Payroll exchange"
+            effectsNote="History becomes read-only historical pay records and makes no invoice; a day People paid is refused. A processor's results become a pay run of the period, approved and finalized as any run. Rows recorded already are skipped."
+            ownerApp="People" targetVersion="1" scopeLabel="Employer"
+            findService="mantle.humanres.PayrollExchangeServices.find#ExchangeRuns"
+            importPermission="PEOPLE_IMPORT,PAYROLL_VIEW,PAYROLL_EDIT" viewPermission="PAYROLL_VIEW"
+            ownerRoute="peoplePayrollExchange" sequenceNum="43"/>
+    <!-- the services the framework calls as the reader or exporter wherever it shows the targets (Admin's Exports, Imports and Data
+        export): every user may call them, and each checks its permissions and People's scope itself; the registration's grant does
+        not carry into them (call#TargetService) -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantlePeoplePayrollExchange" description="People's payroll exchange transfer contracts"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantlePeoplePayrollExchange" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y" nameIsPattern="Y"
+            artifactName="mantle\.humanres\.PayrollExchangeServices\.(find#ExchangeRuns|find#ExportScopes|export#InputsTransfer)"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantlePeoplePayrollExchangeALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantlePeoplePayrollExchange" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+</entity-facade-xml>

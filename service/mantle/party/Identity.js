@@ -6,7 +6,7 @@
 // account with each of its internal organizations) and mantle.party.InternalOrganization, as every other record of an app is
 // filtered (MANTLE_USER_ORG: the caller's organizations, the active one when set; MANTLE_ACTIVE_ORG: the active organization,
 // every one with none active). An app screen's inheritable ALWAYS grant lends its filters (an administrator's MANTLE_ACTIVE_ORG);
-// otherwise this package's ALL_USERS grant carries MANTLE_USER_ORG (data/PartyAccessData.xml). A call whose authorization
+// otherwise this package's ALL_USERS grant carries MANTLE_USER_ORG (data/10-seed/PartyAndIdentity.xml). A call whose authorization
 // names neither filter set (authorization disabled, or a grant without them) has nothing in scope, but for an instance
 // administrator (ADMIN), for whom it is every organization.
 //

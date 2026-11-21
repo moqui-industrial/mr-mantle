@@ -705,7 +705,7 @@ along with this software (see the LICENSE.md file). If not, see
             change): an attendee's invitation put in a calendar of their own. Every other link is N: the organizer's own, one the
             organizer put in a calendar they change, an event with no organizer (the calendar's own: a feed's, an import's, an
             outside invitation's) and a subscription calendar's. Nothing to do once done (add#CalendarEvent writes Y or N) or on a
-            new database; a data load calls it (data/CalendarSeedData.xml). Each link on its own: one that fails is logged and
+            new database; a data load calls it (data/10-seed/Collaboration.xml). Each link on its own: one that fails is logged and
             counted, and the rest are marked.</description>
         <in-parameters>
             <parameter name="calendarIdList" type="List"><description>Only the links of these calendars (a test's own); empty for

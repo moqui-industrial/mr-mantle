@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
     <!-- The audit log's rows of records that belong to an internal organization, each joined back to that organization and
         aliased organizationPartyId, so the organization entity filters (MANTLE_USER_ORG, MANTLE_ACTIVE_ORG: EntityFilter rows
-        in data/PartyAuditData.xml) apply to a find under an app's authorization, as they do to UserAccountOrganization
+        in data/10-seed/PartyAndIdentity.xml) apply to a find under an app's authorization, as they do to UserAccountOrganization
         (PartyViewEntities; mr-boss impl-admin §4 and P17). They carry the audit row's id, what it is of, who and when:
         never its values. mantle.party.IdentityServices.find#IdentityChanges reads them, for the framework's
         org.moqui.admin.AuditServices. -->
@@ -388,7 +388,7 @@ along with this software (see the LICENSE.md file). If not, see
 
     <!-- Records with no organization of their own found through views that join them back to an internal organization, aliased
         organizationPartyId, so the organization entity filters (MANTLE_USER_ORG, MANTLE_ACTIVE_ORG: EntityFilter rows in
-        MantleSetupData) apply to a find under an app's authorization (mr-boss impl-admin §4, the P4 follow-up). -->
+        15-seed-initial/OrganizationFilters.xml) apply to a find under an app's authorization (mr-boss impl-admin §4, the P4 follow-up). -->
     <view-entity entity-name="UserAccountOrganization" package="mantle.party">
         <description>A user account with each internal organization its party works for now: a current agent, employee or
             member relationship (as get#PartyInternalOrgIds counts them) to a party with the OrgInternal role, one row for each.
