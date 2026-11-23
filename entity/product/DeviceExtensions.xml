@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-definition.xsd">
+    <!-- An installation: a Device (moqui-device) is the runtime node of an Asset, the physical instance of a Product; a
+         group node (a subsystem, a zone, the devices realizing a function) has no Asset of its own and a Requirement may be
+         of it (Requirement.deviceId). -->
+    <extend-entity entity-name="Device" package="moqui.device">
+        <field name="assetId" type="id"><description>The Asset this Device is the runtime node of; the Asset carries
+            the productId. Empty for a group node that is not an asset of its own (a subsystem, a zone, a safety
+            function).</description></field>
+        <relationship type="one-nofk" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <index name="DEVICE_ASSET"><index-field name="assetId"/></index>
+    </extend-entity>
+    <extend-entity entity-name="Asset" package="mantle.product.asset">
+        <relationship type="many" related="moqui.device.Device" short-alias="devices">
+            <key-map field-name="assetId"/></relationship>
+    </extend-entity>
+</entities>

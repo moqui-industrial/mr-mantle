@@ -25,6 +25,12 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="deliverableId" type="id"/>
         <field name="assetId" type="id"/>
         <field name="productId" type="id"/>
+        <field name="deviceId" type="id"><description>The Device the requirement is of, when it is neither a Product
+            nor an Asset: a DeviceGroup realizing a safety function or a security zone, which has no Asset of its own.</description></field>
+        <field name="agreementId" type="id"><description>The agreement the requirement comes from: a contract, a norm
+            edition, a policy (AgreementItem).</description></field>
+        <field name="agreementItemSeqId" type="id"><description>The item of the agreement: a clause, an article,
+            a paragraph, a point.</description></field>
         <field name="description" type="text-medium"/>
         <field name="requirementStartDate" type="date-time"/>
         <field name="requiredByDate" type="date-time"/>
@@ -39,6 +45,10 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.work.effort.Deliverable" short-alias="deliverable"/>
         <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
         <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one-nofk" related="moqui.device.Device" short-alias="device"/>
+        <relationship type="one-nofk" related="mantle.party.agreement.AgreementItem" short-alias="agreementItem">
+            <key-map field-name="agreementId"/><key-map field-name="agreementItemSeqId"/></relationship>
+        <index name="REQUIREMENT_AGR_ITEM"><index-field name="agreementId"/><index-field name="agreementItemSeqId"/></index>
 
         <seed-data>
             <!-- Requirement Type -->

@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-moqui-conf.xsd"
         name="mr-mantle" version="0.1.0">
-    <!-- no dependencies; the data model (formerly mr-mantle-udm) and the services (formerly mr-mantle-usl) are both here -->
+    <!-- the data model (formerly mr-mantle-udm) and the services (formerly mr-mantle-usl) are both here. moqui-device is
+         part of the platform as moqui.basic.print.NetworkPrinter is: a Device is the runtime node of an Asset
+         (Device.assetId) and a Requirement may be of a Device (entity/product/DeviceExtensions.xml). -->
+    <depends-on name="moqui-device"/>
 </component>

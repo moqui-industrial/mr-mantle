@@ -33,8 +33,28 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="isTemplate" type="text-indicator"/>
         <field name="templateAgreementId" type="id"><description>The template agreement this agreement was cloned from</description></field>
         <field name="textData" type="text-very-long"/>
+        <!-- A norm (legislation, a standard, guidance, an internal policy) is an agreement too: the issuing body is the
+             organization party, agreementDate the date of adoption or signature, fromDate the entry into force, thruDate
+             the end of validity (repealed, withdrawn), and its partitions are AgreementItems in a tree. Each language
+             edition is an agreement of its own, associated to the others with AatTranslation. -->
+        <field name="documentTypeEnumId" type="id"><description>The kind of document within its agreement type
+            (AgreementDocumentType): a regulation, a directive, an international standard, a technical report, a
+            procedure, a corrigendum</description></field>
+        <field name="versionName" type="text-short"><description>The edition or version as printed: 2010, Ed. 2.0,
+            Rev. 3, consolidated 2024-07-20</description></field>
+        <field name="locale" type="text-short"><description>Language of the agreement text (en, it, fr_CA)</description></field>
+        <field name="jurisdictionGeoId" type="id"><description>Where the agreement applies or binds: a country, a
+            region, the European Union; empty for an international document</description></field>
+        <field name="publicationDate" type="date-time"><description>Date of official publication (the Official
+            Journal, the standards body's publication)</description></field>
+        <field name="applicableDate" type="date-time"><description>Date from which the agreement applies, when later
+            than its entry into force (fromDate); items applying on other dates have their own fromDate</description></field>
         <relationship type="one" title="AgreementType" related="moqui.basic.Enumeration" short-alias="type">
             <key-map field-name="agreementTypeEnumId"/></relationship>
+        <relationship type="one-nofk" title="AgreementDocumentType" related="moqui.basic.Enumeration" short-alias="documentType">
+            <key-map field-name="documentTypeEnumId"/></relationship>
+        <relationship type="one-nofk" title="Jurisdiction" related="moqui.basic.Geo" short-alias="jurisdictionGeo">
+            <key-map field-name="jurisdictionGeoId"/></relationship>
         <relationship type="one" title="Agreement" related="moqui.basic.StatusItem" short-alias="status"/>
         <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
             <key-map field-name="organizationPartyId"/></relationship>
@@ -55,6 +75,8 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="agreementId"/></relationship>
         <relationship type="many" related="mantle.party.agreement.AgreementParty" short-alias="parties">
             <key-map field-name="agreementId"/></relationship>
+        <relationship type="many" related="mantle.party.agreement.AgreementIdentification" short-alias="identifications">
+            <key-map field-name="agreementId"/></relationship>
 
         <seed-data>
             <!-- Agreement Type -->
@@ -65,6 +87,36 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="AgrOther" description="Other" enumTypeId="AgreementType"/>
             <moqui.basic.Enumeration enumId="AgrCommission" description="Commission" enumTypeId="AgreementType"/>
             <moqui.basic.Enumeration enumId="AgrEula" description="End User License Agreement" enumTypeId="AgreementType"/>
+            <!-- norms: what binds or guides by its text rather than between parties -->
+            <moqui.basic.Enumeration enumId="AgrLegislation" description="Legislation" enumTypeId="AgreementType"/>
+            <moqui.basic.Enumeration enumId="AgrStandard" description="Standard" enumTypeId="AgreementType"/>
+            <moqui.basic.Enumeration enumId="AgrGuidance" description="Guidance" enumTypeId="AgreementType"/>
+            <moqui.basic.Enumeration enumId="AgrPolicy" description="Internal Policy" enumTypeId="AgreementType"/>
+
+            <!-- Agreement Document Type: parentEnumId is the agreement type it belongs to -->
+            <moqui.basic.EnumerationType description="Agreement Document Type" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtRegulation" description="Regulation" parentEnumId="AgrLegislation" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtDirective" description="Directive" parentEnumId="AgrLegislation" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtDecision" description="Decision" parentEnumId="AgrLegislation" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtDelegatedAct" description="Delegated Act" parentEnumId="AgrLegislation" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtImplementingAct" description="Implementing Act" parentEnumId="AgrLegislation" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtLaw" description="Law" parentEnumId="AgrLegislation" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtDecree" description="Decree" parentEnumId="AgrLegislation" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtTreaty" description="Treaty" parentEnumId="AgrLegislation" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtStandard" description="Standard" parentEnumId="AgrStandard" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtTechSpec" description="Technical Specification" parentEnumId="AgrStandard" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtTechReport" description="Technical Report" parentEnumId="AgrStandard" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtPas" description="Publicly Available Specification" parentEnumId="AgrStandard" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtStdGuide" description="Standardization Guide" parentEnumId="AgrStandard" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtGuideline" description="Guideline" parentEnumId="AgrGuidance" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtCodeOfPractice" description="Code of Practice" parentEnumId="AgrGuidance" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtPolicy" description="Policy" parentEnumId="AgrPolicy" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtProcedure" description="Procedure" parentEnumId="AgrPolicy" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtWorkInstruction" description="Work Instruction" parentEnumId="AgrPolicy" enumTypeId="AgreementDocumentType"/>
+            <!-- documents that change another one, of any agreement type (associated to it with AatAmendment, AatCorrection) -->
+            <moqui.basic.Enumeration enumId="AdtAmendment" description="Amendment" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtCorrigendum" description="Corrigendum" enumTypeId="AgreementDocumentType"/>
+            <moqui.basic.Enumeration enumId="AdtConsolidated" description="Consolidated Version" enumTypeId="AgreementDocumentType"/>
 
             <!-- Agreement Status -->
             <moqui.basic.StatusType description="Agreement" statusTypeId="Agreement"/>
@@ -91,6 +143,16 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="toAgreementId" type="id" not-null="true"/>
         <field name="agreementAssocTypeEnumId" type="id"/>
         <field name="geoId" type="id"/>
+        <field name="agreementItemSeqId" type="id"><description>Item of the from agreement the association starts from,
+            for example the article that cites or amends another one; empty for the whole agreement</description></field>
+        <field name="toAgreementItemSeqId" type="id"><description>Item of the to agreement; empty for the whole agreement
+            (also when its items are not available)</description></field>
+        <field name="assocText" type="text-medium"><description>The association as written in the from agreement, for
+            example "see ISO 14118:2000, Clause 5" or "Article 3 is replaced by the following"</description></field>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="fromDate" type="date-time"><description>When the association takes effect: the date an amendment,
+            a repeal or a replacement applies from</description></field>
+        <field name="thruDate" type="date-time"/>
 
         <relationship type="one" related="mantle.party.agreement.Agreement" short-alias="agreement"/>
         <relationship type="one" title="To" related="mantle.party.agreement.Agreement" short-alias="toAgreement">
@@ -99,6 +161,13 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="geoId"/></relationship>
         <relationship type="one" title="AgreementAssocType" related="moqui.basic.Enumeration" short-alias="type">
             <key-map field-name="agreementAssocTypeEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.agreement.AgreementItem" short-alias="item">
+            <key-map field-name="agreementId"/><key-map field-name="agreementItemSeqId"/></relationship>
+        <relationship type="one-nofk" title="To" related="mantle.party.agreement.AgreementItem" short-alias="toItem">
+            <key-map field-name="toAgreementId" related="agreementId"/>
+            <key-map field-name="toAgreementItemSeqId" related="agreementItemSeqId"/></relationship>
+        <index name="AGRASSOC_ITEM"><index-field name="agreementId"/><index-field name="agreementItemSeqId"/></index>
+        <index name="AGRASSOC_TO_ITEM"><index-field name="toAgreementId"/><index-field name="toAgreementItemSeqId"/></index>
         <seed-data>
             <!-- Agreement Assoc Type -->
             <moqui.basic.EnumerationType description="Agreement Association Type" enumTypeId="AgreementAssocType"/>
@@ -109,6 +178,16 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Replacement" enumId="AatReplacement" enumTypeId="AgreementAssocType"/>
             <moqui.basic.Enumeration description="Amendment" enumId="AatAmendment" enumTypeId="AgreementAssocType"/>
             <moqui.basic.Enumeration description="Restatement" enumId="AatRestatement" enumTypeId="AgreementAssocType"/>
+            <!-- From the agreement (or item) that does it to the one it is done to. Of a norm, Amendment changes the text
+                 of the other, Replacement supersedes it (a new edition, a repealed act and its successor) and Restatement
+                 is a consolidated version of it -->
+            <moqui.basic.Enumeration description="Reference" enumId="AatReference" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Translation" enumId="AatTranslation" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Repeal" enumId="AatRepeal" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Correction" enumId="AatCorrection" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Transposition" enumId="AatTransposition" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Implementation" enumId="AatImplementation" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Adoption" enumId="AatAdoption" enumTypeId="AgreementAssocType"/>
         </seed-data>
     </entity>
 
@@ -128,6 +207,29 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Agreement Document" enumId="AcntDocument" enumTypeId="AgreementContentType"/>
             <moqui.basic.Enumeration description="Supporting Document" enumId="AcntSupporting" enumTypeId="AgreementContentType"/>
             <moqui.basic.Enumeration description="Price Sheet" enumId="AcntPriceSheet" enumTypeId="AgreementContentType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="AgreementIdentification" package="mantle.party.agreement">
+        <description>An identifier of the agreement in a scheme: the European Legislation Identifier, a CELEX number, the
+            reference of a standards body, a national adoption. The agreementId stays the record's own key.</description>
+        <field name="agreementId" type="id" is-pk="true"/>
+        <field name="agreementIdTypeEnumId" type="id" is-pk="true"/>
+        <field name="idValue" type="text-medium"/>
+        <relationship type="one" related="mantle.party.agreement.Agreement" short-alias="agreement"/>
+        <relationship type="one" title="AgreementIdType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="agreementIdTypeEnumId"/></relationship>
+        <index name="AGREEMENT_ID_VALUE"><index-field name="idValue"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Agreement Identification Type" enumTypeId="AgreementIdType"/>
+            <moqui.basic.Enumeration enumId="AgidEli" description="European Legislation Identifier (ELI)" enumTypeId="AgreementIdType"/>
+            <moqui.basic.Enumeration enumId="AgidCelex" description="CELEX Number" enumTypeId="AgreementIdType"/>
+            <moqui.basic.Enumeration enumId="AgidOfficialJournal" description="Official Journal Reference" enumTypeId="AgreementIdType"/>
+            <moqui.basic.Enumeration enumId="AgidPublisherRef" description="Publisher Reference" enumTypeId="AgreementIdType"/>
+            <moqui.basic.Enumeration enumId="AgidNationalAdoption" description="National Adoption Reference" enumTypeId="AgreementIdType"/>
+            <moqui.basic.Enumeration enumId="AgidDoi" description="DOI" enumTypeId="AgreementIdType"/>
+            <moqui.basic.Enumeration enumId="AgidIsbn" description="ISBN" enumTypeId="AgreementIdType"/>
+            <moqui.basic.Enumeration enumId="AgidUrn" description="URN" enumTypeId="AgreementIdType"/>
         </seed-data>
     </entity>
 
@@ -169,14 +271,37 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="quantity" type="number-decimal" enable-audit-log="true"/>
         <field name="quantityUomId" type="id"/>
         <field name="itemText" type="text-very-long"/>
+        <!-- A partition of a norm (or of any structured text): a tree by parentItemSeqId, in printed order by sequenceNum
+             among siblings. fromDate and thruDate are when the item applies, for items applying on their own dates (a
+             staggered application, an item an amendment replaced) -->
+        <field name="parentItemSeqId" type="id"><description>The item this one is part of (an article of a chapter, a
+            paragraph of an article, a point of a paragraph)</description></field>
+        <field name="itemNumber" type="text-short"><description>Number or letter as printed: 5, 1-bis, a, iii, 5.5.3.5,
+            III</description></field>
+        <field name="itemTitle" type="text-medium"/>
+        <field name="sequenceNum" type="number-integer"><description>Order among the items with the same parent</description></field>
+        <field name="sourceLocation" type="text-medium"><description>Where the item is in the source document: the page
+            of a PDF, the file of a Formex act</description></field>
+        <field name="provisionTypeEnumId" type="id"><description>What the item provides (AgreementProvisionType):
+            a requirement (shall), a recommendation (should), a permission (may), a possibility (can), a prohibition, a
+            definition or a statement; empty when not classified</description></field>
+        <field name="informative" type="text-indicator"><description>Y for an informative part (an informative annex,
+            a bibliography, guidance): read, not met</description></field>
         <relationship type="one" related="mantle.party.agreement.Agreement"/>
         <relationship type="one" title="AgreementItemType" related="moqui.basic.Enumeration">
             <key-map field-name="agreementItemTypeEnumId"/></relationship>
+        <relationship type="one-nofk" title="Parent" related="mantle.party.agreement.AgreementItem" short-alias="parentItem">
+            <key-map field-name="agreementId"/><key-map field-name="parentItemSeqId" related="agreementItemSeqId"/></relationship>
+        <relationship type="many" title="Child" related="mantle.party.agreement.AgreementItem" short-alias="childItems">
+            <key-map field-name="agreementId"/><key-map field-name="agreementItemSeqId" related="parentItemSeqId"/></relationship>
+        <relationship type="one-nofk" title="AgreementProvisionType" related="moqui.basic.Enumeration" short-alias="provisionType">
+            <key-map field-name="provisionTypeEnumId"/></relationship>
         <relationship type="one" related="mantle.product.Product" short-alias="product"/>
         <relationship type="one" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
             <key-map field-name="quantityUomId"/></relationship>
         <relationship type="many" related="mantle.party.agreement.AgreementTerm" short-alias="terms">
             <key-map field-name="agreementId"/><key-map field-name="agreementItemSeqId"/></relationship>
+        <index name="AGRITEM_PARENT"><index-field name="agreementId"/><index-field name="parentItemSeqId"/></index>
         <seed-data>
             <!-- Agreement Item Type -->
             <moqui.basic.EnumerationType description="Agreement Item Type" enumTypeId="AgreementItemType"/>
@@ -186,6 +311,43 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="AitPurchase" description="Purchase" enumTypeId="AgreementItemType"/>
             <moqui.basic.Enumeration enumId="AitSection" description="Section" enumTypeId="AgreementItemType"/>
             <moqui.basic.Enumeration enumId="AitCommissionRate" description="Commission Rate" enumTypeId="AgreementItemType"/>
+            <!-- partitions of a legal or technical text (after Akoma Ntoso): book > part > title > chapter > section >
+                 subsection > article > paragraph > subparagraph > point > sub-point > indent; the preamble and its
+                 recitals; annexes and their parts; notes, examples, footnotes, formulas, figures, tables and their rows.
+                 A numbered clause of a standard, at any level, is an article -->
+            <moqui.basic.Enumeration enumId="AitPreamble" description="Preamble" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitRecital" description="Recital" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitBook" description="Book" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitPart" description="Part" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitTitle" description="Title" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitChapter" description="Chapter" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitSubsection" description="Subsection" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitArticle" description="Article" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitParagraph" description="Paragraph" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitSubparagraph" description="Subparagraph" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitPoint" description="Point" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitSubPoint" description="Sub-point" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitIndent" description="Indent" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitAnnex" description="Annex" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitAnnexPart" description="Annex Part" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitNote" description="Note" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitExample" description="Example" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitFootnote" description="Footnote" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitFormula" description="Formula" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitFigure" description="Figure" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitTable" description="Table" enumTypeId="AgreementItemType"/>
+            <moqui.basic.Enumeration enumId="AitTableRow" description="Table Row" enumTypeId="AgreementItemType"/>
+
+            <!-- Agreement Provision Type: the verbal forms of the ISO/IEC Directives, Part 2 (shall, should, may, can) and
+                 what legislation adds -->
+            <moqui.basic.EnumerationType description="Agreement Provision Type" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptRequirement" description="Requirement" enumCode="shall" sequenceNum="1" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptProhibition" description="Prohibition" enumCode="shall not" sequenceNum="2" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptRecommendation" description="Recommendation" enumCode="should" sequenceNum="3" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptPermission" description="Permission" enumCode="may" sequenceNum="4" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptPossibility" description="Possibility" enumCode="can" sequenceNum="5" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptDefinition" description="Definition" sequenceNum="6" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptStatement" description="Statement" sequenceNum="7" enumTypeId="AgreementProvisionType"/>
         </seed-data>
     </entity>
 

@@ -112,6 +112,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="productClassEnumId" type="id"/>
         <field name="assetTypeEnumId" type="id"/>
         <field name="assetClassEnumId" type="id"/>
+        <field name="purposeEnumId" type="id"><description>What a function product (PtFunction) is for: a safety
+            function, a protective function, a security zone, a conduit (DevicePurpose, as Device.purposeEnumId of the
+            installed device that realizes it).</description></field>
         <field name="statusId" enable-audit-log="true" type="id"/>
         <field name="ownerPartyId" type="id" enable-audit-log="update" default="'_NA_'">
             <description>Brand or other organization that owns the product design, IP, etc.
@@ -148,6 +151,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="originGeoId" type="id"/>
         <!-- not used, not likely to be used 20170413: <field name="billOfMaterialLevel" type="number-integer"/> -->
 
+        <relationship type="one-nofk" title="Purpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId" related="enumId"/></relationship>
         <relationship type="many" related="mantle.product.ProductVariantIdentity" short-alias="variantIdentities"><key-map field-name="productId"/></relationship>
         <relationship type="many" title="Base" related="mantle.product.ProductVariantIdentity" short-alias="baseVariantIdentities"><key-map field-name="productId" related="baseProductId"/></relationship>
         <relationship type="one" title="ProductType" related="moqui.basic.Enumeration" short-alias="type">
@@ -226,6 +231,7 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Virtual (with variants)" enumId="PtVirtual" enumTypeId="ProductType"/>
             <moqui.basic.Enumeration description="Pick Assembly" enumId="PtPickAssembly" enumTypeId="ProductType"/>
             <moqui.basic.Enumeration description="Configurable Good" enumId="PtConfigurable" enumTypeId="ProductType"/>
+            <moqui.basic.Enumeration description="Function (realized by member products)" enumId="PtFunction" enumTypeId="ProductType"/>
 
             <!-- instead of PtPhysical references now use PtAsset, PtDigitalAsset, and sometimes PtAssetUse (for shipping, not for issuance) -->
             <!-- instead of PtRawMaterial, PtSubAssembly, PtFinishedGood use PtAsset with assetTypeEnumId = AstTpInventory
@@ -315,6 +321,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="scrapFactor" type="number-decimal"/>
         <field name="instruction" type="text-medium"/>
         <field name="routingWorkEffortId" type="id"/>
+        <field name="purposeEnumId" type="id"><description>PatFunctionMember: the role of the member in the function
+            (DevicePurpose: input, logic, output), as DeviceGroupMember.purposeEnumId of the installation.</description></field>
+        <relationship type="one-nofk" title="MemberRole" related="moqui.basic.Enumeration" short-alias="memberRole">
+            <key-map field-name="purposeEnumId" related="enumId"/></relationship>
         <relationship type="one" title="ProductAssocType" related="moqui.basic.Enumeration" short-alias="type">
             <key-map field-name="productAssocTypeEnumId"/></relationship>
         <relationship type="one" related="mantle.product.Product" short-alias="product"/>
@@ -356,6 +366,11 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Configurable Product Instance" enumId="PatConfigInstance" enumTypeId="ProductAssocType"/>
             <moqui.basic.Enumeration description="Actual Product Component" enumId="PatComponent" enumTypeId="ProductAssocType"/>
             <moqui.basic.Enumeration description="Packaging For" enumId="PatPackagingFor" enumTypeId="ProductAssocType"/>
+            <!-- A function (safety function, protective function, security zone, conduit) as a level of the bill of materials:
+                 a PtFunction product with its purpose; PatFunction from a product or assembly to the function it takes part
+                 in, PatFunctionMember from the function to each product realizing part of it, with its role (purposeEnumId). -->
+            <moqui.basic.Enumeration description="Function" enumId="PatFunction" enumTypeId="ProductAssocType"/>
+            <moqui.basic.Enumeration description="Function Member" enumId="PatFunctionMember" enumTypeId="ProductAssocType"/>
         </seed-data>
     </entity>
 

@@ -41,12 +41,26 @@ It has no screens of its own. To see it at work, run one of those applications.
   - payment processors in `ext/account/gateway/`: [Authorize.Net](docs/AuthorizeNet.md), [PayTrace](docs/PayTrace.md);
   - [Shippo](docs/Shippo.md) for shipping rates and labels in `ext/shipment/`, and Google Maps in `ext/party/`;
   - [X12 EDI](docs/EdiX12.md) in `service/mantle/edi/`.
+- **Agreements for every kind of norm** (`entity/party/AgreementEntities.xml`): a law, a standard, a guideline or
+  a company policy is an Agreement per language edition, with its kind (`AgreementDocumentType`), version, locale,
+  jurisdiction, adoption, publication, entry-into-force and application dates, and its identifiers (ELI, CELEX,
+  publisher reference, DOI: `AgreementIdentification`). Its partitions (part, chapter, article, paragraph, point,
+  annex, table row) are AgreementItems in a tree, in printed order, each with its provision type (requirement,
+  recommendation, permission, definition: the ISO verbal forms) and whether it is informative. Citations,
+  translations, amendments, repeals and transpositions are AgreementAssocs between acts or single items, effective
+  from a date. A Requirement can come from an item (`Requirement.agreementId`, `agreementItemSeqId`).
+- **Functions in the bill of materials**: a `PtFunction` product (a safety function, a security zone, a conduit)
+  with its purpose (`Product.purposeEnumId`, DevicePurpose), whose members are `PatFunctionMember` associations
+  with their role (`ProductAssoc.purposeEnumId`). The installation is a moqui-device `Device` with its Asset
+  (`Device.assetId`, `entity/product/DeviceExtensions.xml`); a Requirement can be of a Device (`deviceId`).
 - **Report definitions** (`report/`) and email and print templates (`template/`).
 
 ## Get it
 
 In an [mr-moqui](https://github.com/moqui/mr-moqui#quick-start) checkout, `./moq component-get mr-mantle` gets it
-alone, and getting an application gets it too. Another component depends on it with:
+alone, and getting an application gets it too. It depends on [moqui-device](https://github.com/moqui-industrial/moqui-device),
+which depends on [moqui-math](https://github.com/moqui/moqui-math): put both in `runtime/components/addon`, or
+Moqui leaves mr-mantle out, and every application with it. Another component depends on it with:
 
 ```xml
 <depends-on name="mr-mantle"/>
