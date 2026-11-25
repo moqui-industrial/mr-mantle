@@ -102,7 +102,7 @@
         </actions>
     </service>
     <service verb="get" noun="Commit" authenticate="anonymous-all" allow-remote="false">
-        <description>A commit by its id (7 to 40 hex digits): the files it changed with their counts, their diffs within the page's limits (100 files, 20,000 changed lines; truncated says more were left out) or the one of path, in one diff call (a commit of more than 100 files has its file list and no diffs: truncated), and its statuses. Not Found as get#Repository and for an id that names no commit.</description>
+        <description>A commit by its id (7 to 40 hex digits): the files it changed with their counts, their diffs within the page's limits (100 files, 20,000 changed lines; truncated says more were left out) or the one of path (with diffLineLimit only that many lines of its hunks from diffLineOffset, the file with diffLineCount), in one diff call (a commit of more than 100 files has its file list and no diffs: truncated), and its statuses. Not Found as get#Repository and for an id that names no commit.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>
@@ -110,7 +110,7 @@
         </actions>
     </service>
     <service verb="get" noun="Compare" authenticate="anonymous-all" allow-remote="false">
-        <description>What head has that base (the default branch when empty) lacks, each side a branch, a tag or a commit id and nothing else: the commits, ahead and behind, the files, with withDiffs their diffs within the page's limits, with checkMergeable whether it merges cleanly (a trial merge; mergeable is empty without it), and the open merge request of the two branches. Refused (notBuilt) for a head in another repository. Not Found as get#Repository and for a side that names no branch, tag or commit.</description>
+        <description>What head has that base (the default branch when empty) lacks, each side a branch, a tag or a commit id and nothing else: the commits, ahead and behind, the files, with withDiffs their diffs within the page's limits (path's alone, with diffLineLimit only that many lines of its hunks from diffLineOffset), with checkMergeable whether it merges cleanly (a trial merge; mergeable is empty without it), and the open merge request of the two branches. Refused (notBuilt) for a head in another repository. Not Found as get#Repository and for a side that names no branch, tag or commit.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>

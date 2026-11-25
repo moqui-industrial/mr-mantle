@@ -204,6 +204,14 @@ feature("a line comment is a post with its anchor, read beside the comments Proj
             post: lib.row("mantle.forum.ForumPostState", {communicationEventId: line.postId}),
             stranger: threads("SMQ_STRANGER"),
             developer: threads("SMQ_DEV"),
+            // a page's part of one file's diff: the host sends that part's lines alone (mr-pass SmithyDiffScale)
+            part: op("SMQ_STRANGER", "getMergeRequestChanges", {
+                mergeRequestNum: 1,
+                withDiffs: true,
+                path: "feature.txt",
+                diffLineOffset: 1,
+                diffLineLimit: 1
+            }).fileDiffList[0],
             projects: lib.run("mantle.work.GitServices.get#ReviewThreads", {mergeRequestId}).threadList,
             // the framework's REST read of the same threads, for a viewer (SEC-PFS-01)
             rest: lib.service("SMQ_STRANGER", "mantle.work.GitServices.handle#GitReviewThread", {
@@ -213,7 +221,7 @@ feature("a line comment is a post with its anchor, read beside the comments Proj
             }).threadList
         }
     },
-    then({line, elsewhere, reply, old, fromProjects, resolved, anchor, post, stranger, developer, projects, rest}) {
+    then({line, elsewhere, reply, old, fromProjects, resolved, anchor, post, stranger, developer, part, projects, rest}) {
         // the REST names authors as Smithy's pages do: the profile's handle, never a party id (SEC-PFS-01)
         rest.length == 3
         rest.every(thread => thread.commentList.every(comment => !("fromPartyId" in comment)))
@@ -232,6 +240,12 @@ feature("a line comment is a post with its anchor, read beside the comments Proj
         stranger.commitList.length == 1
         stranger.commitList[0].signed == null
         stranger.fileDiffList.length == 1
+        // the part: line 2 of the file's 3, its hunk cut at its start, and the count of all its lines
+        part.diffLineCount == 3
+        part.diffLineOffset == 1
+        part.hunks.length == 1
+        part.hunks[0].skippedLines == 1
+        part.hunks[0].lines.map(entry => entry.newNo + ":" + entry.text) == ["2:two"]
         // a viewer reads the threads of posts; the team's older notes are a Developer's
         stranger.threadList.map(thread => thread.newLine) == [2, 3]
         stranger.threadList[0].postList.map(entry => entry.author.handle) == ["smqstranger", "smqdev"]
