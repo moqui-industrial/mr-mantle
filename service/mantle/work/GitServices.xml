@@ -197,6 +197,98 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
+    <service verb="get" noun="RepositoryIssues">
+        <description>The open issues of a git repository, for a developer's tools such as Dev AIDE's task panel (REST
+            gitRepositories/{repositoryId}/issues, the hosting offer's tasks.issuesPath): the tasks of the projects the
+            repository is linked to now that are not complete, closed or cancelled, by priority, each with its number in
+            the repository where it is one of Smithy's issues (a confidential one is left out), and the linked projects.
+            numbered says whether the repository's issues have numbers (a repository Smithy keeps), so a commit closes one
+            with Fixes #12 rather than its id. Refused (as not found) for a caller who may not view the repository; the
+            tasks are read with the caller's own rights.</description>
+        <in-parameters>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="pageSize" type="Integer" default="200"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="issueList" type="List"><parameter name="issue" type="Map">
+                <parameter name="workEffortId"/><parameter name="issueNumber" type="Integer"/><parameter name="workEffortName"/>
+                <parameter name="statusId"/><parameter name="priority" type="Long"/><parameter name="rootWorkEffortId"/>
+                <parameter name="projectName"/>
+            </parameter></parameter>
+            <parameter name="projectList" type="List"><parameter name="project" type="Map">
+                <parameter name="workEffortId"/><parameter name="workEffortName"/></parameter></parameter>
+            <parameter name="numbered" type="Boolean"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            issueList = []
+            projectList = []
+            numbered = false
+            const access = ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId}).call()
+            if (ec.message.hasError() || !access?.canView) { ec.message.addError(ec.resource.expand('Git repository ${repositoryId} not found', '', {repositoryId})); return }
+            const links = Array.from(ec.entity.find('mantle.work.effort.WorkEffortGitRepository').condition('repositoryId', repositoryId)
+                    .conditionDate('fromDate', 'thruDate', null).orderBy('fromDate').disableAuthz().list())
+            const projectIds = Array.from(new Set(links.map((link) => link.workEffortId)))
+            numbered = ec.entity.find('mantle.smithy.SmithyRepository').condition('repositoryId', repositoryId).disableAuthz().count() > 0
+            if (!projectIds.length) return
+            const names = {}
+            for (const project of Array.from(ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', 'in', projectIds).list())) {
+                names[project.workEffortId] = project.workEffortName || ''
+            }
+            projectList = projectIds.filter((id) => names[id] !== undefined).map((id) => ({workEffortId: id, workEffortName: names[id]}))
+            const tasks = Array.from(ec.entity.find('mantle.work.effort.WorkEffort').condition('rootWorkEffortId', 'in', projectIds)
+                    .condition('workEffortTypeEnumId', 'WetTask').condition('statusId', 'not-in', ['WeComplete', 'WeClosed', 'WeCancelled'])
+                    .orderBy('priority').orderBy('workEffortId').limit(pageSize || 200).list())
+            const issues = {}
+            if (numbered && tasks.length) {
+                for (const issue of Array.from(ec.entity.find('mantle.smithy.SmithyIssue').condition('repositoryId', repositoryId)
+                        .condition('workEffortId', 'in', tasks.map((task) => task.workEffortId)).disableAuthz().list())) {
+                    issues[issue.workEffortId] = issue
+                }
+            }
+            for (const task of tasks) {
+                const issue = issues[task.workEffortId]
+                if (issue?.confidential === 'Y') continue
+                issueList.push({workEffortId: task.workEffortId, issueNumber: issue ? issue.issueNumber : null, workEffortName: task.workEffortName,
+                    statusId: task.statusId, priority: task.priority, rootWorkEffortId: task.rootWorkEffortId,
+                    projectName: names[task.rootWorkEffortId] || null})
+            }
+        ]]></script></actions>
+    </service>
+    <service verb="create" noun="RepositoryIssue">
+        <description>File an issue in a git repository's tracker (REST gitRepositories/{repositoryId}/issues, POST): a task
+            of a project the repository is linked to (rootWorkEffortId, which must be one of them; the first linked when
+            empty), by a caller who may view the repository, made by create#Task with the caller's rights. Out: the task's
+            workEffortId and its issueNumber where the project's tracker numbers it (Smithy's).</description>
+        <in-parameters>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="workEffortName" required="true"/>
+            <parameter name="rootWorkEffortId"/>
+            <parameter name="description"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="issueNumber" type="Integer"/>
+            <parameter name="rootWorkEffortId"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const access = ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId}).call()
+            if (ec.message.hasError() || !access?.canView) { ec.message.addError(ec.resource.expand('Git repository ${repositoryId} not found', '', {repositoryId})); return }
+            const linked = Array.from(ec.entity.find('mantle.work.effort.WorkEffortGitRepository').condition('repositoryId', repositoryId)
+                    .conditionDate('fromDate', 'thruDate', null).orderBy('fromDate').disableAuthz().list()).map((link) => link.workEffortId)
+            if (!linked.length) { ec.message.addError(ec.resource.expand('Git repository ${repositoryId} is linked to no project', '', {repositoryId})); return }
+            if (rootWorkEffortId && !linked.includes(rootWorkEffortId)) {
+                ec.message.addError(ec.resource.expand('Project ${rootWorkEffortId} is not linked to ${repositoryId}', '', {rootWorkEffortId, repositoryId})); return }
+            if (!rootWorkEffortId) rootWorkEffortId = linked[0]
+            const made = ec.service.sync().name('mantle.work.TaskServices.create#Task')
+                    .parameters({rootWorkEffortId, workEffortName: String(workEffortName).trim(), description: description || null}).call()
+            if (ec.message.hasError() || !made?.workEffortId) return
+            workEffortId = made.workEffortId
+            const issue = ec.entity.find('mantle.smithy.SmithyIssue').condition('repositoryId', repositoryId)
+                    .condition('workEffortId', workEffortId).disableAuthz().one()
+            issueNumber = issue ? issue.issueNumber : null
+        ]]></script></actions>
+    </service>
+
     <!-- ========== Task references ========== -->
 
     <service verb="find" noun="TaskReferences">

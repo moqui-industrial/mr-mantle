@@ -101,9 +101,33 @@ function offeredSite(offer) {
         .filter((siteId, index, all) => all.indexOf(siteId) === index && serves(siteId))
     return mounted.length === 1 ? mounted[0] : null
 }
+/* The app a work item opens in on this server, by the task-app names the Dev AIDE knows (its conf), with the paths:
+   BOSS Projects where mr-boss is loaded, else MarbleERP's task pages where mr-marble is, else none. */
+function taskApp() {
+    const loaded = ec.factory.getComponentBaseLocations() || {}
+    const has = name => !!(typeof loaded.get === "function" ? loaded.get(name) : loaded[name])
+    if (has("mr-boss"))
+        return {
+            name: "projects",
+            title: "IronStone Projects",
+            projectPath: "/qapps/Projects/Projects/ProjectDetail?workEffortId={projectId}",
+            taskPath: "/qapps/Projects/WorkItems/WorkItemDetail?workEffortId={taskId}"
+        }
+    if (has("mr-marble"))
+        return {
+            name: "marble",
+            title: "MarbleERP",
+            projectPath: "/qapps/marble/Project/ProjectSummary?workEffortId={projectId}",
+            taskPath: "/qapps/marble/Task/TaskSummary?workEffortId={taskId}"
+        }
+    return null
+}
 /* add#GitHostingOffer: the framework's offer with Smithy's REST for the site a client reaches (application: name,
    restBase, the path on this host; siteId; pageUrl, the Smithy pages' address), forks (Smithy makes them: forkRepository),
-   and Mantle's task source (the moqui-rest source of the user's work items, docs/Run-Deploy.md). It names no account. */
+   and Mantle's task source (the moqui-rest source of the user's work items, docs/Run-Deploy.md): the user's tasks
+   (path), one work item (issuePath), a repository's open issues and Quick create there (issuesPath,
+   GitServices.get#RepositoryIssues and create#RepositoryIssue) and the app a work item opens in (app). It names no
+   account. */
 function hostingOffer(p) {
     const offer = Object.assign({}, p?.offer || {})
     const siteId = offeredSite(offer)
@@ -116,7 +140,16 @@ function hostingOffer(p) {
         }
         offer.forks = true
     }
-    if (!offer.tasks) offer.tasks = {kind: "moqui-rest", path: "/rest/s1/mantle/my/tasks"}
+    if (!offer.tasks) {
+        offer.tasks = {
+            kind: "moqui-rest",
+            path: "/rest/s1/mantle/my/tasks",
+            issuePath: "/rest/s1/mantle/workEfforts/{id}",
+            issuesPath: "/rest/s1/mantle/gitRepositories/{repositoryId}/issues"
+        }
+        const app = taskApp()
+        if (app) offer.tasks.app = app
+    }
     return offer
 }
 

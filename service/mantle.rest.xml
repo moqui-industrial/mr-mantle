@@ -525,6 +525,16 @@ along with this software (see the LICENSE.md file). If not, see
         </resource>
     </resource>
 
+    <!-- ========== Git repositories of projects: their open issues, and one filed (the hosting offer's tasks.issuesPath) ========== -->
+    <resource name="gitRepositories" description="Git repositories of projects">
+        <id name="repositoryId">
+            <resource name="issues">
+                <method type="get"><service name="mantle.work.GitServices.get#RepositoryIssues"/></method>
+                <method type="post"><service name="mantle.work.GitServices.create#RepositoryIssue"/></method>
+            </resource>
+        </id>
+    </resource>
+
     <!-- ========== Work Efforts ========== -->
     <resource name="workEfforts" description="Work Efforts - Projects, Tasks, Events, Production Runs, Shipment Loads, etc">
         <!-- no goal (People's WetGoal, its own services' alone; impl-people follow-up 2): listed, read and changed through a view and a
