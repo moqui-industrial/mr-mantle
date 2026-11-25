@@ -1026,7 +1026,7 @@ kit => {
         // the deployment fields (DG10): an empty value clears one, a left-out one stays. The target's token is no field
         // of the environment: it is an item of an operational vault (vaultId), bound to
         // GitCiEnvironment:<environmentId>:targetToken, which a member of the vault makes in their client and a
-        // deployment reads under its lease (plans/Vault-Instances.md §4.6); no operation takes a token (SmithySchema.js
+        // deployment reads under its lease (plans/archive/Vault-Instances.md §4.6); no operation takes a token (SmithySchema.js
         // refuses the field). The engine's store#CiEnvironment clears what a change would hand to a wider audience: the
         // values of the environment's secrets when allowedRefs widens or approvalRequired goes from Y to N (SEC-GIT-91);
         // it says so as its cleared, which the save returns for Smithy's notice. Smithy has no approver groups: an
@@ -1145,7 +1145,7 @@ kit => {
         return out
     }
     const mine = d => !!ec.user.userId && d.requestedByUserId === ec.user.userId
-    /* A deployment's lease (plans/Vault-Instances.md §4.6 of mr-moqui): its environment's vault holds the target's token,
+    /* A deployment's lease (plans/archive/Vault-Instances.md §4.6 of mr-moqui): its environment's vault holds the target's token,
        which its deploy step opens under a lease asked for once its pipeline passed. Approving the lease in the framework's
        lease dialog (System › Vaults › Lease, in the approver's browser) is the deployment's approval when its approver
        decides it, as the engine holds it (decide_by_lease, and decide for a lease opened before the decision): not who
