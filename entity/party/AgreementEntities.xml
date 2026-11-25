@@ -49,6 +49,12 @@ along with this software (see the LICENSE.md file). If not, see
             Journal, the standards body's publication)</description></field>
         <field name="applicableDate" type="date-time"><description>Date from which the agreement applies, when later
             than its entry into force (fromDate); items applying on other dates have their own fromDate</description></field>
+        <field name="prescriptive" type="text-indicator"><description>N when the document contains no prescriptive text,
+            nothing that is or may become binding: a technical report, a guide, a non-normative resolution (Akoma Ntoso
+            FRBRprescriptive). Its items are read, never applied as requirements</description></field>
+        <field name="authoritative" type="text-indicator"><description>N when the text is not the official product of
+            the body entrusted with it: an unofficial consolidation, a working translation (Akoma Ntoso
+            FRBRauthoritative)</description></field>
         <relationship type="one" title="AgreementType" related="moqui.basic.Enumeration" short-alias="type">
             <key-map field-name="agreementTypeEnumId"/></relationship>
         <relationship type="one-nofk" title="AgreementDocumentType" related="moqui.basic.Enumeration" short-alias="documentType">
@@ -188,6 +194,18 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Transposition" enumId="AatTransposition" enumTypeId="AgreementAssocType"/>
             <moqui.basic.Enumeration description="Implementation" enumId="AatImplementation" enumTypeId="AgreementAssocType"/>
             <moqui.basic.Enumeration description="Adoption" enumId="AatAdoption" enumTypeId="AgreementAssocType"/>
+            <!-- between items of norms, as the text states them: the use of a defined term to its definition (assocText the
+                 term); a provision fixing when others apply to them (fromDate the date); an exclusion from or extension of
+                 the scope of the items it names; a derogation from them; an entry of the normative references (the
+                 documents indispensable for applying it) to the document; a clause of a harmonised standard to the
+                 essential requirement of the act it covers (Annex ZA) -->
+            <moqui.basic.Enumeration description="Defined Term" enumId="AatDefinedTerm" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Efficacy" enumId="AatEfficacy" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Scope Exclusion" enumId="AatScopeExclusion" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Scope Extension" enumId="AatScopeExtension" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Derogation" enumId="AatDerogation" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Normative Reference" enumId="AatNormativeReference" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Harmonisation" enumId="AatHarmonisation" enumTypeId="AgreementAssocType"/>
         </seed-data>
     </entity>
 
@@ -199,6 +217,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="description" type="text-long"/>
         <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
         <field name="userId" type="id" default="ec.user.userId"/>
+        <field name="contentHash" type="text-medium"><description>SHA-256 of the content, hex: the exact file the items of
+            the agreement were read from</description></field>
         <relationship type="one" related="mantle.party.agreement.Agreement"/>
         <relationship type="one" title="AgreementContentType" related="moqui.basic.Enumeration" short-alias="type">
             <key-map field-name="contentTypeEnumId"/></relationship>
@@ -207,6 +227,11 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Agreement Document" enumId="AcntDocument" enumTypeId="AgreementContentType"/>
             <moqui.basic.Enumeration description="Supporting Document" enumId="AcntSupporting" enumTypeId="AgreementContentType"/>
             <moqui.basic.Enumeration description="Price Sheet" enumId="AcntPriceSheet" enumTypeId="AgreementContentType"/>
+            <!-- the sources of a norm and their readings: the items of the agreement are read from a source, and checked
+                 against a second, independent reading of it -->
+            <moqui.basic.Enumeration description="Source Document" enumId="AcntSource" enumTypeId="AgreementContentType"/>
+            <moqui.basic.Enumeration description="Source Structured Text" enumId="AcntSourceStructured" enumTypeId="AgreementContentType"/>
+            <moqui.basic.Enumeration description="Source Reading" enumId="AcntSourceReading" enumTypeId="AgreementContentType"/>
         </seed-data>
     </entity>
 
@@ -282,11 +307,19 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="sequenceNum" type="number-integer"><description>Order among the items with the same parent</description></field>
         <field name="sourceLocation" type="text-medium"><description>Where the item is in the source document: the page
             of a PDF, the file of a Formex act</description></field>
-        <field name="provisionTypeEnumId" type="id"><description>What the item provides (AgreementProvisionType):
-            a requirement (shall), a recommendation (should), a permission (may), a possibility (can), a prohibition, a
-            definition or a statement; empty when not classified</description></field>
+        <field name="sourcePage" type="number-integer"><description>Page of the source document (1-based, as the PDF
+            numbers it) where the item starts</description></field>
+        <field name="sourceRegion" type="text-short"><description>Region of the page the item occupies, in PDF points
+            from the top left: x0,y0,x1,y1</description></field>
+        <field name="provisionTypeEnumId" type="id"><description>What the item provides (AgreementProvisionType), a
+            leaf of its families: constitutive (a definition, the scope, an exclusion), regulative (a requirement, a
+            prohibition, a recommendation, a permission), procedural, sanction, meta (efficacy, amendment, derogation)
+            or informative (a statement, a possibility); empty when not classified</description></field>
         <field name="informative" type="text-indicator"><description>Y for an informative part (an informative annex,
             a bibliography, guidance): read, not met</description></field>
+        <field name="listTypeEnumId" type="id"><description>What the list this item introduces is (AgreementListType):
+            all of its points apply, one or more of them, they are conditions, or they are the contents of something;
+            its points take the provision of this item</description></field>
         <relationship type="one" related="mantle.party.agreement.Agreement"/>
         <relationship type="one" title="AgreementItemType" related="moqui.basic.Enumeration">
             <key-map field-name="agreementItemTypeEnumId"/></relationship>
@@ -296,6 +329,8 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="agreementId"/><key-map field-name="agreementItemSeqId" related="parentItemSeqId"/></relationship>
         <relationship type="one-nofk" title="AgreementProvisionType" related="moqui.basic.Enumeration" short-alias="provisionType">
             <key-map field-name="provisionTypeEnumId"/></relationship>
+        <relationship type="one-nofk" title="AgreementListType" related="moqui.basic.Enumeration" short-alias="listType">
+            <key-map field-name="listTypeEnumId"/></relationship>
         <relationship type="one" related="mantle.product.Product" short-alias="product"/>
         <relationship type="one" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
             <key-map field-name="quantityUomId"/></relationship>
@@ -337,17 +372,60 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="AitFigure" description="Figure" enumTypeId="AgreementItemType"/>
             <moqui.basic.Enumeration enumId="AitTable" description="Table" enumTypeId="AgreementItemType"/>
             <moqui.basic.Enumeration enumId="AitTableRow" description="Table Row" enumTypeId="AgreementItemType"/>
+            <!-- a cell of a table row: the column header (levels joined with ": ") in itemTitle, the value in itemText -->
+            <moqui.basic.Enumeration enumId="AitTableCell" description="Table Cell" enumTypeId="AgreementItemType"/>
+            <!-- a sentence of an item that holds more than one provision (a requirement and its exemption), so that each
+                 provision is an item of its own -->
+            <moqui.basic.Enumeration enumId="AitSentence" description="Sentence" enumTypeId="AgreementItemType"/>
 
-            <!-- Agreement Provision Type: the verbal forms of the ISO/IEC Directives, Part 2 (shall, should, may, can) and
-                 what legislation adds -->
+            <!-- Agreement Provision Type: what a provision does, in families (parentEnumId) after the provision types of
+                 legal informatics (Biagioli), the modifications of Akoma Ntoso and the statements of LegalRuleML. An item
+                 takes a leaf; the verbal form of the ISO/IEC Directives, Part 2, is the enumCode of the regulative ones -->
             <moqui.basic.EnumerationType description="Agreement Provision Type" enumTypeId="AgreementProvisionType"/>
-            <moqui.basic.Enumeration enumId="AptRequirement" description="Requirement" enumCode="shall" sequenceNum="1" enumTypeId="AgreementProvisionType"/>
-            <moqui.basic.Enumeration enumId="AptProhibition" description="Prohibition" enumCode="shall not" sequenceNum="2" enumTypeId="AgreementProvisionType"/>
-            <moqui.basic.Enumeration enumId="AptRecommendation" description="Recommendation" enumCode="should" sequenceNum="3" enumTypeId="AgreementProvisionType"/>
-            <moqui.basic.Enumeration enumId="AptPermission" description="Permission" enumCode="may" sequenceNum="4" enumTypeId="AgreementProvisionType"/>
-            <moqui.basic.Enumeration enumId="AptPossibility" description="Possibility" enumCode="can" sequenceNum="5" enumTypeId="AgreementProvisionType"/>
-            <moqui.basic.Enumeration enumId="AptDefinition" description="Definition" sequenceNum="6" enumTypeId="AgreementProvisionType"/>
-            <moqui.basic.Enumeration enumId="AptStatement" description="Statement" sequenceNum="7" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptfConstitutive" description="Constitutive" sequenceNum="10" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptfRegulative" description="Regulative" sequenceNum="20" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptfProcedural" description="Procedural" sequenceNum="30" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptfSanction" description="Sanction" sequenceNum="40" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptfMeta" description="On Other Provisions" sequenceNum="50" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptfInformative" description="Informative" sequenceNum="60" enumTypeId="AgreementProvisionType"/>
+            <!-- constitutive: what the text defines, covers, leaves out or presumes -->
+            <moqui.basic.Enumeration enumId="AptDefinition" description="Definition" parentEnumId="AptfConstitutive" sequenceNum="11" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptScope" description="Scope" parentEnumId="AptfConstitutive" sequenceNum="12" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptExclusion" description="Exclusion from Scope" parentEnumId="AptfConstitutive" sequenceNum="13" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptPresumption" description="Presumption" parentEnumId="AptfConstitutive" sequenceNum="14" enumTypeId="AgreementProvisionType"/>
+            <!-- the classes, levels or categories the text sets up: security levels, performance levels, important products -->
+            <moqui.basic.Enumeration enumId="AptClassification" description="Classification" parentEnumId="AptfConstitutive" sequenceNum="15" enumTypeId="AgreementProvisionType"/>
+            <!-- regulative: what someone or something shall, shall not, should or may do -->
+            <moqui.basic.Enumeration enumId="AptRequirement" description="Requirement" enumCode="shall" parentEnumId="AptfRegulative" sequenceNum="21" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptProhibition" description="Prohibition" enumCode="shall not" parentEnumId="AptfRegulative" sequenceNum="22" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptRecommendation" description="Recommendation" enumCode="should" parentEnumId="AptfRegulative" sequenceNum="23" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptPermission" description="Permission" enumCode="may" parentEnumId="AptfRegulative" sequenceNum="24" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptRight" description="Right" parentEnumId="AptfRegulative" sequenceNum="25" enumTypeId="AgreementProvisionType"/>
+            <!-- procedural: how a conformity assessment, a notification, a verification is carried out -->
+            <moqui.basic.Enumeration enumId="AptProcedure" description="Procedure" parentEnumId="AptfProcedural" sequenceNum="31" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptPenalty" description="Penalty" parentEnumId="AptfSanction" sequenceNum="41" enumTypeId="AgreementProvisionType"/>
+            <!-- on other provisions: when they apply, how they change, where they give way -->
+            <moqui.basic.Enumeration enumId="AptEfficacy" description="Entry into Force or Application" parentEnumId="AptfMeta" sequenceNum="51" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptAmending" description="Amending" parentEnumId="AptfMeta" sequenceNum="52" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptDerogation" description="Derogation" parentEnumId="AptfMeta" sequenceNum="53" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptDelegation" description="Delegation of Power" parentEnumId="AptfMeta" sequenceNum="54" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptTransitional" description="Transitional" parentEnumId="AptfMeta" sequenceNum="55" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptNormativeReference" description="Normative Reference" parentEnumId="AptfMeta" sequenceNum="56" enumTypeId="AgreementProvisionType"/>
+            <!-- a saving clause: "Paragraphs 1 and 2 shall not affect", "without prejudice to" other provisions -->
+            <moqui.basic.Enumeration enumId="AptSaving" description="Saving Clause" parentEnumId="AptfMeta" sequenceNum="57" enumTypeId="AgreementProvisionType"/>
+            <!-- informative: what is read, never met -->
+            <moqui.basic.Enumeration enumId="AptPossibility" description="Possibility" enumCode="can" parentEnumId="AptfInformative" sequenceNum="61" enumTypeId="AgreementProvisionType"/>
+            <moqui.basic.Enumeration enumId="AptStatement" description="Statement" parentEnumId="AptfInformative" sequenceNum="62" enumTypeId="AgreementProvisionType"/>
+
+            <!-- Agreement List Type: what the points of a list introduced by an item are -->
+            <moqui.basic.EnumerationType description="Agreement List Type" enumTypeId="AgreementListType"/>
+            <moqui.basic.Enumeration enumId="AltAll" description="All Apply" sequenceNum="1" enumTypeId="AgreementListType"/>
+            <moqui.basic.Enumeration enumId="AltAny" description="One or More Apply" sequenceNum="2" enumTypeId="AgreementListType"/>
+            <!-- conditions or criteria: "where all of the following are met", "where any of the following criteria is met" -->
+            <moqui.basic.Enumeration enumId="AltConditionsAll" description="Conditions, All Met" sequenceNum="3" enumTypeId="AgreementListType"/>
+            <moqui.basic.Enumeration enumId="AltConditionsAny" description="Conditions, One or More Met" sequenceNum="4" enumTypeId="AgreementListType"/>
+            <moqui.basic.Enumeration enumId="AltContents" description="Contents" sequenceNum="5" enumTypeId="AgreementListType"/>
+            <moqui.basic.Enumeration enumId="AltExamples" description="Examples" sequenceNum="6" enumTypeId="AgreementListType"/>
         </seed-data>
     </entity>
 

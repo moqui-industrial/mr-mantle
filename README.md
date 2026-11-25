@@ -44,11 +44,15 @@ It has no screens of its own. To see it at work, run one of those applications.
 - **Agreements for every kind of norm** (`entity/party/AgreementEntities.xml`): a law, a standard, a guideline or
   a company policy is an Agreement per language edition, with its kind (`AgreementDocumentType`), version, locale,
   jurisdiction, adoption, publication, entry-into-force and application dates, and its identifiers (ELI, CELEX,
-  publisher reference, DOI: `AgreementIdentification`). Its partitions (part, chapter, article, paragraph, point,
-  annex, table row) are AgreementItems in a tree, in printed order, each with its provision type (requirement,
-  recommendation, permission, definition: the ISO verbal forms) and whether it is informative. Citations,
-  translations, amendments, repeals and transpositions are AgreementAssocs between acts or single items, effective
-  from a date. A Requirement can come from an item (`Requirement.agreementId`, `agreementItemSeqId`).
+  publisher reference, DOI: `AgreementIdentification`), whether it is prescriptive (not a technical report) and
+  official, and its sources (the PDF, the Formex XML) as AgreementContent with their SHA-256. Its partitions (part,
+  chapter, article, paragraph, point, sentence, annex, table row and cell, footnote) are AgreementItems in a tree, in
+  printed order, with their page and region, each with its provision type in families (constitutive, regulative with
+  the ISO verbal forms, procedural, sanction, on other provisions, informative), what the list it introduces is (all
+  apply, one or more, conditions, contents) and whether it is informative. Citations, defined terms, efficacy,
+  exclusions from and extensions of scope, derogations, normative references, harmonisation, translations,
+  amendments, repeals and transpositions are AgreementAssocs between acts or single items, effective from a date. A
+  Requirement can come from an item (`Requirement.agreementId`, `agreementItemSeqId`).
 - **Functions in the bill of materials**: a `PtFunction` product (a safety function, a security zone, a conduit)
   with its purpose (`Product.purposeEnumId`, DevicePurpose), whose members are `PatFunctionMember` associations
   with their role (`ProductAssoc.purposeEnumId`). The installation is a moqui-device `Device` with its Asset
