@@ -461,12 +461,12 @@ kit => {
         return out
     }
     /* What a merge request changes, as the host compares it (a hidden one's head is read for those who see it). */
-    function diffOf(mr, withDiffs, path) {
+    function diffOf(mr, withDiffs, path, part) {
         const {out, problem} = hosted(REVIEW + "get#MergeRequestDiff", {
             mergeRequestId: mr.mergeRequestId,
             withDiffs,
-            // no more than the page shows: one file's diff, or a page's bounded, as hunks
-            ...(withDiffs ? kit.diffAsk(path || null) : {})
+            // no more than the page shows: one file's diff (or a part of it), or a page's bounded, as hunks
+            ...(withDiffs ? kit.diffAsk(path || null, part) : {})
         })
         if (problem != null) missing()
         return out
@@ -499,7 +499,7 @@ kit => {
             }
         }
         const withDiffs = flag(p.withDiffs)
-        const diff = diffOf(mr, withDiffs, p.path)
+        const diff = diffOf(mr, withDiffs, p.path, kit.lineWindow(p))
         const files = Array.from(diff.fileList || [])
         if (p.path && !files.some(file => file.path === p.path)) missing()
         const diffs = kit.boundedDiffs(withDiffs ? files : [], p.path || null)

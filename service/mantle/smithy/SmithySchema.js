@@ -51,11 +51,22 @@
     },
     getCommit: {
         service: "mantle.smithy.SmithyServices.get#Commit",
-        fields: ["siteId", "repositoryId", "commitId", "path"]
+        fields: ["siteId", "repositoryId", "commitId", "path", "diffLineOffset", "diffLineLimit"]
     },
     getCompare: {
         service: "mantle.smithy.SmithyServices.get#Compare",
-        fields: ["siteId", "repositoryId", "base", "head", "headRepositoryPath", "path", "withDiffs", "checkMergeable"]
+        fields: [
+            "siteId",
+            "repositoryId",
+            "base",
+            "head",
+            "headRepositoryPath",
+            "path",
+            "withDiffs",
+            "checkMergeable",
+            "diffLineOffset",
+            "diffLineLimit"
+        ]
     },
     findRefs: {
         service: "mantle.smithy.SmithyServices.find#Refs",
@@ -392,7 +403,7 @@
     },
     getMergeRequestChanges: {
         service: "mantle.smithy.SmithyReviewServices.get#MergeRequestChanges",
-        fields: ["siteId", "repositoryId", "mergeRequestNum", "path", "withDiffs", "agent"]
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "path", "withDiffs", "agent", "diffLineOffset", "diffLineLimit"]
     },
     createMergeRequest: {
         service: "mantle.smithy.SmithyReviewServices.create#MergeRequest",

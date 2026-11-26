@@ -305,15 +305,25 @@ const fileViews = files =>
         binary: !!file.binary,
         tooLarge: !!file.tooLarge
     }))
+/* The part of one file's diff a page asks for (p.diffLineOffset, p.diffLineLimit: lines of its hunks, counted without
+ * their headers), at most FILE_DIFF_LINES lines; none for a page of files or with no limit. */
+function lineWindow(p) {
+    const limit = Math.min(FILE_DIFF_LINES, Math.max(0, Math.floor(Number(p.diffLineLimit) || 0)))
+    if (!p.path || !limit) return {}
+    return {diffLineOffset: Math.max(0, Math.floor(Number(p.diffLineOffset) || 0)), diffLineLimit: limit}
+}
 /* What a page asks the host for: one file's diff (path) or a page's, bounded so that the host sends no more than the page
- * shows, as hunks only (the page renders them). */
-const diffAsk = path => ({
-    ...(path ? {path} : {maxFileDiffLines: INLINE_FILE_LINES}),
+ * shows, as hunks only (the page renders them); for one file only the lines of the part the page shows (lineWindow), so a
+ * large file's other lines are not made into values for each script that passes the diff on (mr-pass SmithyDiffScale). */
+const diffAsk = (path, part) => ({
+    ...(path ? {path, ...(part || {})} : {maxFileDiffLines: INLINE_FILE_LINES}),
     maxDiffLines: path ? FILE_DIFF_LINES : DIFF_LINES,
     withHtml: false
 })
 /* The diffs a page shows: at most DIFF_FILES files and DIFF_LINES changed lines, none of more than INLINE_FILE_LINES (one
- * file asked by its path: FILE_DIFF_LINES), the rest left to the file list; truncated says some file's diff is left out. */
+ * file asked by its path: FILE_DIFF_LINES), the rest left to the file list; truncated says some file's diff is left out. A
+ * file the host gave a part of (lineWindow) has diffLineCount, the lines of all its hunks, and diffLineOffset, where the
+ * part starts. */
 function boundedDiffs(files, path) {
     const shown = []
     let lines = 0
@@ -333,7 +343,10 @@ function boundedDiffs(files, path) {
             status: file.changeType,
             unifiedDiff: file.unifiedDiff ?? null,
             html: file.html ?? null,
-            hunks: file.hunks ?? null
+            hunks: file.hunks ?? null,
+            ...(file.diffLineCount != null
+                ? {diffLineCount: Number(file.diffLineCount), diffLineOffset: Number(file.diffLineOffset || 0)}
+                : {})
         })
     }
     return {shown, truncated}
@@ -756,7 +769,14 @@ methods.getCommit = p => {
     if (p.path && !files.some(file => file.path === p.path)) missing()
     // the first files' diffs (the host diffs at most 300); the rest are in the file list
     const diffs = boundedDiffs(
-        Array.from(git("get#GitCommitDiff", {repositoryId: p.repositoryId, commitId, path: p.path || null}).fileDiffList || []),
+        Array.from(
+            git("get#GitCommitDiff", {
+                repositoryId: p.repositoryId,
+                commitId,
+                path: p.path || null,
+                ...lineWindow(p)
+            }).fileDiffList || []
+        ),
         p.path || null
     )
     const statuses = git("get#GitCommitStatuses", {repositoryId: p.repositoryId, commitId})
@@ -808,7 +828,7 @@ methods.getCompare = p => {
         head: across ? head.fullName : head.commitId,
         ...(across ? {headRepositoryId: headRepository.repositoryId} : {}),
         withDiffs: flag(p.withDiffs),
-        ...(flag(p.withDiffs) ? diffAsk(p.path || null) : {}),
+        ...(flag(p.withDiffs) ? diffAsk(p.path || null, lineWindow(p)) : {}),
         // a trial merge only when the page asks for it
         checkMergeable: flag(p.checkMergeable)
     })
@@ -1165,6 +1185,7 @@ const kit = {
     fileViews,
     boundedDiffs,
     diffAsk,
+    lineWindow,
     // DG7: what the site's lists share with the code's (a list's query, its scan, a typed search)
     scopeOf,
     narrowed,
@@ -1222,7 +1243,9 @@ const NUMBERS = [
     "newLine",
     "runNum",
     "afterChunkSeq",
-    "pageIndex"
+    "pageIndex",
+    "diffLineOffset",
+    "diffLineLimit"
 ]
 /* Lists of ids or handles, and the one field that holds a post's text. */
 const LISTS = ["labelIds", "assigneeHandles", "attachmentIds", "reviewerHandles", "postIds"]

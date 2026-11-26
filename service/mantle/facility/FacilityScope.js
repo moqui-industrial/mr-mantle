@@ -45,11 +45,15 @@ const facilityDepth = 12
 // null for a missing facility or one no ancestor owns. An owned facility is its owner's, as before.
 function facilityOrganization(facility) {
     const seen = new Set()
-    let row = typeof facility === "string" ? ec.entity.find("mantle.facility.Facility").condition("facilityId", facility).one() : facility
+    // read with authorization off: a scope is computed for a caller already checked, and a service granted without inheritance
+    // (the map adapters', mantle/other/MapPlaces.js) has no entity grant of its own
+    const facilityRow = facilityId =>
+        ec.entity.find("mantle.facility.Facility").condition("facilityId", facilityId).disableAuthz().one()
+    let row = typeof facility === "string" ? facilityRow(facility) : facility
     for (let depth = 0; row && !seen.has(row.facilityId) && depth < facilityDepth; depth++) {
         if (row.ownerPartyId) return row.ownerPartyId
         seen.add(row.facilityId)
-        row = row.parentFacilityId ? ec.entity.find("mantle.facility.Facility").condition("facilityId", row.parentFacilityId).one() : null
+        row = row.parentFacilityId ? facilityRow(row.parentFacilityId) : null
     }
     return null
 }

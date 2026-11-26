@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Mantle's map adapters (mr-moqui plans/Maps.md §3.2, docs/tools/Maps.md "Record adapters"; MapPlaces.js): the framework's
+    local-map dialog and record layers call these services as the user, resolved by the adapter keys of data/10-seed/MapPlaces.xml
+    (postalAddress, party, facility, asset). Each checks the caller itself, on every call, from permissions and organization scope
+    (MapPlaces.js says who reads and who writes), so every user may call them (MantleMapPlaceServices); a record that is not there
+    and one the caller may not read are refused alike (reasonCode RECORD_UNAVAILABLE), with nothing of the record. A place is the
+    record's own confirmed point, else its address's postal code and country for the framework's approximate postal-area position,
+    which is never saved to the record. A save (Choose location) makes a new point with its provenance (GeoPointProvenance) and
+    points the record at it: applied false with STALE_VERSION, PERMISSION_DENIED, RECORD_UNAVAILABLE, POINT_INVALID,
+    PRECISION_INVALID, PRECISION_REFUSED (an estimate as an address's point) or POINT_RECORDED (an estimate over a facility's or
+    asset's recorded point). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
+
+    <!-- ========== A postal address (adapter postalAddress; recordKey {contactMechId}) ========== -->
+
+    <service verb="get" noun="PostalAddressPlace">
+        <description>A postal address's place, through the parties and facilities it is current for (addressPurpose narrows them
+            to that purpose): its own point while it is this address's, else its postal code and country. Read by the party, the
+            owner of a personal contact, and within reach of the caller's organizations only a business address (an organization's
+            but its home address, a person's work address), or the address of a facility of their scope. chooseLocation with
+            PARTY_LOCATION_EDIT for a party of their organizations, FACILITY_EDIT for their facility, and always for their own or
+            their personal contact's.</description>
+        <implements service="org.moqui.maps.MapServices.get#RecordMapContext"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('postalAddressContext', context)"/>
+            <set field="label" from="answer.label"/>
+            <set field="geometry" from="answer.geometry"/>
+            <set field="extent" from="answer.extent"/>
+            <set field="precisionEnumId" from="answer.precisionEnumId"/>
+            <set field="sourceText" from="answer.sourceText"/>
+            <set field="recordVersion" from="answer.recordVersion"/>
+            <set field="permittedActions" from="answer.permittedActions"/>
+            <set field="links" from="answer.links"/>
+            <set field="reasonCode" from="answer.reasonCode"/>
+            <set field="postalCode" from="answer.postalCode"/>
+            <set field="countryGeoId" from="answer.countryGeoId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="PostalAddressPlace">
+        <description>Save a point a user chose as a postal address's location (its geoPointId, a new point with provenance and the
+            address's fingerprint), checked again as get#PostalAddressPlace offers chooseLocation; refuses a changed address or
+            point (STALE_VERSION) and any postal-area or place estimate (PRECISION_REFUSED).</description>
+        <implements service="org.moqui.maps.MapServices.store#RecordLocation"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('postalAddressStore', context)"/>
+            <set field="applied" from="answer.applied"/>
+            <set field="reasonCode" from="answer.reasonCode"/>
+            <set field="reason" from="answer.reason"/>
+            <set field="recordVersion" from="answer.recordVersion"/>
+        </actions>
+    </service>
+    <!-- ========== A party (adapter party; recordKey {partyId}, addressPurpose a postal purpose) ========== -->
+
+    <service verb="get" noun="PartyPlace">
+        <description>A party's place: with addressPurpose its current address of that purpose (refused as unavailable when the
+            caller may not read that purpose); else its own point (PartyGeoPoint: an organization's for whoever reaches it, a
+            person's for that person and their personal contact's owner), else its first readable address (primary first). The
+            address rules of get#PostalAddressPlace; a party's own point is written by the party, their personal contact's owner,
+            or PARTY_LOCATION_EDIT for an organization of the caller's organizations.</description>
+        <implements service="org.moqui.maps.MapServices.get#RecordMapContext"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('partyContext', context)"/>
+            <set field="label" from="answer.label"/>
+            <set field="geometry" from="answer.geometry"/>
+            <set field="extent" from="answer.extent"/>
+            <set field="precisionEnumId" from="answer.precisionEnumId"/>
+            <set field="sourceText" from="answer.sourceText"/>
+            <set field="recordVersion" from="answer.recordVersion"/>
+            <set field="permittedActions" from="answer.permittedActions"/>
+            <set field="links" from="answer.links"/>
+            <set field="reasonCode" from="answer.reasonCode"/>
+            <set field="postalCode" from="answer.postalCode"/>
+            <set field="countryGeoId" from="answer.countryGeoId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="PartyPlace">
+        <description>Save a point a user chose for the place get#PartyPlace showed: the address's location, or the party's own
+            point (the current PartyGeoPoint ended, a new one from now). Checked again; refuses a changed record (STALE_VERSION).</description>
+        <implements service="org.moqui.maps.MapServices.store#RecordLocation"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('partyStore', context)"/>
+            <set field="applied" from="answer.applied"/>
+            <set field="reasonCode" from="answer.reasonCode"/>
+            <set field="reason" from="answer.reason"/>
+            <set field="recordVersion" from="answer.recordVersion"/>
+        </actions>
+    </service>
+    <!-- ========== A facility (adapter facility; recordKey {facilityId}; the record layer of its features) ========== -->
+
+    <service verb="get" noun="FacilityPlace">
+        <description>A facility's place: its own point, else its address's (addressPurpose, else its primary address): the
+            address's own point or its postal code and country. Read in the caller's facility scope (FacilityScope.js: their
+            organizations, every one with FACILITY_ALL_ORGANIZATIONS); chooseLocation with FACILITY_EDIT there, as store#Facility.</description>
+        <implements service="org.moqui.maps.MapServices.get#RecordMapContext"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('facilityContext', context)"/>
+            <set field="label" from="answer.label"/>
+            <set field="geometry" from="answer.geometry"/>
+            <set field="extent" from="answer.extent"/>
+            <set field="precisionEnumId" from="answer.precisionEnumId"/>
+            <set field="sourceText" from="answer.sourceText"/>
+            <set field="recordVersion" from="answer.recordVersion"/>
+            <set field="permittedActions" from="answer.permittedActions"/>
+            <set field="links" from="answer.links"/>
+            <set field="reasonCode" from="answer.reasonCode"/>
+            <set field="postalCode" from="answer.postalCode"/>
+            <set field="countryGeoId" from="answer.countryGeoId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="FacilityPlace">
+        <description>Save a point a user chose as a facility's own location (Facility.geoPointId, a new point with provenance),
+            checked again as store#Facility checks a change; refuses a changed point (STALE_VERSION) and an estimate over a
+            recorded point (POINT_RECORDED).</description>
+        <implements service="org.moqui.maps.MapServices.store#RecordLocation"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('facilityStore', context)"/>
+            <set field="applied" from="answer.applied"/>
+            <set field="reasonCode" from="answer.reasonCode"/>
+            <set field="reason" from="answer.reason"/>
+            <set field="recordVersion" from="answer.recordVersion"/>
+        </actions>
+    </service>
+    <service verb="find" noun="FacilityPlaces">
+        <description>The open facilities of the caller's facility scope that have their own point within the viewport, by name, at
+            most limit (truncated when there were more), each with its precision and a link (route facilityDetail); none for a
+            caller with no organization. The scope is applied in the query on every viewport, never after it.</description>
+        <implements service="org.moqui.maps.MapServices.find#LayerFeatures"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('facilityFeatures', context)"/>
+            <set field="features" from="answer.features"/>
+            <set field="truncated" from="answer.truncated"/>
+        </actions>
+    </service>
+    <!-- ========== An asset (adapter asset; recordKey {assetId}; the record layer of its features) ========== -->
+
+    <service verb="get" noun="AssetPlace">
+        <description>An asset's place: its own point, else where its facility is (the facility's point, else its address's postal
+            code and country). Read in the stock scope (StockScope.js: its owner's or its facility's owner's organization among
+            the caller's); chooseLocation with MAINTENANCE_RESOURCE_EDIT or FACILITY_EDIT there.</description>
+        <implements service="org.moqui.maps.MapServices.get#RecordMapContext"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('assetContext', context)"/>
+            <set field="label" from="answer.label"/>
+            <set field="geometry" from="answer.geometry"/>
+            <set field="extent" from="answer.extent"/>
+            <set field="precisionEnumId" from="answer.precisionEnumId"/>
+            <set field="sourceText" from="answer.sourceText"/>
+            <set field="recordVersion" from="answer.recordVersion"/>
+            <set field="permittedActions" from="answer.permittedActions"/>
+            <set field="links" from="answer.links"/>
+            <set field="reasonCode" from="answer.reasonCode"/>
+            <set field="postalCode" from="answer.postalCode"/>
+            <set field="countryGeoId" from="answer.countryGeoId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="AssetPlace">
+        <description>Save a point a user chose as an asset's own location (Asset.geoPointId, audit-logged; a new point with
+            provenance), checked again; refuses a changed point (STALE_VERSION) and an estimate over a recorded point
+            (POINT_RECORDED).</description>
+        <implements service="org.moqui.maps.MapServices.store#RecordLocation"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('assetStore', context)"/>
+            <set field="applied" from="answer.applied"/>
+            <set field="reasonCode" from="answer.reasonCode"/>
+            <set field="reason" from="answer.reason"/>
+            <set field="recordVersion" from="answer.recordVersion"/>
+        </actions>
+    </service>
+    <service verb="find" noun="AssetPlaces">
+        <description>The assets of the caller's stock scope that have their own point within the viewport, but those delivered or
+            deactivated, by name, at most limit (truncated when there were more), each with its precision and a link (route
+            assetDetail). The scope is applied in the query on every viewport.</description>
+        <implements service="org.moqui.maps.MapServices.find#LayerFeatures"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('assetFeatures', context)"/>
+            <set field="features" from="answer.features"/>
+            <set field="truncated" from="answer.truncated"/>
+        </actions>
+    </service>
+</services>
