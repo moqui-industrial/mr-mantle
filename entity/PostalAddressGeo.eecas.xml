@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
+    <!-- A postal address's postalCodeGeoId (mr-moqui plans/Maps.md §6.3), read by sales tax, checkout and segments as one of the
+        address's geos: the postal code's Geo from the local Geo data (GeoPostalCode by the country and the code as the framework's
+        normalize#PostalCode reads it; MapPlaces.js resolvePostalCodeGeo), read directly so no lookup service runs inside the
+        address's transaction. Set when a new address has a code and country, and when an address's code or country changes in
+        place: a value the caller gave is kept unless it is a postal code's Geo of another code (as update#PartyPostalAddress's
+        clone carries the old one), which is replaced by the code's Geo or cleared when there is none; a postal code's Geo is
+        cleared when the code or country is removed. Only the code's Geo is set: its point is never copied into the address's
+        geoPointId. A failure is logged and leaves the address as it was given. -->
+    <eeca id="PostalAddressCodeGeoCreate" entity="mantle.party.contact.PostalAddress" on-create="true" run-before="true"
+            run-on-error="false" get-entire-entity="true">
+        <condition><expression>(postalCode &amp;&amp; countryGeoId) || postalCodeGeoId</expression></condition>
+        <actions><script>ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').resolvePostalCodeGeo(entityValue)</script></actions>
+    </eeca>
+    <eeca id="PostalAddressCodeGeoUpdate" entity="mantle.party.contact.PostalAddress" on-update="true" run-before="true"
+            run-on-error="false" get-entire-entity="true" get-original-value="true">
+        <condition><expression>originalValue != null &amp;&amp; (originalValue.postalCode != postalCode ||
+            originalValue.countryGeoId != countryGeoId)</expression></condition>
+        <actions><script>ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').resolvePostalCodeGeo(entityValue)</script></actions>
+    </eeca>
+</eecas>

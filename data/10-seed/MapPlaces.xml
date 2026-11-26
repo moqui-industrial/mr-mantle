@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed">
+    <!-- Mantle's map adapters (mr-moqui docs/tools/Maps.md "Record adapters"; service/mantle/other/MapPlaceServices.xml,
+        MapPlaces.js): the framework's local-map dialog and record layers resolve these keys to their services, and a browser sends
+        only the key. The registration grants nothing: each service checks the caller itself. -->
+    <moqui.maps.MapAdapter adapterKey="postalAddress" description="Postal address" sequenceNum="100"
+            contextServiceName="mantle.other.MapPlaceServices.get#PostalAddressPlace"
+            storeServiceName="mantle.other.MapPlaceServices.store#PostalAddressPlace"/>
+    <moqui.maps.MapAdapter adapterKey="party" description="Party" sequenceNum="110"
+            contextServiceName="mantle.other.MapPlaceServices.get#PartyPlace"
+            storeServiceName="mantle.other.MapPlaceServices.store#PartyPlace"/>
+    <moqui.maps.MapAdapter adapterKey="facility" description="Facility" sequenceNum="120"
+            contextServiceName="mantle.other.MapPlaceServices.get#FacilityPlace"
+            storeServiceName="mantle.other.MapPlaceServices.store#FacilityPlace"
+            featuresServiceName="mantle.other.MapPlaceServices.find#FacilityPlaces"/>
+    <moqui.maps.MapAdapter adapterKey="asset" description="Asset" sequenceNum="130"
+            contextServiceName="mantle.other.MapPlaceServices.get#AssetPlace"
+            storeServiceName="mantle.other.MapPlaceServices.store#AssetPlace"
+            featuresServiceName="mantle.other.MapPlaceServices.find#AssetPlaces"/>
+
+    <!-- Their grants, and PARTY_LOCATION_EDIT, are initial settings: data/15-seed-initial/Access.xml. -->
+
+    <!-- the source of a point a user chose on a map (GeoPoint.dataSourceId; its precision, user and date are its
+        GeoPointProvenance) -->
+    <moqui.basic.DataSource dataSourceId="MANTLE_MAP_CHOICE" dataSourceTypeEnumId="DST_INTERNAL_ENTRY" description="A location chosen on a map by a user"/>
+</entity-facade-xml>

@@ -376,6 +376,22 @@
     <moqui.security.ArtifactAuthz artifactAuthzId="MantleDavServicesALL" userGroupId="ALL_USERS" artifactGroupId="MantleDavServices"
             authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
 
+    <!-- Mantle's map adapters (data/10-seed/MapPlaces.xml, service/mantle/other/MapPlaceServices.xml): the framework's local-map
+        dialog's grants reach no service it calls (MAPS_DIALOG is not inherited), so the adapter services are granted to every
+        user, ALWAYS as the dialog is, so an application that denies its groups Mantle's services does not take a record's map
+        from them; not inherited, as each reads and writes only after its own check. -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantleMapPlaceServices" description="Mantle's map adapters"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleMapPlaceServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="N"
+            nameIsPattern="Y" artifactName="mantle\.other\.MapPlaceServices\.(get|store|find)#[A-Za-z]+"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleMapPlaceServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleMapPlaceServices" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <!-- choosing the map location of the business addresses and the own point of the parties of the user's organizations (an
+        organization's addresses but its home address, a person's work address; MapPlaces.js). A party's own addresses and a
+        personal contact's owner need none; a facility's location is FACILITY_EDIT's, an asset's MAINTENANCE_RESOURCE_EDIT's or
+        FACILITY_EDIT's. A system administrator passes Mantle's permission checks without a grant; an application grants it to
+        the groups that keep its contacts' addresses. -->
+    <userPermissions userPermissionId="PARTY_LOCATION_EDIT" description="Party Location Edit (the map location of the addresses of the parties of the user's organizations)"/>
+
     <!-- Commerce's stores, merchandising, website, orders, promotions, channels and subscriptions (impl-commerce P1, F2;
         design-commerce §1.1), each checked by the store services with the store's organization: COMMERCE_VIEW reads stores and
         their records, COMMERCE_STORE_EDIT keeps a store's configuration and checkout settings, COMMERCE_MERCHANDISE its

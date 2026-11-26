@@ -187,6 +187,26 @@ along with this software (see the LICENSE.md file). If not, see
         <alias entity-alias="AOITM" name="acquireUnitAmount" field="unitAmount"/>
     </view-entity>
 
+    <!-- An asset with its own point, and the owner of the facility that holds it, for the asset map layer's bounded viewport
+        query in the stock scope (mantle/other/MapPlaces.js, StockScope.js: its owner or its facility's owner) -->
+    <view-entity entity-name="AssetGeoPoint" package="mantle.product.asset">
+        <member-entity entity-alias="AST" entity-name="mantle.product.asset.Asset"/>
+        <member-entity entity-alias="GPT" entity-name="moqui.basic.GeoPoint" join-from-alias="AST">
+            <key-map field-name="geoPointId"/></member-entity>
+        <member-entity entity-alias="FAC" entity-name="mantle.facility.Facility" join-from-alias="AST" join-optional="true">
+            <key-map field-name="facilityId"/></member-entity>
+        <alias name="assetId" entity-alias="AST"/>
+        <alias name="assetName" entity-alias="AST"/>
+        <alias name="assetTypeEnumId" entity-alias="AST"/>
+        <alias name="statusId" entity-alias="AST"/>
+        <alias name="ownerPartyId" entity-alias="AST"/>
+        <alias name="facilityId" entity-alias="AST"/>
+        <alias name="geoPointId" entity-alias="AST"/>
+        <alias name="latitude" entity-alias="GPT"/>
+        <alias name="longitude" entity-alias="GPT"/>
+        <alias name="facilityOwnerPartyId" entity-alias="FAC" field="ownerPartyId"/>
+    </view-entity>
+
     <view-entity entity-name="AssetLocationDetail" package="mantle.product.asset">
         <member-entity entity-alias="AST" entity-name="mantle.product.asset.Asset"/>
         <member-entity entity-alias="FCL" entity-name="mantle.facility.FacilityLocation" join-from-alias="AST" join-optional="true">
