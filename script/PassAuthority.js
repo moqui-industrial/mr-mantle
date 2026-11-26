@@ -96,7 +96,7 @@ const TOKEN_WRITES = [
     'getRegistration',
     'cancelRegistration',
 ]
-/* The operations an installed app's login key may call (mr-moqui plans/design-dev-aide.md §21.4 to §21.8: the Dev AIDE
+/* The operations an installed app's login key may call (mr-moqui plans/archive/design-dev-aide.md §21.4 to §21.8: the Dev AIDE
    connected to a group server by the app sign-in, /sso/appToken): its merge requests, fork, agreement, review threads
    (getMergeRequestChanges answers them) and reviews, pipeline runs and their re-runs, and issues. A request whose user
    came by any other login key (an access token, a session's key, a scoped key) calls no PASS operation (mr-pass

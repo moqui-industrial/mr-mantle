@@ -1,4 +1,4 @@
-// Smithy's side of the Dev AIDE's connection to a group server (mr-moqui plans/design-dev-aide.md §21; SmithyHosting.js,
+// Smithy's side of the Dev AIDE's connection to a group server (mr-moqui plans/archive/design-dev-aide.md §21; SmithyHosting.js,
 // PassAuthority.js APP_KEY_OPERATIONS): the framework's REST refuses the writes of a repository Smithy keeps and names
 // Smithy's REST, and allows its reads and any other repository's writes; the hosting offer names Smithy's REST of the
 // host's site, forks and Mantle's task source; the agreement check answers for a repository Smithy keeps; an installed

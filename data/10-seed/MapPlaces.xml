@@ -18,6 +18,9 @@
             contextServiceName="mantle.other.MapPlaceServices.get#AssetPlace"
             storeServiceName="mantle.other.MapPlaceServices.store#AssetPlace"
             featuresServiceName="mantle.other.MapPlaceServices.find#AssetPlaces"/>
+    <!-- read only (no store service): an order's, a shipment's or an invoice's own address, located on its party's address -->
+    <moqui.maps.MapAdapter adapterKey="transactionAddress" description="Transaction address" sequenceNum="140"
+            contextServiceName="mantle.other.MapPlaceServices.get#TransactionAddressPlace"/>
 
     <!-- Their grants, and PARTY_LOCATION_EDIT, are initial settings: data/15-seed-initial/Access.xml. -->
 

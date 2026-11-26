@@ -1,5 +1,5 @@
 /* CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md.
- * What the framework's hosting REST asks Smithy (mr-moqui docs/interfaces/Git-Hosting.md, REST; plans/design-dev-aide.md
+ * What the framework's hosting REST asks Smithy (mr-moqui docs/interfaces/Git-Hosting.md, REST; plans/archive/design-dev-aide.md
  * §21), so a client such as the Dev AIDE finds Smithy's REST for the repositories it keeps: the write check
  * (git-server rest-write-check-service, check#GitRestWrite), the offer (offer-service, add#GitHostingOffer) and the
  * agreement check (agreement-check-service, check#GitAuthorSigned). Each is asked with authorization off and reads as

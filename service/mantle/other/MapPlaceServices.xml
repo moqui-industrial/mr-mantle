@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- Mantle's map adapters (mr-moqui plans/Maps.md §3.2, docs/tools/Maps.md "Record adapters"; MapPlaces.js): the framework's
     local-map dialog and record layers call these services as the user, resolved by the adapter keys of data/10-seed/MapPlaces.xml
-    (postalAddress, party, facility, asset). Each checks the caller itself, on every call, from permissions and organization scope
+    (postalAddress, party, facility, asset, and the read-only transactionAddress). Each checks the caller itself, on every call, from permissions and organization scope
     (MapPlaces.js says who reads and who writes), so every user may call them (MantleMapPlaceServices); a record that is not there
     and one the caller may not read are refused alike (reasonCode RECORD_UNAVAILABLE), with nothing of the record. A place is the
     record's own confirmed point, else its address's postal code and country for the framework's approximate postal-area position,
@@ -30,9 +30,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A postal address's place, through the parties and facilities it is current for (addressPurpose narrows them
             to that purpose): its own point while it is this address's, else its postal code and country. Read by the party, the
             owner of a personal contact, and within reach of the caller's organizations only a business address (an organization's
-            but its home address, a person's work address), or the address of a facility of their scope. chooseLocation with
-            PARTY_LOCATION_EDIT for a party of their organizations, FACILITY_EDIT for their facility, and always for their own or
-            their personal contact's.</description>
+            but its home address, a person's work address), or the address of a facility of their scope; a person's home address
+            also, read only, by an HR reader People admits them to (PEOPLE_HR_VIEW). chooseLocation with PARTY_LOCATION_EDIT for a
+            party of their organizations, SALES_ACCOUNT_EDIT for an unshared account of their sales scope or its contact,
+            FACILITY_EDIT for their facility, and always for their own or their personal contact's.</description>
         <implements service="org.moqui.maps.MapServices.get#RecordMapContext"/>
         <actions>
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('postalAddressContext', context)"/>
@@ -47,6 +48,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="reasonCode" from="answer.reasonCode"/>
             <set field="postalCode" from="answer.postalCode"/>
             <set field="countryGeoId" from="answer.countryGeoId"/>
+            <set field="address1" from="answer.address1"/>
+            <set field="address2" from="answer.address2"/>
+            <set field="city" from="answer.city"/>
         </actions>
     </service>
     <service verb="store" noun="PostalAddressPlace">
@@ -69,7 +73,8 @@ along with this software (see the LICENSE.md file). If not, see
             caller may not read that purpose); else its own point (PartyGeoPoint: an organization's for whoever reaches it, a
             person's for that person and their personal contact's owner), else its first readable address (primary first). The
             address rules of get#PostalAddressPlace; a party's own point is written by the party, their personal contact's owner,
-            or PARTY_LOCATION_EDIT for an organization of the caller's organizations.</description>
+            or PARTY_LOCATION_EDIT (or Sales' SALES_ACCOUNT_EDIT for an unshared account of their sales scope) for an organization
+            of the caller's organizations. A home address is read through HR only when addressPurpose asks for it.</description>
         <implements service="org.moqui.maps.MapServices.get#RecordMapContext"/>
         <actions>
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('partyContext', context)"/>
@@ -84,6 +89,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="reasonCode" from="answer.reasonCode"/>
             <set field="postalCode" from="answer.postalCode"/>
             <set field="countryGeoId" from="answer.countryGeoId"/>
+            <set field="address1" from="answer.address1"/>
+            <set field="address2" from="answer.address2"/>
+            <set field="city" from="answer.city"/>
         </actions>
     </service>
     <service verb="store" noun="PartyPlace">
@@ -118,6 +126,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="reasonCode" from="answer.reasonCode"/>
             <set field="postalCode" from="answer.postalCode"/>
             <set field="countryGeoId" from="answer.countryGeoId"/>
+            <set field="address1" from="answer.address1"/>
+            <set field="address2" from="answer.address2"/>
+            <set field="city" from="answer.city"/>
         </actions>
     </service>
     <service verb="store" noun="FacilityPlace">
@@ -164,6 +175,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="reasonCode" from="answer.reasonCode"/>
             <set field="postalCode" from="answer.postalCode"/>
             <set field="countryGeoId" from="answer.countryGeoId"/>
+            <set field="address1" from="answer.address1"/>
+            <set field="address2" from="answer.address2"/>
+            <set field="city" from="answer.city"/>
         </actions>
     </service>
     <service verb="store" noun="AssetPlace">
@@ -188,6 +202,38 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('assetFeatures', context)"/>
             <set field="features" from="answer.features"/>
             <set field="truncated" from="answer.truncated"/>
+        </actions>
+    </service>
+    <!-- ========== A transaction's address (adapter transactionAddress, read only; recordKey {orderId, orderPartSeqId} | {shipmentId} |
+        {invoiceId}, addressPurpose its purpose) ========== -->
+
+    <service verb="get" noun="TransactionAddressPlace">
+        <description>The place of the address an order, a shipment or an invoice was made with (the document's own contact
+            mechanism: an order part's ship-to and OrderPartContactMech, a shipment's ShipmentContactMech and route segments' origin
+            and destination, an invoice's InvoiceContactMech): with addressPurpose that purpose's, else the ship-to (an order's and
+            a shipment's) or the billing address (an invoice's), else its first. Its own point while it is this address's, else its
+            postal code and country. Read only by a reader of the document by Mantle's rule of its kind (Sales' order scope, Customer
+            Service's, Commerce's store orders, a purchasing read, receivables or payables, fulfillment at its facility; MapPlaces.js
+            transactionDocument), within the caller's organizations as the organization filter has them; never an outside user's,
+            and a member of the organization who reads the document by none of these is refused as for a missing one. Read only:
+            never chooseLocation, and its link is the party whose address it is, where the location is chosen.</description>
+        <implements service="org.moqui.maps.MapServices.get#RecordMapContext"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/other/MapPlaces.js').execute('transactionAddressContext', context)"/>
+            <set field="label" from="answer.label"/>
+            <set field="geometry" from="answer.geometry"/>
+            <set field="extent" from="answer.extent"/>
+            <set field="precisionEnumId" from="answer.precisionEnumId"/>
+            <set field="sourceText" from="answer.sourceText"/>
+            <set field="recordVersion" from="answer.recordVersion"/>
+            <set field="permittedActions" from="answer.permittedActions"/>
+            <set field="links" from="answer.links"/>
+            <set field="reasonCode" from="answer.reasonCode"/>
+            <set field="postalCode" from="answer.postalCode"/>
+            <set field="countryGeoId" from="answer.countryGeoId"/>
+            <set field="address1" from="answer.address1"/>
+            <set field="address2" from="answer.address2"/>
+            <set field="city" from="answer.city"/>
         </actions>
     </service>
 </services>

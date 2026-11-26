@@ -1,7 +1,7 @@
 // A git repository's issues for a developer's tools (mantle.work.GitServices.get#RepositoryIssues, get#RepositoryIssue
 // and create#RepositoryIssue, GitIssues.js; REST gitRepositories/{repositoryId}/issues, the hosting offer's
 // tasks.issuesPath and issuePath), as Dev AIDE's task panel and hosting tool read them from a group server (mr-moqui
-// plans/design-dev-aide.md 21.6):
+// plans/archive/design-dev-aide.md 21.6):
 // - any repository Smithy does not keep: for a member of a linked project (the update right), the open tasks of general
 //   visibility (never a work group's, restricted, confidential or protected People task), by priority, with the linked
 //   projects; a new one is a task of a linked project, another project not found; a client contact who only views gets

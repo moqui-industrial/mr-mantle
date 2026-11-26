@@ -69,7 +69,7 @@
     <!-- A hidden repository (or one of a site without Smithy) sends no webhook and pushes to no mirror
         (SmithyGitServices.check#Outbound) -->
     <!-- A repository Smithy keeps is written through Smithy's REST, not the framework's, and the hosting offer and the
-        agreement check name Smithy's REST to a client such as the Dev AIDE (mr-moqui plans/design-dev-aide.md §21;
+        agreement check name Smithy's REST to a client such as the Dev AIDE (mr-moqui plans/archive/design-dev-aide.md §21;
         SmithyGitServices check#RestWrite, add#HostingOffer, check#AuthorSigned); the review threads of the framework's REST
         are Mantle's (mantle.work.GitServices.handle#GitReviewThread) -->
     <git-server lfs-upload-check-service="mantle.smithy.SmithyGitServices.check#LfsUpload"
