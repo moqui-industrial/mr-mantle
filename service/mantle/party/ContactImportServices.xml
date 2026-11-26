@@ -385,8 +385,11 @@ along with this software (see the LICENSE.md file). If not, see
             const progress = (done, finished) => {
                 if (!progressUserId) return
                 try {
-                    ec.makeNotificationMessage().topic('contactImportProgress').userId(progressUserId).message({progressKey: progressKey || null,
-                        done: done, total: rows.length, createdCount, updatedCount, skippedCount, failedCount, finished: finished}).send()
+                    // in a transaction of its own: a notice sent in this service's long transaction would go out only at
+                    // its end, and the rows it counts are committed already, each in its own
+                    ec.transaction.runRequireNew(null, 'Contact import progress not sent', () => ec.makeNotificationMessage()
+                        .topic('contactImportProgress').userId(progressUserId).message({progressKey: progressKey || null,
+                        done: done, total: rows.length, createdCount, updatedCount, skippedCount, failedCount, finished: finished}).send())
                 } catch (err) { ec.logger.warn(`Contact import progress for ${progressUserId} not sent: ${err}`) }
             }
             let rowsDone = 0
