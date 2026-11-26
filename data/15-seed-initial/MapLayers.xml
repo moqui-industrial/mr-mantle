@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entity-facade-xml type="seed-initial">
+    <!-- Mantle's record layers (mr-moqui docs/tools/Maps.md; the adapters of data/10-seed/MapPlaces.xml): the facilities and the
+        assets with their own point, each viewport read by the adapter in the viewer's scope. In no profile: a map shows one when
+        it asks for it by ID (layerIds), or when an administrator adds it to a profile. Initial data, so an administrator's change
+        is kept by a later load. -->
+    <moqui.maps.MapLayer layerId="MANTLE_FACILITIES" layerName="Facilities" formatEnumId="MLF_ADAPTER" adapterKey="facility"
+            description="The facilities of your organizations that have a location of their own"/>
+    <moqui.maps.MapLayer layerId="MANTLE_ASSETS" layerName="Assets" formatEnumId="MLF_ADAPTER" adapterKey="asset"
+            description="The assets of your organizations that have a location of their own"/>
+</entity-facade-xml>

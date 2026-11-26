@@ -17,6 +17,12 @@ along with this software (see the LICENSE.md file). If not, see
     <!--
         For all Google Maps web services:
         https://developers.google.com/maps/web-services/client-library
+
+        Superseded (mr-moqui plans/Maps.md §2, §6.1, P3): geocoding is the framework's, through the map provider interface of
+        org.moqui.maps.MapServices (a registered mapProvider connection with a write-only key, outside requests only when
+        maps@external-requests allows them and the installation enabled the workflow), and a record's place is Mantle's map
+        adapters' (mantle.other.MapPlaceServices). Nothing calls these services and their key is a user preference; they are
+        kept for an installation that called them, and are not to be used for new work.
     -->
 
     <service verb="get" noun="MapsGeoCodeResults">
@@ -25,7 +31,8 @@ along with this software (see the LICENSE.md file). If not, see
             https://developers.google.com/maps/documentation/geocoding/faq
             Response specs for 'results' list that this returns: https://developers.google.com/maps/documentation/geocoding/overview#results
         -->
-        <description>Use the address parameter for general search, country and postalCode are passed as 'components' if specified</description>
+        <description>Superseded by the framework's geocoder provider interface (org.moqui.maps.MapServices); not for new work.
+            Use the address parameter for general search, country and postalCode are passed as 'components' if specified</description>
         <in-parameters>
             <parameter name="address" required="true"/>
             <parameter name="postalCode"/>

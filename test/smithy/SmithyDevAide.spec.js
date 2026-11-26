@@ -153,7 +153,12 @@ feature("the offer names Smithy's REST of the host's site, its forks and Mantle'
         offer.application.name == "smithy"
         offer.application.restBase == REST
         offer.forks == true
-        offer.tasks == {kind: "moqui-rest", path: "/rest/s1/mantle/my/tasks"}
+        offer.tasks.kind == "moqui-rest"
+        offer.tasks.path == "/rest/s1/mantle/my/tasks"
+        offer.tasks.issuePath == "/rest/s1/mantle/gitRepositories/{repositoryId}/issues/{id}"
+        offer.tasks.issuesPath == "/rest/s1/mantle/gitRepositories/{repositoryId}/issues"
+        // the app a work item opens in, where one is loaded (mr-boss or mr-marble)
+        !offer.tasks.app || (offer.tasks.app.taskPath.includes("{taskId}") && offer.tasks.app.projectPath.includes("{projectId}"))
         // the framework's offer stays
         offer.git.httpsBase == "https://" + HOST + "/git/"
     }
