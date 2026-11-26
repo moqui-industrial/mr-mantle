@@ -197,6 +197,78 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
+    <service verb="get" noun="RepositoryIssues">
+        <description>The open issues of a git repository, for a developer's tools such as Dev AIDE's task panel (REST
+            gitRepositories/{repositoryId}/issues, the hosting offer's tasks.issuesPath), each read only as the caller may
+            (GitIssues.js):
+            - a repository Smithy keeps (a SmithyRepository row): its open issues the caller may read by Smithy's rules
+              (SmithyIssueServices.find#Issues), by number, a confidential one left out, numbered true; none when its
+              issues are off; only what Smithy's projection shows (number, title, state; never the task's description,
+              status or priority); projectList its own project; a login key only an installed app's device key, and a
+              session a header login made held to the same, as PASS has it;
+            - any other: for a caller with the update right on it (an internal member of a linked project by
+              check#GitRepositoryAuthz, or another grant; not a client contact who only views), the open tasks of the
+              linked projects of general visibility (none, WevAllUsers or WevGeneral), never a protected People task, by
+              priority, and the linked projects; nothing for anyone else.
+            At most pageSize (200 at most; Smithy's pages are 100). Refused as not found for a caller who may not view
+            the repository.</description>
+        <in-parameters>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="pageSize" type="Integer" default="200"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="issueList" type="List"><parameter name="issue" type="Map">
+                <parameter name="workEffortId"/><parameter name="issueNumber" type="Integer"/><parameter name="workEffortName"/>
+                <parameter name="statusId"><description>A task's, of a repository Smithy does not keep</description></parameter>
+                <parameter name="state"><description>Smithy's state of the issue (open, closed), of a repository it keeps</description></parameter>
+                <parameter name="priority" type="Long"/><parameter name="rootWorkEffortId"/><parameter name="projectName"/>
+            </parameter></parameter>
+            <parameter name="projectList" type="List"><parameter name="project" type="Map">
+                <parameter name="workEffortId"/><parameter name="workEffortName"/></parameter></parameter>
+            <parameter name="numbered" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/work/GitIssues.js").listIssues({repositoryId, pageSize}))</script></actions>
+    </service>
+    <service verb="get" noun="RepositoryIssue">
+        <description>One issue of a git repository (REST gitRepositories/{repositoryId}/issues/{issueId}, the hosting
+            offer's tasks.issuePath), by the same rules as get#RepositoryIssues: of a repository Smithy keeps by its number
+            (byNumber, 1 to 10 digits) or its task's id, through Smithy's get#Issue, never a confidential one, its text its
+            approved first post as Smithy shows it (never the task's description); of any other, for a caller with the
+            update right, a task of a linked project of general visibility, with its description. Not found otherwise.</description>
+        <in-parameters>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="issueId" required="true"/>
+            <parameter name="byNumber" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="issue" type="Map"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/work/GitIssues.js").getIssue({repositoryId, issueId, byNumber}))</script></actions>
+    </service>
+    <service verb="create" noun="RepositoryIssue">
+        <description>File an issue in a git repository's tracker (REST gitRepositories/{repositoryId}/issues, POST;
+            GitIssues.js):
+            - a repository Smithy keeps: through Smithy's create#Issue and its rules (a confirmed address, the post gate,
+              issues on, not archived), its text the description, a login key only a device's; the issue's number comes
+              back, and its project as Smithy made it;
+            - any other: by a caller with the update right on it (a member of a linked project), a task of a project the
+              repository is linked to (rootWorkEffortId, else the first linked), made by create#Task.
+            Refused as not found for a caller who may not view the repository, and for a project that is not linked.
+            Out: the task's workEffortId, its issueNumber where it has one, and its project.</description>
+        <in-parameters>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="workEffortName" required="true"/>
+            <parameter name="rootWorkEffortId"/>
+            <parameter name="description"/>
+            <parameter name="operationId"><description>Smithy's: the same one answers the first result</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="issueNumber" type="Integer"/>
+            <parameter name="rootWorkEffortId"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/work/GitIssues.js").createIssue({repositoryId,
+            workEffortName, rootWorkEffortId, description, operationId}))</script></actions>
+    </service>
+
     <!-- ========== Task references ========== -->
 
     <service verb="find" noun="TaskReferences">

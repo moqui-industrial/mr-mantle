@@ -163,6 +163,22 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="facilityCapacityUomId" entity-alias="FAC" field="capacityUomId"/>
     </view-entity>
 
+    <!-- A facility with its own point, for the facility map layer's bounded viewport query (mantle/other/MapPlaces.js) -->
+    <view-entity entity-name="FacilityGeoPoint" package="mantle.facility">
+        <member-entity entity-alias="FAC" entity-name="mantle.facility.Facility"/>
+        <member-entity entity-alias="GPT" entity-name="moqui.basic.GeoPoint" join-from-alias="FAC">
+            <key-map field-name="geoPointId"/></member-entity>
+        <alias name="facilityId" entity-alias="FAC"/>
+        <alias name="facilityName" entity-alias="FAC"/>
+        <alias name="facilityTypeEnumId" entity-alias="FAC"/>
+        <alias name="ownerPartyId" entity-alias="FAC"/>
+        <alias name="parentFacilityId" entity-alias="FAC"/>
+        <alias name="closedDate" entity-alias="FAC"/>
+        <alias name="geoPointId" entity-alias="FAC"/>
+        <alias name="latitude" entity-alias="GPT"/>
+        <alias name="longitude" entity-alias="GPT"/>
+    </view-entity>
+
     <view-entity entity-name="ProductFacilityLocationDetail" package="mantle.facility">
         <member-entity entity-alias="PFL" entity-name="mantle.facility.ProductFacilityLocation"/>
         <member-entity entity-alias="FLOC" entity-name="mantle.facility.FacilityLocation" join-from-alias="PFL">

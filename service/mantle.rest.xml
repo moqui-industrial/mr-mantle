@@ -36,7 +36,10 @@ along with this software (see the LICENSE.md file). If not, see
             <service name="mantle.party.PartyServices.setup#UserOrganizationInfo"/></method></resource>
         <resource name="noticeCounts"><method type="get">
             <service name="mantle.party.PartyServices.get#UserNoticeCounts"/></method></resource>
-        <resource name="tasks"><method type="get">
+        <!-- key-scope tasks: a key made for the task panel alone (a dev instance's connection, mr-moqui
+            plans/design-dev-aide.md question 18) reads the user's tasks here, and reads and files a repository's issues
+            below (a scope is a resource's, each method of it), and nothing else of this API -->
+        <resource name="tasks" key-scope="tasks"><method type="get">
             <service name="mantle.work.TaskServices.get#MyTasks"/></method></resource>
         <!-- A card payment in a browser with Accept.js (docs/AuthorizeNet.md): the payment's public configuration, then its
             single-use token. The payment picks the organization, gateway, amount and currency. -->
@@ -523,6 +526,17 @@ along with this software (see the LICENSE.md file). If not, see
                     <service name="mantle.product.AssetServices.move#AssetReservation"/></method></resource>
             </id>
         </resource>
+    </resource>
+
+    <!-- ========== Git repositories of projects: their open issues, and one filed (the hosting offer's tasks.issuesPath) ========== -->
+    <resource name="gitRepositories" description="Git repositories of projects">
+        <id name="repositoryId">
+            <resource name="issues" key-scope="tasks">
+                <method type="get"><service name="mantle.work.GitServices.get#RepositoryIssues"/></method>
+                <method type="post"><service name="mantle.work.GitServices.create#RepositoryIssue"/></method>
+                <id name="issueId"><method type="get"><service name="mantle.work.GitServices.get#RepositoryIssue"/></method></id>
+            </resource>
+        </id>
     </resource>
 
     <!-- ========== Work Efforts ========== -->

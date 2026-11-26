@@ -101,22 +101,66 @@ function offeredSite(offer) {
         .filter((siteId, index, all) => all.indexOf(siteId) === index && serves(siteId))
     return mounted.length === 1 ? mounted[0] : null
 }
+/* The app a work item opens in on this server, by the task-app names the Dev AIDE knows (its conf), with the paths:
+   BOSS Projects where mr-boss is loaded, else MarbleERP's task pages where mr-marble is, else none. */
+function taskApp() {
+    const loaded = ec.factory.getComponentBaseLocations() || {}
+    const has = name => !!(typeof loaded.get === "function" ? loaded.get(name) : loaded[name])
+    if (has("mr-boss"))
+        return {
+            name: "projects",
+            title: "IronStone Projects",
+            projectPath: "/qapps/Projects/Projects/ProjectDetail?workEffortId={projectId}",
+            taskPath: "/qapps/Projects/WorkItems/WorkItemDetail?workEffortId={taskId}"
+        }
+    if (has("mr-marble"))
+        return {
+            name: "marble",
+            title: "MarbleERP",
+            projectPath: "/qapps/marble/Project/ProjectSummary?workEffortId={projectId}",
+            taskPath: "/qapps/marble/Task/TaskSummary?workEffortId={taskId}"
+        }
+    return null
+}
+/* The pages of a repository Smithy keeps, as templates under the Smithy pages' address (the framework's offer, pages):
+   a file at a ref, at a line ({repositoryPath}, {ref}, {file}, {line}), a commit ({commitId}) and a branch ({branch}),
+   as Smithy.js urls() makes them. None where the site has no canonical host. */
+function repositoryPages(base) {
+    if (!base) return null
+    const root = base + "/{repositoryPath}/-/"
+    return {file: root + "blob/{ref}/{file}#L{line}", commit: root + "commit/{commitId}", branch: root + "tree/{branch}"}
+}
 /* add#GitHostingOffer: the framework's offer with Smithy's REST for the site a client reaches (application: name,
-   restBase, the path on this host; siteId; pageUrl, the Smithy pages' address), forks (Smithy makes them: forkRepository),
-   and Mantle's task source (the moqui-rest source of the user's work items, docs/Run-Deploy.md). It names no account. */
+   restBase, the path on this host; siteId; pageUrl, the Smithy pages' address; pages, a repository's pages as
+   templates), forks (Smithy makes them: forkRepository),
+   and Mantle's task source (the moqui-rest source of the user's work items, docs/Run-Deploy.md): the user's tasks
+   (path), one issue of a repository (issuePath, by {repositoryId} and {id}: get#RepositoryIssue), a repository's open
+   issues and Quick create there (issuesPath, GitServices.get#RepositoryIssues and create#RepositoryIssue) and the app a work item opens in (app). It names no
+   account. */
 function hostingOffer(p) {
     const offer = Object.assign({}, p?.offer || {})
     const siteId = offeredSite(offer)
     if (siteId) {
+        const pageUrl = publicApps().pageUrl(siteId, "smithy", "") || null
         offer.application = {
             name: "smithy",
             restBase: restPath(siteId),
             siteId,
-            pageUrl: publicApps().pageUrl(siteId, "smithy", "") || null
+            pageUrl,
+            pages: repositoryPages(pageUrl)
         }
         offer.forks = true
     }
-    if (!offer.tasks) offer.tasks = {kind: "moqui-rest", path: "/rest/s1/mantle/my/tasks"}
+    if (!offer.tasks) {
+        offer.tasks = {
+            kind: "moqui-rest",
+            path: "/rest/s1/mantle/my/tasks",
+            issuePath: "/rest/s1/mantle/gitRepositories/{repositoryId}/issues/{id}",
+            issuesPath: "/rest/s1/mantle/gitRepositories/{repositoryId}/issues"
+        }
+        const app = taskApp()
+        if (app) offer.tasks.app = app
+    }
     return offer
 }
 

@@ -91,7 +91,9 @@
             Smithy's REST for the site a client reaches (application: name smithy, restBase the site's
             /rest/s1/pass/v1/sites/[siteId]/smithy, siteId, pageUrl), forks true, for the site of the host the request
             came to, else of the server's own address, else the one published site that mounts Smithy; and Mantle's task
-            source (tasks: kind moqui-rest, path /rest/s1/mantle/my/tasks) when the offer has none. It adds to the
+            source when the offer has none (tasks: kind moqui-rest; path /rest/s1/mantle/my/tasks; issuePath, one issue of a
+            repository by {repositoryId} and {id}; issuesPath, a repository's open issues and Quick create by {repositoryId}; app, the app a work item
+            opens in, BOSS Projects or MarbleERP when loaded). It adds to the
             framework's offer and keeps the rest of it (gateway, signIn, rest...). Asked for callers with no credentials
             too: it names no account.</description>
         <implements service="org.moqui.git.GitServices.add#GitHostingOffer"/>

@@ -39,8 +39,11 @@ It has no screens of its own. To see it at work, run one of those applications.
 - **Integrations**, apart from the packages whose interfaces they implement:
   - bank files (NACHA, Positive Pay, BAI, OFX) in `service/mantle/ext/account/`;
   - payment processors in `ext/account/gateway/`: [Authorize.Net](docs/AuthorizeNet.md), [PayTrace](docs/PayTrace.md);
-  - [Shippo](docs/Shippo.md) for shipping rates and labels in `ext/shipment/`, and Google Maps in `ext/party/`;
-  - [X12 EDI](docs/EdiX12.md) in `service/mantle/edi/`.
+  - [Shippo](docs/Shippo.md) for shipping rates and labels in `ext/shipment/`, and Google Maps in `ext/party/`
+    (superseded by the framework's Maps);
+  - [X12 EDI](docs/EdiX12.md) in `service/mantle/edi/`;
+  - the [map adapters](docs/MapAdapters.md) of the framework's Maps (a postal address, a party, a facility, an asset) in
+    `service/mantle/other/MapPlaceServices.xml`.
 - **Agreements for every kind of norm** (`entity/party/AgreementEntities.xml`): a law, a standard, a guideline or
   a company policy is an Agreement per language edition, with its kind (`AgreementDocumentType`), version, locale,
   jurisdiction, adoption, publication, entry-into-force and application dates, and its identifiers (ELI, CELEX,

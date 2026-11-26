@@ -383,6 +383,30 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="POSTAL_CODE_IDX"><index-field name="postalCode"/></index>
     </entity>
 
+    <!-- How a record's own point was obtained (mr-moqui plans/Maps.md §6.1, §6.3): the precision, who chose it and when, and for
+        an address's point the fingerprint of the address it was chosen for. One row for the GeoPoint of a PostalAddress, a
+        PartyGeoPoint, a Facility or an Asset, written by the map adapters' store services (mantle/other/MapPlaces.js) with the
+        point's dataSourceId; kept beside PostalAddress, whose points are most of them, it serves the facility, asset and party
+        points as well. A point with no row is a recorded one of unknown provenance (one recorded before these adapters). A
+        companion of the point rather than fields on GeoPoint: update#PartyPostalAddress clones a GeoPoint with the values it is
+        given, so a typed latitude would carry a confirmation it never had, while a new point has no row. An address changed since
+        (Mantle's address update makes a new PostalAddress that keeps the geoPointId) no longer matches addressFingerprint, and
+        its point is then taken as stale and not shown as the address's place. -->
+    <entity entity-name="GeoPointProvenance" package="mantle.party.contact" cache="never">
+        <field name="geoPointId" type="id" is-pk="true"/>
+        <field name="precisionEnumId" type="id"><description>GeoPointPrecision: user-confirmed, address match, street range,
+            postal area or place estimate</description></field>
+        <field name="confirmedByUserId" type="id"/>
+        <field name="confirmedDate" type="date-time"/>
+        <field name="addressFingerprint" type="text-medium"><description>For an address's point: the fingerprint of the address
+            (its street, city, region, country and postal code) it was chosen for</description></field>
+        <relationship type="one" related="moqui.basic.GeoPoint" short-alias="geoPoint"/>
+        <relationship type="one-nofk" title="GeoPointPrecision" related="moqui.basic.Enumeration" short-alias="precision">
+            <key-map field-name="precisionEnumId"/></relationship>
+        <relationship type="one-nofk" title="ConfirmedBy" related="moqui.security.UserAccount" short-alias="confirmedBy">
+            <key-map field-name="confirmedByUserId"/></relationship>
+    </entity>
+
     <entity entity-name="TelecomNumber" package="mantle.party.contact" use="nontransactional" cache="never">
         <field name="contactMechId" type="id" is-pk="true"/>
         <field name="countryCode" type="text-short"/>
