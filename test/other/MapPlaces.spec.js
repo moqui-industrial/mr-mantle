@@ -11,6 +11,14 @@
 // refused, and so are a disabled party and another organization's customer; a personal contact is its owner's), a room with no
 // owner of its own is its building's organization's; an asset's, an organization's own and an address's point are saved; and
 // postalCodeGeoId follows a change of the code in place, keeps a value the caller gave, and stays empty for a refused code.
+// A point with no provenance says its precision is unknown. A transaction's address (an order's ship-to, a shipment's
+// destination and origin, an invoice's billing address) is read view only by a reader of the document (an assigned Sales
+// representative, a shipper at its facility, a receivables reader), linked to its party, and refused to a member of the
+// organization who reads none, an unassigned representative (a consumer's home ship-to), another organization and an outside
+// user. A Sales account editor (SALES_ACCOUNT_EDIT) locates an account of their scope and its contact, not a shared one,
+// another organization's, an internal organization, an address row the organization shares, nor without a Sales read, and a
+// reader without it does not; an HR reader (PEOPLE_HR_VIEW) reads an employee's home address, never locates it, not a person
+// People does not admit, and a party's map without a purpose still opens on the work address.
 // Run: ./moq test mr-mantle --spec MapPlaces
 const S = "mantle.other.MapPlaceServices."
 const find = (entity, conditions = {}) => ec.entity.find(entity).condition(conditions).disableAuthz()
@@ -79,6 +87,13 @@ spec({
             ensureGroup("MPL_EXTERNALS", ["EXTERNAL_USER"])
             // an internal organization's own places are its settings manager's (SEC-BOS-89)
             ensureGroup("MPL_SETTERS", ["PARTY_LOCATION_EDIT", "ADMIN_SETTINGS_MANAGE"])
+            // Sales' account editors locate their accounts' addresses; People's HR readers read a home address
+            ensureGroup("MPL_SALES", ["SALES_VIEW", "SALES_ACCOUNT_EDIT"])
+            ensureGroup("MPL_HR", ["PEOPLE_HR_VIEW"])
+            // an account editor with no Sales read, a receivables reader and a shipper (a transaction's readers)
+            ensureGroup("MPL_SALES_BLIND", ["SALES_ACCOUNT_EDIT"])
+            ensureGroup("MPL_FINANCE", ["RECEIVABLE_VIEW"])
+            ensureGroup("MPL_SHIPPERS", ["SHIPMENT_SHIP"])
             for (const partyId of ["MPL_ORG", "MPL_OTHER"]) {
                 call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyOrganization"})
                 call("create#mantle.party.Organization", {partyId, organizationName: partyId})
@@ -88,6 +103,12 @@ spec({
                 ["MPL_EDITOR", "MPL_EDITORS", "MPL_ORG"],
                 ["MPL_READER", "MPL_READERS", "MPL_ORG"],
                 ["MPL_SETTER", "MPL_SETTERS", "MPL_ORG"],
+                ["MPL_SALESREP", "MPL_SALES", "MPL_ORG"],
+                ["MPL_HRREADER", "MPL_HR", "MPL_ORG"],
+                ["MPL_SALESREP2", "MPL_SALES", "MPL_ORG"],
+                ["MPL_SALESBLIND", "MPL_SALES_BLIND", "MPL_ORG"],
+                ["MPL_AR", "MPL_FINANCE", "MPL_ORG"],
+                ["MPL_SHIPPER", "MPL_SHIPPERS", "MPL_ORG"],
                 ["MPL_OUTSIDER", "MPL_EDITORS", "MPL_OTHER"],
                 // a user of no organization, and an outside user of the organization
                 ["MPL_LONER", "MPL_EDITORS", null],
@@ -213,6 +234,92 @@ spec({
                 geoPointId: "MPL_GP_ROOM"
             })
             facility("MPL_FAC_DATELINE", "MPL_ORG", "MPL_GP_DATELINE")
+            // a Sales account of the organization with its address, and the order, shipment and invoice made with that address
+            // (the shipment from the organization's office); another organization's order
+            organization("MPL_ACCOUNT", {ownerPartyId: "MPL_ORG"})
+            call("create#mantle.party.PartyRole", {partyId: "MPL_ACCOUNT", roleTypeId: "Customer"})
+            const accountAddress = address({
+                partyId: "MPL_ACCOUNT",
+                contactMechPurposeId: "PostalPrimary",
+                postalCode: "99951",
+                address1: "8 Account Ave"
+            })
+            const officeAddress = find("mantle.party.contact.PartyContactMech", {
+                partyId: "MPL_ORG",
+                contactMechPurposeId: "PostalPrimary"
+            }).one().contactMechId
+            const create = (entity, fields) => ec.entity.makeValue(entity).setAll(fields).create()
+            const addressOf = (partyId, contactMechPurposeId) =>
+                find("mantle.party.contact.PartyContactMech", {partyId, contactMechPurposeId}).one().contactMechId
+            // a consumer (a person customer of the organization) with only a home address, and a contact of the account
+            call("create#mantle.party.Party", {partyId: "MPL_CONSUMER", partyTypeEnumId: "PtyPerson", ownerPartyId: "MPL_ORG"})
+            call("create#mantle.party.Person", {partyId: "MPL_CONSUMER", firstName: "Consumer"})
+            call("create#mantle.party.PartyRole", {partyId: "MPL_CONSUMER", roleTypeId: "Customer"})
+            const consumerHome = address({
+                partyId: "MPL_CONSUMER",
+                contactMechPurposeId: "PostalHome",
+                postalCode: "99951",
+                address1: "5 Consumer Court"
+            })
+            call("create#mantle.party.Party", {partyId: "MPL_CONTACT", partyTypeEnumId: "PtyPerson", ownerPartyId: "MPL_ORG"})
+            call("create#mantle.party.Person", {partyId: "MPL_CONTACT", firstName: "Contact"})
+            call("create#mantle.party.PartyRelationship", {
+                fromPartyId: "MPL_CONTACT",
+                toPartyId: "MPL_ACCOUNT",
+                relationshipTypeEnumId: "PrtContact",
+                fromDate: since
+            })
+            address({partyId: "MPL_CONTACT", contactMechPurposeId: "PostalWork", postalCode: "99951", address1: "6 Contact Row"})
+            // the account's billing address, shared with the organization's own (an internal organization's place)
+            const sharedAddress = address({
+                partyId: "MPL_ACCOUNT",
+                contactMechPurposeId: "PostalBilling",
+                postalCode: "99951",
+                address1: "4 Shared Street"
+            })
+            call("create#mantle.party.contact.PartyContactMech", {
+                partyId: "MPL_ORG",
+                contactMechId: sharedAddress,
+                contactMechPurposeId: "PostalGeneral",
+                fromDate: since
+            })
+            // placed sales orders assigned to the first representative (the account's, the consumer's); another organization's
+            // order to its own customer
+            for (const [orderId, vendorPartyId, customerPartyId, postalContactMechId, assigned] of [
+                ["MPL_ORDER", "MPL_ORG", "MPL_ACCOUNT", accountAddress, true],
+                ["MPL_CONSUMER_ORDER", "MPL_ORG", "MPL_CONSUMER", consumerHome, true],
+                ["MPL_OTHER_ORDER", "MPL_OTHER", "MPL_OTHER_CUSTOMER", addressOf("MPL_OTHER_CUSTOMER", "PostalPrimary"), false]
+            ]) {
+                create("mantle.order.OrderHeader", {orderId, statusId: "OrderPlaced", placedDate: ec.user.nowTimestamp})
+                create("mantle.order.OrderPart", {
+                    orderId,
+                    orderPartSeqId: "01",
+                    vendorPartyId,
+                    customerPartyId,
+                    postalContactMechId
+                })
+                if (assigned)
+                    create("mantle.order.OrderPartParty", {
+                        orderId,
+                        orderPartSeqId: "01",
+                        partyId: "MPL_SALESREP",
+                        roleTypeId: "SalesRepresentative"
+                    })
+            }
+            create("mantle.shipment.Shipment", {shipmentId: "MPL_SHIPMENT", fromPartyId: "MPL_ORG", toPartyId: "MPL_ACCOUNT"})
+            create("mantle.shipment.ShipmentRouteSegment", {
+                shipmentId: "MPL_SHIPMENT",
+                shipmentRouteSegmentSeqId: "01",
+                originFacilityId: "MPL_FAC",
+                originPostalContactMechId: officeAddress,
+                destPostalContactMechId: accountAddress
+            })
+            create("mantle.account.invoice.Invoice", {invoiceId: "MPL_INVOICE", fromPartyId: "MPL_ORG", toPartyId: "MPL_ACCOUNT"})
+            create("mantle.account.invoice.InvoiceContactMech", {
+                invoiceId: "MPL_INVOICE",
+                contactMechPurposeId: "PostalBilling",
+                contactMechId: accountAddress
+            })
         })
     },
     cleanup() {
@@ -251,6 +358,9 @@ feature(
             editor.geometry.coordinates[0] == 10
             editor.geometry.coordinates[1] == 10
             editor.recordVersion == "facility:MPL_FAC:MPL_GP_FAC"
+            // a point recorded before provenance: shown as recorded, its precision unknown
+            editor.precisionEnumId == null
+            editor.sourceText == "Recorded location; precision unknown — recorded before provenance"
             editor.permittedActions.includes("chooseLocation")
             reader.geometry.coordinates[0] == 10
             !reader.permittedActions.includes("chooseLocation")
@@ -602,6 +712,124 @@ feature(
             given == "USA"
             refused.postalCode == "ABC"
             refused.postalCodeGeoId == null
+        }
+    }
+)
+
+feature(
+    "a transaction's address is read only by a reader of the document, view only and linked to its party; a member who reads none, an unassigned representative, another organization's and an outside user are refused",
+    {
+        when() {
+            const transaction = (username, recordKey, addressPurpose) =>
+                as(username, () =>
+                    place("get", "TransactionAddressPlace", recordKey, addressPurpose ? {addressPurpose} : {})
+                )
+            const order = {orderId: "MPL_ORDER"}
+            const consumer = {orderId: "MPL_CONSUMER_ORDER"}
+            return {
+                order: transaction("mpl_salesrep", order),
+                member: transaction("mpl_reader", order),
+                outsider: transaction("mpl_outsider", order),
+                client: transaction("mpl_client", order),
+                otherOrder: transaction("mpl_salesrep", {orderId: "MPL_OTHER_ORDER"}),
+                consumerAssigned: transaction("mpl_salesrep", consumer),
+                consumerUnassigned: transaction("mpl_salesrep2", consumer),
+                consumerMember: transaction("mpl_editor", consumer),
+                destination: transaction("mpl_shipper", {shipmentId: "MPL_SHIPMENT"}),
+                origin: transaction("mpl_shipper", {shipmentId: "MPL_SHIPMENT"}, "PostalShippingOrigin"),
+                shipmentMember: transaction("mpl_reader", {shipmentId: "MPL_SHIPMENT"}),
+                invoice: transaction("mpl_ar", {invoiceId: "MPL_INVOICE"}),
+                invoiceMember: transaction("mpl_salesrep2", {invoiceId: "MPL_INVOICE"}),
+                // through the framework: the adapter has no store service, so no Choose location
+                framed: as(
+                    "mpl_salesrep",
+                    () =>
+                        invoke("org.moqui.maps.MapServices.get#EffectiveConfig", {
+                            adapterKey: "transactionAddress",
+                            recordKey: JSON.stringify(order),
+                            recordLayers: false
+                        }).config || {}
+                )
+            }
+        },
+        then(r) {
+            r.order.error == ""
+            r.order.label == "8 Account Ave, 99951 Spec City, USA"
+            r.order.postalCode == "99951"
+            r.order.permittedActions.length == 1
+            r.order.permittedActions[0] == "view"
+            r.order.links.length == 1
+            r.order.links[0].route == "partyDetail"
+            r.order.links[0].parameters.partyId == "MPL_ACCOUNT"
+            // a member of the organization with no read of the order: refused, with nothing of it
+            r.member.reasonCode == "RECORD_UNAVAILABLE"
+            r.member.label == null
+            r.outsider.reasonCode == "RECORD_UNAVAILABLE"
+            r.client.reasonCode == "RECORD_UNAVAILABLE"
+            r.otherOrder.reasonCode == "RECORD_UNAVAILABLE"
+            // a consumer's ship-to (their home): to the assigned representative, never to another or to a member
+            r.consumerAssigned.label == "5 Consumer Court, 99951 Spec City, USA"
+            r.consumerUnassigned.reasonCode == "RECORD_UNAVAILABLE"
+            r.consumerMember.reasonCode == "RECORD_UNAVAILABLE"
+            r.destination.postalCode == "99951"
+            // the office's address (located by an earlier feature, so its point or its postal code)
+            r.origin.label.startsWith("3 Office Road")
+            r.shipmentMember.reasonCode == "RECORD_UNAVAILABLE"
+            r.invoice.postalCode == "99951"
+            !r.invoice.permittedActions.includes("chooseLocation")
+            r.invoiceMember.reasonCode == "RECORD_UNAVAILABLE"
+            r.framed.record.label == "8 Account Ave, 99951 Spec City, USA"
+            !r.framed.record.permittedActions.includes("chooseLocation")
+        }
+    }
+)
+
+feature(
+    "a Sales account editor may locate an account of their scope and its contact, not a shared one, another organization's or an address shared with an internal organization, nor without a Sales read; an HR reader reads, never locates, an employee's home address and not a person People does not admit",
+    {
+        when() {
+            const party = (username, partyId, addressPurpose) =>
+                as(username, () => place("get", "PartyPlace", {partyId}, addressPurpose ? {addressPurpose} : {}))
+            return {
+                holder: party("mpl_salesrep", "MPL_ACCOUNT"),
+                contact: party("mpl_salesrep", "MPL_CONTACT", "PostalWork"),
+                sharedRow: party("mpl_salesrep", "MPL_ACCOUNT", "PostalBilling"),
+                nonHolder: party("mpl_reader", "MPL_ACCOUNT"),
+                blind: party("mpl_salesblind", "MPL_ACCOUNT"),
+                shared: party("mpl_salesrep", "MPL_SHARED"),
+                otherAccount: party("mpl_salesrep", "MPL_OTHER_CUSTOMER"),
+                internal: party("mpl_salesrep", "MPL_ORG"),
+                hrHome: party("mpl_hrreader", "MPL_READER", "PostalHome"),
+                hrFallback: party("mpl_hrreader", "MPL_READER"),
+                hrWork: party("mpl_hrreader", "MPL_READER", "PostalWork"),
+                hrConsumer: party("mpl_hrreader", "MPL_CONSUMER", "PostalHome"),
+                salesHome: party("mpl_salesrep", "MPL_READER", "PostalHome")
+            }
+        },
+        then(r) {
+            r.holder.postalCode == "99951"
+            r.holder.permittedActions.includes("chooseLocation")
+            r.contact.postalCode == "99951"
+            r.contact.permittedActions.includes("chooseLocation")
+            // the billing address is also the organization's own: every party it is current for must allow the write
+            r.sharedRow.postalCode == "99951"
+            !r.sharedRow.permittedActions.includes("chooseLocation")
+            r.nonHolder.postalCode == "99951"
+            !r.nonHolder.permittedActions.includes("chooseLocation")
+            !r.blind.permittedActions.includes("chooseLocation")
+            r.shared.reasonCode == null
+            !r.shared.permittedActions.includes("chooseLocation")
+            r.otherAccount.reasonCode == "RECORD_UNAVAILABLE"
+            !r.internal.permittedActions.includes("chooseLocation")
+            r.hrHome.reasonCode == null
+            r.hrHome.postalCode == "99951"
+            !r.hrHome.permittedActions.includes("chooseLocation")
+            // with no purpose asked for, the work address, never the home one
+            r.hrFallback.recordVersion == r.hrWork.recordVersion
+            r.hrFallback.recordVersion != r.hrHome.recordVersion
+            // a person People's scope does not admit (a consumer, no employee): no home address for the HR reader
+            r.hrConsumer.reasonCode == "RECORD_UNAVAILABLE"
+            r.salesHome.reasonCode == "RECORD_UNAVAILABLE"
         }
     }
 )

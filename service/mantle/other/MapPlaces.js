@@ -12,11 +12,20 @@
 //   organization, a unit under one and their staff only under one of the caller's top-level organizations; every party for a
 //   system administrator) and of it only its business addresses: an organization's, but its home
 //   address, and a person's work address alone (readable party identity is not a readable home address). Writing those needs
-//   PARTY_LOCATION_EDIT and a party of their organizations (one of them, owned by one, or its staff). A party's own point
-//   (PartyGeoPoint) is an organization's business place, and a person's private one.
+//   PARTY_LOCATION_EDIT and a party of their organizations (one of them, owned by one, or its staff), or Sales' account
+//   editor's (SALES_ACCOUNT_EDIT) for an account of their sales scope that is not shared and a current contact of one
+//   (SalesAccess.js accountOf, contactAccounts), as they change those addresses in Sales. A person's home address is also
+//   read, never written, by an HR reader People admits them to (PEOPLE_HR_VIEW and an employment by an employer of their People
+//   scope, People.js partyAccess, as Employee360's private region). A party's own point (PartyGeoPoint) is an organization's
+//   business place, and a person's private one.
 // - A facility: in the caller's facility scope (FacilityScope.js) to read; FACILITY_EDIT there to write, as store#Facility.
 // - An asset: in the stock scope (StockScope.js: its owner's or its facility's owner's organization) to read;
 //   MAINTENANCE_RESOURCE_EDIT or FACILITY_EDIT there to write.
+// - A transaction's address (an order's, a shipment's or an invoice's own contact mechanism, kept by the document when the
+//   party's address changes): read only by a reader of the document by Mantle's rules of its kind (Sales' order scope,
+//   Customer Service's, Commerce's store orders, a purchasing read, receivables or payables, fulfillment at its facility;
+//   transactionDocument below), within the caller's organizations as the organization filter (MANTLE_USER_ORG) has them;
+//   never written here (its location is the party's address's, which the answer links).
 // - An outside user (EXTERNAL_USER, PROJECT_CLIENT) reads only its own and its personal contacts' places.
 // A record that is not there and one the caller may not read are refused alike (RECORD_UNAVAILABLE).
 //
@@ -33,6 +42,9 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 const stockScope = ec.resource.script("component://mr-mantle/service/mantle/product/StockScope.js")
+// read only when a rule needs them: Sales' account scope and People's
+const salesAccess = () => ec.resource.script("component://mr-mantle/service/mantle/sales/SalesAccess.js")
+const peopleAccess = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const {find, one, call, denied, hash, dateText, partyNames} = lib
 const access = lib.access
 
@@ -65,6 +77,14 @@ const OWNERLESS_PAGES = 4
 const FACILITY_DEPTH = 12
 // route keys the application showing the map resolves (never a path)
 const ROUTES = {party: "partyDetail", facility: "facilityDetail", asset: "assetDetail"}
+// a point recorded before these adapters, with no provenance row: its precision is not known (one wording, every answer)
+const LEGACY_PRECISION = "precision unknown — recorded before provenance"
+// the address a transaction's map opens on when no purpose is asked for, before its other addresses
+const TRANSACTION_PURPOSES = {
+    order: ["PostalShippingDest", "PostalBilling"],
+    shipment: ["PostalShippingDest", "PostalShippingOrigin"],
+    invoice: ["PostalBilling", "PostalPayment"]
+}
 
 const blank = value => value == null || String(value).trim() === ""
 const text = value => (blank(value) ? null : String(value).trim())
@@ -107,6 +127,14 @@ function caller() {
     // the top-level organizations of theirs
     who.organizationRoots = () =>
         organizationRoots || (organizationRoots = new Set((who.organizations() || []).map(partyId => rootOf(partyId, who.roots))))
+    let sales
+    // Sales' scope (SalesAccess.js), for an account editor's write
+    who.salesScope = () => sales || (sales = salesAccess().scope())
+    let people
+    // People's scope (People.js), for an HR reader's read of a home address
+    who.peopleScope = () => people || (people = peopleAccess().scopeOf())
+    // the parties whose home address People admits the caller to as an HR reader, as they are asked
+    who.hrReads = new Map()
     return who
 }
 
@@ -141,9 +169,38 @@ function employersOf(partyId) {
             .list()
     ).map(row => row.toPartyId)
 }
-// What the caller may do with a party: {read, write, self, owner, person}; write is the PARTY_LOCATION_EDIT scope, which a
-// purpose narrows (purposeAllowed). Beyond the party themselves and a personal contact's owner, a caller reaches only with
-// organizations of their own, as Mantle's party filter (MANTLE_USER_ORG): one of their organizations, a party owned by _NA_
+// Whether Sales' account editor may locate a party's addresses (SALES_ACCOUNT_EDIT in their sales scope, as they change them in
+// Sales, SalesAccess.js): an account of the scope that is not shared, or a person who is a current contact of one.
+function salesAccountEditor(who, partyId) {
+    if (!access.has("SALES_ACCOUNT_EDIT")) return false
+    const userScope = who.salesScope()
+    if (!userScope.capabilities.accountEdit) return false
+    const sales = salesAccess()
+    const account = sales.accountOf(userScope, partyId)
+    if (account) return !account.shared
+    return sales.contactAccounts(userScope, partyId).some(found => !found.shared)
+}
+// Whether People admits the caller to a person's private contacts as an HR reader: PEOPLE_HR_VIEW and an employment of theirs
+// by an employer of the caller's People scope (People.js partyAccess staff, as Employee360's private region). A failure is
+// logged and admits nobody.
+function hrReader(who, partyId) {
+    if (!partyId || !access.has("PEOPLE_HR_VIEW")) return false
+    if (who.hrReads.has(partyId)) return who.hrReads.get(partyId)
+    let admitted = false
+    try {
+        const userScope = who.peopleScope()
+        admitted =
+            !!userScope.capabilities.hrView &&
+            peopleAccess().checkedAccess(userScope, partyId, null, true).kinds.includes("staff")
+    } catch (error) {
+        ec.logger.error("People's HR access to " + partyId + " was not read for a map: " + (error?.message ?? error))
+    }
+    who.hrReads.set(partyId, admitted)
+    return admitted
+}
+// What the caller may do with a party: {read, write, self, owner, person}; write is the PARTY_LOCATION_EDIT scope (or Sales'
+// account editor's), which a purpose narrows (purposeAccess). Beyond the party themselves and a personal contact's owner, a
+// caller reaches only with organizations of their own, as Mantle's party filter (MANTLE_USER_ORG): one of their organizations, a party owned by _NA_
 // or by one of them; the staff of an internal organization (or of a unit under an internal top-level one, a department)
 // and such an organization itself only under one of the caller's top-level organizations, and write only within theirs. An
 // internal organization's own places, and a unit's under one, are its configuration's (SEC-BOS-89, as BOSS's contact record):
@@ -181,14 +238,26 @@ function partyAccess(who, party) {
     const tenant = tenantOf(party.partyId)
     if (tenant) return reach(who.organizationRoots().has(tenant), organizations.includes(tenant) && settings())
     const owner = party.ownerPartyId
-    return reach(owner === "_NA_" || organizations.includes(owner), organizations.includes(owner))
+    const ours = organizations.includes(owner)
+    // a party of theirs: PARTY_LOCATION_EDIT, or Sales' account editor for an account of their sales scope or its contact
+    return {
+        read: owner === "_NA_" || ours,
+        write: ours && (editor || salesAccountEditor(who, party.partyId)),
+        person
+    }
 }
-// Whether the access reaches an address of a purpose: all of them for the party or its personal contact's owner, else its
-// business addresses (no home address; a person's work address alone).
-function purposeAllowed(found, purposeId) {
-    if (found.self || found.owner) return true
-    if (!found.read || PRIVATE_PURPOSES.includes(purposeId)) return false
-    return found.person ? PERSON_BUSINESS_PURPOSES.includes(purposeId) : true
+// What the access reaches of a party's address of a purpose: {read, write}. The party themselves and its personal contact's
+// owner reach all of them; anyone else who reads the party, its business addresses (no home address; a person's work address
+// alone) with the party's write. A person's home address is read, never written, by an HR reader People admits them to
+// (hrReader), when hr is not false (a map opened on that purpose, not a party's fallback).
+const NO_ACCESS = {read: false, write: false}
+function purposeAccess(who, found, partyId, purposeId, hr = true) {
+    if (found.self || found.owner) return {read: true, write: !!found.write}
+    if (!found.read) return NO_ACCESS
+    if (PRIVATE_PURPOSES.includes(purposeId))
+        return found.person && hr && hrReader(who, partyId) ? {read: true, write: false} : NO_ACCESS
+    if (found.person && !PERSON_BUSINESS_PURPOSES.includes(purposeId)) return NO_ACCESS
+    return {read: true, write: !!found.write}
 }
 function partyLabel(partyId) {
     return partyNames([partyId])[partyId] || partyId
@@ -240,8 +309,9 @@ const validPoint = point =>
     Number.isFinite(Number(point.longitude)) &&
     Math.abs(Number(point.latitude)) <= 90 &&
     Math.abs(Number(point.longitude)) <= 180
-// A recorded point as a place: {geometry, precisionEnumId, sourceText}, or null; with fingerprint (an address's point) null
-// when its provenance names another address.
+// A recorded point as a place: {geometry, precisionEnumId, sourceText, legacy}, or null; with fingerprint (an address's point)
+// null when its provenance names another address. A point with no provenance (recorded before these adapters) is shown as
+// recorded, its precision unknown (LEGACY_PRECISION); no provenance is made up for it.
 function pointPlace(geoPointId, fingerprint) {
     const point = geoPointId ? one(GEO_POINT, {geoPointId}) : null
     if (!validPoint(point)) return null
@@ -254,9 +324,11 @@ function pointPlace(geoPointId, fingerprint) {
         sourceText: provenance
             ? (provenance.precisionEnumId === "GPP_USER_CONFIRMED" ? L("Chosen on a map") : L("Recorded location")) +
               (confirmed ? " " + confirmed : "")
-            : L("Recorded location")
+            : legacySource(),
+        legacy: !provenance
     }
 }
+const legacySource = () => L("Recorded location") + "; " + L(LEGACY_PRECISION)
 // An address's place: its own point when it is still this address's, else its postal code and country for the framework's
 // approximate postal-area position (never written to the address).
 function addressPlace(address) {
@@ -278,22 +350,34 @@ function facilityLinks(contactMechId, purposeId) {
     if (purposeId) query = query.condition("contactMechPurposeId", purposeId)
     return Array.from(query.list())
 }
-// What the caller may do with an address, through any party or facility it is current for: {read, write}.
+// What the caller may do with an address: read through any party or facility it is current for (of the purpose, when given);
+// write only when every party and facility it is current for, of any purpose, grants the write, so an address row shared with a
+// record the caller may not locate (an internal organization's, another party's) is not located through the one they may.
 function addressAccess(who, contactMechId, purposeId) {
     let read = false
-    let write = false
     for (const link of partyLinks(contactMechId, purposeId)) {
         const found = partyAccess(who, one("mantle.party.Party", {partyId: link.partyId}))
-        if (!purposeAllowed(found, link.contactMechPurposeId)) continue
-        read = true
-        if (found.write) write = true
+        if (purposeAccess(who, found, link.partyId, link.contactMechPurposeId).read) {
+            read = true
+            break
+        }
     }
-    for (const link of facilityLinks(contactMechId, purposeId)) {
-        const facility = one("mantle.facility.Facility", {facilityId: link.facilityId})
-        if (!facilityRead(who, facility)) continue
-        read = true
-        if (facilityWrite(who, facility)) write = true
-    }
+    if (!read)
+        for (const link of facilityLinks(contactMechId, purposeId))
+            if (facilityRead(who, one("mantle.facility.Facility", {facilityId: link.facilityId}))) {
+                read = true
+                break
+            }
+    if (!read) return {read, write: false}
+    const partyRows = partyLinks(contactMechId, null)
+    const facilityRows = facilityLinks(contactMechId, null)
+    const write =
+        partyRows.length + facilityRows.length > 0 &&
+        partyRows.every(link => {
+            const found = partyAccess(who, one("mantle.party.Party", {partyId: link.partyId}))
+            return purposeAccess(who, found, link.partyId, link.contactMechPurposeId).write
+        }) &&
+        facilityRows.every(link => facilityWrite(who, one("mantle.facility.Facility", {facilityId: link.facilityId})))
     return {read, write}
 }
 // The current postal address of a facility: of the purpose, else its primary one, else its latest.
@@ -348,7 +432,7 @@ function partyTarget(who, partyId, purposeId) {
             .condition("contactMechPurposeId", "in", postalPurposes())
             .orderBy("-fromDate")
             .list()
-    ).filter(link => purposeAllowed(found, link.contactMechPurposeId))
+    ).filter(link => purposeAccess(who, found, party.partyId, link.contactMechPurposeId, !!purposeId).read)
     const addressOf = link => {
         const address = one("mantle.party.contact.PostalAddress", {contactMechId: link.contactMechId})
         if (!address) return null
@@ -356,7 +440,7 @@ function partyTarget(who, partyId, purposeId) {
     }
     if (purposeId) {
         // a purpose the caller may not read is as one the party does not have
-        if (!purposeAllowed(found, purposeId)) unavailable()
+        if (!purposeAccess(who, found, party.partyId, purposeId).read) unavailable()
         const link = addresses.find(row => row.contactMechPurposeId === purposeId)
         const target = link ? addressOf(link) : null
         return target || {label, place: null, version: "party:" + party.partyId + ":" + purposeId + ":none", write: false, links}
@@ -430,7 +514,13 @@ function assetTarget(who, assetId) {
         const facility = facilityRead(who, found) ? found : null
         const facilityPoint = facility ? pointPlace(facility.geoPointId) : null
         if (facilityPoint)
-            place = Object.assign(facilityPoint, {sourceText: L("Where its facility is") + ": " + facilityLabel(facility)})
+            place = Object.assign(facilityPoint, {
+                sourceText:
+                    L("Where its facility is") +
+                    ": " +
+                    facilityLabel(facility) +
+                    (facilityPoint.legacy ? "; " + L(LEGACY_PRECISION) : "")
+            })
         else {
             const address = facility ? facilityAddress(facility.facilityId, null) : null
             place = address ? addressPlace(address) : null
@@ -451,11 +541,263 @@ function assetTarget(who, assetId) {
         links
     }
 }
+// ===== transaction addresses =====
+// Who reads a transaction's document, beyond its organization scope, by Mantle's own rules of each kind; reading the document is
+// what reads its address (a consumer's ship-to is their home), so a member of the organization who reads none of them reads
+// nothing here.
+// - A sales part (an internal vendor, an outside customer): Sales' order scope (SalesAccess.js orderOf: an order assigned to the
+//   caller or a team of theirs, the organization's every one for SALES_TEAM_VIEW, an approver's or a change operator's own
+//   reach); Customer Service's (SUPPORT_CASE_EDIT or ORDER_APPROVE in the selling organization, as OrderConfirmations.js);
+//   Commerce's (COMMERCE_ORDER_VIEW for an order of the caller's stores, StoreOperations.js storeOrder); receivables
+//   (RECEIVABLE_VIEW or ACCOUNTING_ADMIN in the vendor, AccountingPolicy.js access).
+// - A purchase part (an internal customer, an outside vendor): a purchasing read (PurchasePolicy.js readPermissions) in the
+//   buying organization; payables (PAYABLE_VIEW or ACCOUNTING_ADMIN in the customer).
+// - Fulfillment, either kind: a picking, packing, shipping or stock permission (FULFILLMENT_READ) with the part's facility in the
+//   caller's facility scope.
+// - A shipment: fulfillment at a route segment's origin or destination facility; Customer Service's in its from or to party;
+//   or a reader of an order it ships (its ShipmentItemSource orders, at most TRANSACTION_ORDERS of them).
+// - An invoice: receivables in its from party, payables in its to party (or ACCOUNTING_ADMIN in either); a purchasing read with
+//   INVOICE_MATCH in its to party (a bill); Customer Service's in its from party.
+const PURCHASE_READ = [
+    "PURCHASE_POLICY_EDIT",
+    "PURCHASE_ORDER_EDIT",
+    "PURCHASE_APPROVE",
+    "PURCHASE_ORDER_APPROVE",
+    "SUPPLIER_PROFILE_EDIT"
+]
+const SERVICE_READ = ["SUPPORT_CASE_EDIT", "ORDER_APPROVE"]
+const FULFILLMENT_READ = ["SHIPMENT_PICK", "SHIPMENT_PACK", "SHIPMENT_SHIP", "SHIPMENT_LOAD_EDIT", "STOCK_ISSUE", "STOCK_RECEIVE"]
+const SALES_READ = ["SALES_VIEW", "SALES_TEAM_VIEW", "SALES_REPORT_VIEW"]
+const TRANSACTION_ORDERS = 5
+const anyOf = permissions => permissions.some(permission => access.has(permission))
+// The organizations of the caller's receivables and payables reads (AccountingPolicy.js), read once a call: {ar, ap} each a list
+// (null: every one), empty without the read.
+function accountingReads(who) {
+    if (who.accounting) return who.accounting
+    let found = {ar: [], ap: []}
+    if (who.userId && !who.external && anyOf(["RECEIVABLE_VIEW", "PAYABLE_VIEW", "ACCOUNTING_ADMIN"])) {
+        try {
+            const policy = ec.resource.script("component://mr-mantle/service/mantle/ledger/AccountingPolicy.js")
+            const reads = policy.access("read")
+            const ids = who.systemAdmin ? null : Array.from(reads.allowedOrganizationPartyIds || [])
+            const c = reads.capabilities
+            found = {ar: c.arRead || c.admin ? ids : [], ap: c.apRead || c.admin ? ids : []}
+        } catch (error) {
+            if (lib.reasonCode(error) == null)
+                ec.logger.error("Accounting reads were not read for a map: " + (error?.message ?? error))
+        }
+    }
+    return (who.accounting = found)
+}
+const inList = (list, partyId) => !!partyId && (list == null || list.includes(partyId))
+// Whether the caller's organizations hold a party (every one for a system administrator).
+const ourParty = (who, partyId) => {
+    const organizations = who.organizations()
+    return !!partyId && (organizations == null || organizations.includes(partyId))
+}
+function fulfillsAt(who, facilityId) {
+    if (!facilityId || !anyOf(FULFILLMENT_READ)) return false
+    return facilityRead(who, one("mantle.facility.Facility", {facilityId}))
+}
+// Whether the caller reads an order (its parts in scope given) by one of the rules above.
+function orderReader(who, order, parts) {
+    for (const part of parts) {
+        const sale = internalParty(part.vendorPartyId) && !internalParty(part.customerPartyId)
+        const purchase = internalParty(part.customerPartyId) && !internalParty(part.vendorPartyId)
+        if (sale) {
+            if (anyOf(SALES_READ) && salesAccess().orderOf(who.salesScope(), order.orderId)) return true
+            if (anyOf(SERVICE_READ) && ourParty(who, part.vendorPartyId)) return true
+            if (inList(accountingReads(who).ar, part.vendorPartyId)) return true
+            if (order.productStoreId && access.has("COMMERCE_ORDER_VIEW")) {
+                try {
+                    const operations = ec.resource.script("component://mr-mantle/service/mantle/order/StoreOperations.js")
+                    if (operations.storeOrder(operations.scope("orders"), order.orderId, false)) return true
+                } catch (error) {
+                    if (lib.reasonCode(error) == null)
+                        ec.logger.error("Commerce's order scope was not read for a map: " + (error?.message ?? error))
+                }
+            }
+        }
+        if (purchase) {
+            if (anyOf(PURCHASE_READ) && ourParty(who, part.customerPartyId)) return true
+            if (inList(accountingReads(who).ap, part.customerPartyId)) return true
+        }
+        if (fulfillsAt(who, part.facilityId)) return true
+    }
+    return false
+}
+// The parts of an order in the caller's organizations (one, with orderPartSeqId).
+function orderParts(who, orderId, orderPartSeqId) {
+    const organizations = who.organizations()
+    let query = find("mantle.order.OrderPart", {orderId}).orderBy("orderPartSeqId")
+    if (!blank(orderPartSeqId)) query = query.condition("orderPartSeqId", text(orderPartSeqId))
+    return Array.from(query.list()).filter(
+        part =>
+            organizations == null || [part.vendorPartyId, part.customerPartyId].some(partyId => organizations.includes(partyId))
+    )
+}
+function shipmentReader(who, shipment, segments) {
+    if (segments.some(segment => fulfillsAt(who, segment.originFacilityId) || fulfillsAt(who, segment.destinationFacilityId)))
+        return true
+    if (
+        anyOf(SERVICE_READ) &&
+        [shipment.fromPartyId, shipment.toPartyId].some(partyId => internalParty(partyId) && ourParty(who, partyId))
+    )
+        return true
+    const orderIds = Array.from(
+        new Set(
+            Array.from(
+                find("mantle.shipment.ShipmentItemSource", {shipmentId: shipment.shipmentId})
+                    .condition("orderId", "is-not-null", null)
+                    .selectField("orderId")
+                    .limit(50)
+                    .list()
+            ).map(row => row.orderId)
+        )
+    ).slice(0, TRANSACTION_ORDERS)
+    for (const orderId of orderIds) {
+        const order = one("mantle.order.OrderHeader", {orderId})
+        const parts = order ? orderParts(who, orderId, null) : []
+        if (parts.length && orderReader(who, order, parts)) return true
+    }
+    return false
+}
+function invoiceReader(who, invoice) {
+    const reads = accountingReads(who)
+    if (inList(reads.ar, invoice.fromPartyId) || inList(reads.ap, invoice.toPartyId)) return true
+    if (anyOf(PURCHASE_READ) && access.has("INVOICE_MATCH") && ourParty(who, invoice.toPartyId)) return true
+    return anyOf(SERVICE_READ) && internalParty(invoice.fromPartyId) && ourParty(who, invoice.fromPartyId)
+}
+// The document of a transaction address key the caller reads: {kind, id, parties, addresses: [{purposeId, contactMechId}]}, or a
+// refusal (RECORD_UNAVAILABLE) for a document that is not there, one of no organization of theirs, one they read by none of the
+// rules above, an outside user and a user of no organization. An order's are the parts of it in scope (orderPartSeqId narrows to
+// one): each part's ship-to (postalContactMechId, as PostalShippingDest) and its postal OrderPartContactMech rows; a shipment's
+// its postal ShipmentContactMech rows, then its route segments' origin and destination; an invoice's its postal
+// InvoiceContactMech rows.
+function transactionDocument(who, key) {
+    const given = ["orderId", "shipmentId", "invoiceId"].filter(field => !blank(key[field]))
+    if (given.length !== 1 || !who.userId || who.external) unavailable()
+    const organizations = who.organizations()
+    if (organizations != null && !organizations.length) unavailable()
+    const ours = partyIds => organizations == null || partyIds.some(partyId => !!partyId && organizations.includes(partyId))
+    const postal = new Set(postalPurposes())
+    const addresses = []
+    const add = (purposeId, contactMechId) => {
+        if (contactMechId && !addresses.some(row => row.purposeId === purposeId && row.contactMechId === contactMechId))
+            addresses.push({purposeId, contactMechId})
+    }
+    if (given[0] === "orderId") {
+        const orderId = text(key.orderId)
+        const order = one("mantle.order.OrderHeader", {orderId})
+        const parts = order ? orderParts(who, orderId, key.orderPartSeqId) : []
+        if (!parts.length || !orderReader(who, order, parts)) unavailable()
+        for (const part of parts) {
+            add("PostalShippingDest", part.postalContactMechId)
+            for (const row of find("mantle.order.OrderPartContactMech", {orderId, orderPartSeqId: part.orderPartSeqId})
+                .orderBy("contactMechPurposeId")
+                .list())
+                if (postal.has(row.contactMechPurposeId)) add(row.contactMechPurposeId, row.contactMechId)
+        }
+        const parties = parts.flatMap(part => [part.customerPartyId, part.vendorPartyId])
+        return {kind: "order", id: orderId, label: L("Order") + " " + orderId, parties, addresses}
+    }
+    if (given[0] === "shipmentId") {
+        const shipment = one("mantle.shipment.Shipment", {shipmentId: text(key.shipmentId)})
+        if (!shipment || !ours([shipment.fromPartyId, shipment.toPartyId])) unavailable()
+        const segments = Array.from(
+            find("mantle.shipment.ShipmentRouteSegment", {shipmentId: shipment.shipmentId})
+                .orderBy("shipmentRouteSegmentSeqId")
+                .list()
+        )
+        if (!shipmentReader(who, shipment, segments)) unavailable()
+        for (const row of find("mantle.shipment.ShipmentContactMech", {shipmentId: shipment.shipmentId})
+            .orderBy("contactMechPurposeId")
+            .list())
+            if (postal.has(row.contactMechPurposeId)) add(row.contactMechPurposeId, row.contactMechId)
+        for (const segment of segments) {
+            if (!addresses.some(row => row.purposeId === "PostalShippingDest"))
+                add("PostalShippingDest", segment.destPostalContactMechId)
+            if (!addresses.some(row => row.purposeId === "PostalShippingOrigin"))
+                add("PostalShippingOrigin", segment.originPostalContactMechId)
+        }
+        return {
+            kind: "shipment",
+            id: shipment.shipmentId,
+            label: L("Shipment") + " " + shipment.shipmentId,
+            parties: [shipment.toPartyId, shipment.fromPartyId],
+            addresses
+        }
+    }
+    const invoice = one("mantle.account.invoice.Invoice", {invoiceId: text(key.invoiceId)})
+    if (!invoice || !ours([invoice.fromPartyId, invoice.toPartyId]) || !invoiceReader(who, invoice)) unavailable()
+    for (const row of find("mantle.account.invoice.InvoiceContactMech", {invoiceId: invoice.invoiceId})
+        .orderBy("contactMechPurposeId")
+        .list())
+        if (postal.has(row.contactMechPurposeId)) add(row.contactMechPurposeId, row.contactMechId)
+    return {
+        kind: "invoice",
+        id: invoice.invoiceId,
+        label: L("Invoice") + " " + invoice.invoiceId,
+        parties: [invoice.toPartyId, invoice.fromPartyId],
+        addresses
+    }
+}
+// The party of a transaction whose address a contact mechanism is (or was: an address since changed is ended there), when the
+// caller reads that party: the link to where its location is chosen.
+function addressParty(who, parties, contactMechId) {
+    const partyIds = Array.from(new Set(parties.filter(Boolean)))
+    if (!partyIds.length) return null
+    const links = Array.from(
+        find("mantle.party.contact.PartyContactMech", {contactMechId})
+            .condition("partyId", "in", partyIds)
+            .orderBy("-fromDate")
+            .list()
+    )
+    const ordered = links.filter(link => !link.thruDate || lib.ms(link.thruDate) > lib.ms(now())).concat(links)
+    for (const link of ordered) {
+        const party = one("mantle.party.Party", {partyId: link.partyId})
+        if (partyAccess(who, party).read) return party.partyId
+    }
+    return null
+}
+// An order's, a shipment's or an invoice's address (adapter transactionAddress; recordKey {orderId, orderPartSeqId} |
+// {shipmentId} | {invoiceId}; addressPurpose its purpose, else the document's first of TRANSACTION_PURPOSES, else its first
+// address): the address's own point while it is this address's, else its postal code and country. Read only: no save reaches
+// it (a document keeps the address it was made with), and its link is the party whose address it is.
+function transactionTarget(who, key, purposeId) {
+    const document = transactionDocument(who, key)
+    const ordered = purposeId
+        ? document.addresses.filter(row => row.purposeId === purposeId)
+        : TRANSACTION_PURPOSES[document.kind]
+              .map(purpose => document.addresses.find(row => row.purposeId === purpose))
+              .concat(document.addresses)
+              .filter(Boolean)
+    const chosen = ordered[0] || null
+    const address = chosen ? one("mantle.party.contact.PostalAddress", {contactMechId: chosen.contactMechId}) : null
+    const partyId = address ? addressParty(who, document.parties, address.contactMechId) : null
+    return {
+        label: (address && addressText(address)) || document.label,
+        place: address ? addressPlace(address) : null,
+        version:
+            "transaction:" +
+            document.kind +
+            ":" +
+            document.id +
+            ":" +
+            (chosen?.purposeId || "-") +
+            ":" +
+            (address ? addressVersion(address) : "none"),
+        write: false,
+        links: partyId ? [{label: partyLabel(partyId), route: ROUTES.party, parameters: {partyId}}] : []
+    }
+}
+
 const targets = {
     postalAddress: (who, key, purposeId) => addressTarget(who, text(key.contactMechId), purposeId),
     party: (who, key, purposeId) => partyTarget(who, text(key.partyId), purposeId),
     facility: (who, key, purposeId) => facilityTarget(who, text(key.facilityId), purposeId),
-    asset: (who, key) => assetTarget(who, text(key.assetId))
+    asset: (who, key) => assetTarget(who, text(key.assetId)),
+    transactionAddress: (who, key, purposeId) => transactionTarget(who, key, purposeId)
 }
 function targetOf(kind, who, p) {
     if (!targets[kind]) throw new Error("Unknown map place kind " + kind)
@@ -831,7 +1173,8 @@ const operations = {
     facilityFeatures,
     assetContext: p => context("asset", p),
     assetStore: p => store("asset", p),
-    assetFeatures
+    assetFeatures,
+    transactionAddressContext: p => context("transactionAddress", p)
 }
 function execute(op, p) {
     if (!operations[op]) throw new Error("Unknown map place operation " + op)
