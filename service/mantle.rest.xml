@@ -531,6 +531,7 @@ along with this software (see the LICENSE.md file). If not, see
             <resource name="issues">
                 <method type="get"><service name="mantle.work.GitServices.get#RepositoryIssues"/></method>
                 <method type="post"><service name="mantle.work.GitServices.create#RepositoryIssue"/></method>
+                <id name="issueId"><method type="get"><service name="mantle.work.GitServices.get#RepositoryIssue"/></method></id>
             </resource>
         </id>
     </resource>

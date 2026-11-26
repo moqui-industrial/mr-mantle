@@ -125,8 +125,8 @@ function taskApp() {
 /* add#GitHostingOffer: the framework's offer with Smithy's REST for the site a client reaches (application: name,
    restBase, the path on this host; siteId; pageUrl, the Smithy pages' address), forks (Smithy makes them: forkRepository),
    and Mantle's task source (the moqui-rest source of the user's work items, docs/Run-Deploy.md): the user's tasks
-   (path), one work item (issuePath), a repository's open issues and Quick create there (issuesPath,
-   GitServices.get#RepositoryIssues and create#RepositoryIssue) and the app a work item opens in (app). It names no
+   (path), one issue of a repository (issuePath, by {repositoryId} and {id}: get#RepositoryIssue), a repository's open
+   issues and Quick create there (issuesPath, GitServices.get#RepositoryIssues and create#RepositoryIssue) and the app a work item opens in (app). It names no
    account. */
 function hostingOffer(p) {
     const offer = Object.assign({}, p?.offer || {})
@@ -144,7 +144,7 @@ function hostingOffer(p) {
         offer.tasks = {
             kind: "moqui-rest",
             path: "/rest/s1/mantle/my/tasks",
-            issuePath: "/rest/s1/mantle/workEfforts/{id}",
+            issuePath: "/rest/s1/mantle/gitRepositories/{repositoryId}/issues/{id}",
             issuesPath: "/rest/s1/mantle/gitRepositories/{repositoryId}/issues"
         }
         const app = taskApp()

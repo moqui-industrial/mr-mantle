@@ -199,17 +199,17 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="get" noun="RepositoryIssues">
         <description>The open issues of a git repository, for a developer's tools such as Dev AIDE's task panel (REST
-            gitRepositories/{repositoryId}/issues, the hosting offer's tasks.issuesPath), each read only as the caller may:
+            gitRepositories/{repositoryId}/issues, the hosting offer's tasks.issuesPath), each read only as the caller may
+            (GitIssues.js):
             - a repository Smithy keeps (a SmithyRepository row): its open issues the caller may read by Smithy's rules
-              (SmithyIssueServices.find#Issues), by number, a confidential one left out; numbered is true, so a commit
-              closes one with Fixes #12;
-            - any other: for a caller with the update right on the repository (an internal member of a linked project by
-              check#GitRepositoryAuthz, or another grant), the open tasks of the linked projects whose visibility is
-              general (none, WevAllUsers or WevGeneral; never a work group's, restricted or confidential one, nor a
-              protected People task), by priority.
-            projectList is the linked projects. At most pageSize (200 at most; Smithy's pages are 100). Refused as not
-            found for a caller who may not view the repository; a viewer without the update right on a repository Smithy
-            does not keep gets no tasks.</description>
+              (SmithyIssueServices.find#Issues), by number, a confidential one left out, numbered true; none when its
+              issues are off; projectList its own project; a login key only an installed app's device key, as PASS has it;
+            - any other: for a caller with the update right on it (an internal member of a linked project by
+              check#GitRepositoryAuthz, or another grant; not a client contact who only views), the open tasks of the
+              linked projects of general visibility (none, WevAllUsers or WevGeneral), never a protected People task, by
+              priority, and the linked projects; nothing for anyone else.
+            At most pageSize (200 at most; Smithy's pages are 100). Refused as not found for a caller who may not view
+            the repository.</description>
         <in-parameters>
             <parameter name="repositoryId" required="true"/>
             <parameter name="pageSize" type="Integer" default="200"/>
@@ -224,60 +224,28 @@ along with this software (see the LICENSE.md file). If not, see
                 <parameter name="workEffortId"/><parameter name="workEffortName"/></parameter></parameter>
             <parameter name="numbered" type="Boolean"/>
         </out-parameters>
-        <actions><script><![CDATA[
-            issueList = []
-            projectList = []
-            numbered = false
-            const limit = Math.min(Math.max(Number(pageSize) || 200, 1), 200)
-            const access = ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId}).call()
-            if (ec.message.hasError() || !access?.canView) { ec.message.addError(ec.resource.expand('Git repository ${repositoryId} not found', '', {repositoryId})); return }
-            const projectIds = Array.from(new Set(Array.from(ec.entity.find('mantle.work.effort.WorkEffortGitRepository').condition('repositoryId', repositoryId)
-                    .conditionDate('fromDate', 'thruDate', null).orderBy('fromDate').disableAuthz().list()).map((link) => link.workEffortId)))
-            const names = {}
-            if (projectIds.length) {
-                for (const project of Array.from(ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', 'in', projectIds).disableAuthz().list()))
-                    names[project.workEffortId] = project.workEffortName || ''
-            }
-            projectList = projectIds.filter((id) => names[id] !== undefined).map((id) => ({workEffortId: id, workEffortName: names[id]}))
-            const smithy = ec.entity.find('mantle.smithy.SmithyRepository').condition('repositoryId', repositoryId).disableAuthz().one()
-            if (smithy) {
-                numbered = true
-                // Smithy's own rules: what the caller may read of its tracker, and nothing else
-                const found = ec.service.sync().name('mantle.smithy.SmithyIssueServices.find#Issues')
-                        .parameters({input: {siteId: smithy.siteId, repositoryId, state: 'open', limit: Math.min(limit, 100)}}).call()
-                if (ec.message.hasError()) return
-                for (const view of Array.from(found?.result?.issueList || [])) {
-                    if (view.confidential) continue
-                    const issue = ec.entity.find('mantle.smithy.SmithyIssue').condition('repositoryId', repositoryId)
-                            .condition('issueNumber', view.issueNumber).disableAuthz().one()
-                    if (!issue) continue
-                    const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', issue.workEffortId).disableAuthz().one()
-                    issueList.push({workEffortId: issue.workEffortId, issueNumber: Number(view.issueNumber), workEffortName: view.title,
-                        statusId: task?.statusId || null, priority: task?.priority ?? null, rootWorkEffortId: task?.rootWorkEffortId || null,
-                        projectName: (task && names[task.rootWorkEffortId]) || null})
-                }
-                return
-            }
-            // the tasks of the linked projects are their members' to read: the update right, not the view a client has
-            if (!access.canUpdate || !projectIds.length) return
-            const tasks = Array.from(ec.entity.find('mantle.work.effort.WorkEffort').condition('rootWorkEffortId', 'in', projectIds)
-                    .condition('workEffortTypeEnumId', 'WetTask').condition('statusId', 'not-in', ['WeComplete', 'WeClosed', 'WeCancelled'])
-                    .condition(ec.entity.conditionFactory.makeCondition('visibilityEnumId', 'in', ['WevAllUsers', 'WevGeneral'], true))
-                    .orderBy('priority').orderBy('workEffortId').limit(limit).disableAuthz().list())
-            const protectedIds = tasks.length ? ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
-                    .protectedTaskIds(tasks.map((task) => task.workEffortId)) : []
-            for (const task of tasks) {
-                if (protectedIds.includes(task.workEffortId)) continue
-                issueList.push({workEffortId: task.workEffortId, issueNumber: null, workEffortName: task.workEffortName,
-                    statusId: task.statusId, priority: task.priority, rootWorkEffortId: task.rootWorkEffortId,
-                    projectName: names[task.rootWorkEffortId] || null})
-            }
-        ]]></script></actions>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/work/GitIssues.js").listIssues({repositoryId, pageSize}))</script></actions>
+    </service>
+    <service verb="get" noun="RepositoryIssue">
+        <description>One issue of a git repository (REST gitRepositories/{repositoryId}/issues/{issueId}, the hosting
+            offer's tasks.issuePath), by the same rules as get#RepositoryIssues: of a repository Smithy keeps by its number
+            (byNumber) or its task's id, through Smithy's get#Issue, never a confidential one; of any other, for a caller
+            with the update right, a task of a linked project of general visibility. Its title, status, project and text.
+            Not found otherwise.</description>
+        <in-parameters>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="issueId" required="true"/>
+            <parameter name="byNumber" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="issue" type="Map"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/work/GitIssues.js").getIssue({repositoryId, issueId, byNumber}))</script></actions>
     </service>
     <service verb="create" noun="RepositoryIssue">
-        <description>File an issue in a git repository's tracker (REST gitRepositories/{repositoryId}/issues, POST):
+        <description>File an issue in a git repository's tracker (REST gitRepositories/{repositoryId}/issues, POST;
+            GitIssues.js):
             - a repository Smithy keeps: through Smithy's create#Issue and its rules (a confirmed address, the post gate,
-              issues on, not archived), its text the description; the issue's number comes back;
+              issues on, not archived), its text the description, a login key only a device's; the issue's number comes
+              back, and its project as Smithy made it;
             - any other: by a caller with the update right on it (a member of a linked project), a task of a project the
               repository is linked to (rootWorkEffortId, else the first linked), made by create#Task.
             Refused as not found for a caller who may not view the repository, and for a project that is not linked.
@@ -294,38 +262,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="issueNumber" type="Integer"/>
             <parameter name="rootWorkEffortId"/>
         </out-parameters>
-        <actions><script><![CDATA[
-            const notFound = (what) => ec.message.addError(ec.resource.expand('${what} not found', '', {what}))
-            const access = ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId}).call()
-            if (ec.message.hasError() || !access?.canView) { notFound('Git repository ' + repositoryId); return }
-            const title = String(workEffortName || '').trim()
-            if (!title) { ec.message.addError(ec.l10n.localize('An issue needs a title')); return }
-            const smithy = ec.entity.find('mantle.smithy.SmithyRepository').condition('repositoryId', repositoryId).disableAuthz().one()
-            if (smithy) {
-                const made = ec.service.sync().name('mantle.smithy.SmithyIssueServices.create#Issue')
-                        .parameters({input: {siteId: smithy.siteId, repositoryId, title, body: description || title,
-                            operationId: operationId || ('gitIssue-' + ec.user.userId + '-' + Date.now())}}).call()
-                if (ec.message.hasError() || !made?.result?.issueNumber) return
-                issueNumber = Number(made.result.issueNumber)
-                const issue = ec.entity.find('mantle.smithy.SmithyIssue').condition('repositoryId', repositoryId)
-                        .condition('issueNumber', issueNumber).disableAuthz().one()
-                workEffortId = issue?.workEffortId || null
-                rootWorkEffortId = smithy.workEffortId || null
-                return
-            }
-            // a task of a project is its members' to file: the update right, not the view a client has
-            if (!access.canUpdate) { ec.message.addError(ec.resource.expand('You may not file issues in ${repositoryId}', '', {repositoryId})); return }
-            const linked = Array.from(ec.entity.find('mantle.work.effort.WorkEffortGitRepository').condition('repositoryId', repositoryId)
-                    .conditionDate('fromDate', 'thruDate', null).orderBy('fromDate').disableAuthz().list()).map((link) => link.workEffortId)
-            if (rootWorkEffortId && !linked.includes(rootWorkEffortId)) { notFound('Project ' + rootWorkEffortId); return }
-            if (!linked.length) { notFound('A project of ' + repositoryId); return }
-            if (!rootWorkEffortId) rootWorkEffortId = linked[0]
-            const made = ec.service.sync().name('mantle.work.TaskServices.create#Task')
-                    .parameters({rootWorkEffortId, workEffortName: title, description: description || null}).call()
-            if (ec.message.hasError() || !made?.workEffortId) return
-            workEffortId = made.workEffortId
-            issueNumber = null
-        ]]></script></actions>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/work/GitIssues.js").createIssue({repositoryId,
+            workEffortName, rootWorkEffortId, description, operationId}))</script></actions>
     </service>
 
     <!-- ========== Task references ========== -->
