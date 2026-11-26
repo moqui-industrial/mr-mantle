@@ -203,7 +203,9 @@ along with this software (see the LICENSE.md file). If not, see
             (GitIssues.js):
             - a repository Smithy keeps (a SmithyRepository row): its open issues the caller may read by Smithy's rules
               (SmithyIssueServices.find#Issues), by number, a confidential one left out, numbered true; none when its
-              issues are off; projectList its own project; a login key only an installed app's device key, as PASS has it;
+              issues are off; only what Smithy's projection shows (number, title, state; never the task's description,
+              status or priority); projectList its own project; a login key only an installed app's device key, and a
+              session a header login made held to the same, as PASS has it;
             - any other: for a caller with the update right on it (an internal member of a linked project by
               check#GitRepositoryAuthz, or another grant; not a client contact who only views), the open tasks of the
               linked projects of general visibility (none, WevAllUsers or WevGeneral), never a protected People task, by
@@ -217,8 +219,9 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="issueList" type="List"><parameter name="issue" type="Map">
                 <parameter name="workEffortId"/><parameter name="issueNumber" type="Integer"/><parameter name="workEffortName"/>
-                <parameter name="statusId"/><parameter name="priority" type="Long"/><parameter name="rootWorkEffortId"/>
-                <parameter name="projectName"/>
+                <parameter name="statusId"><description>A task's, of a repository Smithy does not keep</description></parameter>
+                <parameter name="state"><description>Smithy's state of the issue (open, closed), of a repository it keeps</description></parameter>
+                <parameter name="priority" type="Long"/><parameter name="rootWorkEffortId"/><parameter name="projectName"/>
             </parameter></parameter>
             <parameter name="projectList" type="List"><parameter name="project" type="Map">
                 <parameter name="workEffortId"/><parameter name="workEffortName"/></parameter></parameter>
@@ -229,9 +232,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="RepositoryIssue">
         <description>One issue of a git repository (REST gitRepositories/{repositoryId}/issues/{issueId}, the hosting
             offer's tasks.issuePath), by the same rules as get#RepositoryIssues: of a repository Smithy keeps by its number
-            (byNumber) or its task's id, through Smithy's get#Issue, never a confidential one; of any other, for a caller
-            with the update right, a task of a linked project of general visibility. Its title, status, project and text.
-            Not found otherwise.</description>
+            (byNumber, 1 to 10 digits) or its task's id, through Smithy's get#Issue, never a confidential one, its text its
+            approved first post as Smithy shows it (never the task's description); of any other, for a caller with the
+            update right, a task of a linked project of general visibility, with its description. Not found otherwise.</description>
         <in-parameters>
             <parameter name="repositoryId" required="true"/>
             <parameter name="issueId" required="true"/>

@@ -7,8 +7,9 @@
 //   projects; a new one is a task of a linked project, another project not found; a client contact who only views gets
 //   none and files none;
 // - a repository Smithy keeps: the issues its rules show, by number, never a confidential one, none while issues are
-//   off; one by its number; a new one through Smithy's create#Issue (refused an unconfirmed address); a session's key
-//   refused, as PASS refuses it;
+//   off; only what Smithy shows (never the task's internal description); one by its number, its text its first post; a
+//   new one through Smithy's create#Issue (refused an unconfirmed address); a session's key refused, and a session a
+//   header login made that sends only its cookie, as PASS refuses them;
 // - a caller who may not view a repository is refused as not found; members who are no admin reach the REST.
 // New spec, no Groovy original. Run: ./moq test mr-mantle --spec WorkRepositoryIssues
 const lib = ec.resource.script("component://mr-mantle/test/smithy/SmithySpecLib.js")
@@ -159,6 +160,12 @@ feature("a repository Smithy keeps lists the issues its rules show, by number, n
         const open = lib.file("RIQ_AUTHOR", SITE, ids.repositoryId, "Totals are wrong")
         lib.settled(SITE, "RIQ_AUTHOR")
         const secret = lib.file("RIQ_AUTHOR", SITE, ids.repositoryId, "A hole", {confidential: true})
+        // the task's description as Projects may change it, which Smithy's projection never shows
+        const task = ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId",
+            ec.entity.find("mantle.smithy.SmithyIssue").condition({repositoryId: ids.repositoryId, issueNumber: open.issueNumber}).one().workEffortId).one()
+        task.description = "RIQ-INTERNAL-NOTE"
+        task.priority = 1
+        task.update()
         // its Owner may read the confidential one, and is shown none here
         return lib.as("RIQ_OWNER", () => ({open, secret, found: call(`${GIT}.get#RepositoryIssues`, {repositoryId: ids.repositoryId}),
             one: call(`${GIT}.get#RepositoryIssue`, {repositoryId: ids.repositoryId, issueId: String(open.issueNumber), byNumber: true}),
@@ -175,6 +182,14 @@ feature("a repository Smithy keeps lists the issues its rules show, by number, n
         Array.from(found.projectList).map(project => project.workEffortId) == [ids.projectId]
         one.issue.issueNumber == open.issueNumber
         one.issue.workEffortName == "Totals are wrong"
+        one.issue.state == "open"
+        // its text is its first post as Smithy shows it, never the task's description; no status nor priority
+        one.issue.description.includes("The text of Totals are wrong")
+        !JSON.stringify(one).includes("RIQ-INTERNAL-NOTE")
+        !JSON.stringify(found).includes("RIQ-INTERNAL-NOTE")
+        Array.from(found.issueList)[0].priority == null
+        Array.from(found.issueList)[0].statusId == null
+        Array.from(found.issueList)[0].state == "open"
         hidden.errors.includes("not found")
         // issues off: none, and no error
         Array.from(quiet.issueList).length == 0
@@ -204,11 +219,22 @@ feature("Smithy's refusals hold: a session's key, an unconfirmed address, a stra
             return {kind: ec.user.loginKeyKind, listed: attempt(`${GIT}.get#RepositoryIssues`, {repositoryId: ids.repositoryId}),
                 filed: attempt(`${GIT}.create#RepositoryIssue`, {repositoryId: ids.repositoryId, workEffortName: "By a session's key"})}
         })
+        // a session a header login made, now sending only its cookie: no key this request, and held to the same rule
+        const byCookie = lib.as("RIQ_OWNER", () => {
+            ec.web.sessionAttributes.put("moquiHeaderLogin", "RIQ_OWNER")
+            try {
+                return {kind: ec.user.loginKeyKind, listed: attempt(`${GIT}.get#RepositoryIssues`, {repositoryId: ids.repositoryId})}
+            } finally {
+                ec.web.sessionAttributes.remove("moquiHeaderLogin")
+            }
+        })
         const unconfirmed = asAccount("RIQ_NEW", rest => rest(ids.repositoryId + "/issues", {workEffortName: "Unconfirmed"}, "post"))
         const stranger = asAccount("RIQ_STRANGER", rest => rest(ids.privateId + "/issues"))
-        return {bySession, unconfirmed, stranger}
+        return {bySession, byCookie, unconfirmed, stranger}
     },
-    then({bySession, unconfirmed, stranger}) {
+    then({bySession, byCookie, unconfirmed, stranger}) {
+        byCookie.kind == null
+        byCookie.listed.errors.includes("installed app")
         bySession.kind == "session"
         bySession.listed.errors.includes("installed app")
         bySession.filed.errors.includes("installed app")
