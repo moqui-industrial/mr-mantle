@@ -1,7 +1,7 @@
 /* CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md.
  * A git repository's issues for a developer's tools (GitServices.get#RepositoryIssues, get#RepositoryIssue and
  * create#RepositoryIssue; REST gitRepositories/{repositoryId}/issues, the hosting offer's tasks.issuesPath and
- * tasks.issuePath; mr-moqui plans/design-dev-aide.md 21.6). Each is read as the caller may, by the repository's kind:
+ * tasks.issuePath; mr-moqui plans/archive/design-dev-aide.md 21.6). Each is read as the caller may, by the repository's kind:
  * - one Smithy keeps (a SmithyRepository row): through Smithy's issue operations and their rules alone, a confidential
  *   issue never shown, only what Smithy's projection shows of an issue (its title, state and approved first post, never
  *   its task's description, status or priority), and as PASS has it (design-smithy §5.5, PassAuthority.js) a login key
