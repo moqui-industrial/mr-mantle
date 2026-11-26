@@ -85,8 +85,10 @@ own grants reach no service. A record that is not there and one the caller may n
 ## Places, saves and provenance
 
 A place is the record's own point; an asset with none is where its facility is. An address with no point (or with a
-point chosen for an earlier form of it) answers its postal code and country, from which the framework shows the code's
-local postal-area position labeled approximate; that position is never written to the address. Choose location makes a
+point chosen for an earlier form of it) answers its street line (`address1`, and `address2` as `#` and its `unitNumber`
+when it has one), city, postal code and country, from which the framework shows the address point its local geocoder
+matches when the installation has one (Overture addresses, no outside request), else the code's local postal-area position
+labeled approximate; neither is ever written to the address. Choose location makes a
 new `GeoPoint` (`GPT_RECORD_LOCATION`, data source `MANTLE_MAP_CHOICE`) with a `GeoPointProvenance` row (precision, who,
 when, and for an address the fingerprint of the address it was chosen for), and points the record at it; a point another
 record shares is never changed. Mantle's address update keeps the point on the new address, so a changed address no

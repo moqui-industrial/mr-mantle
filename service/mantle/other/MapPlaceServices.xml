@@ -48,6 +48,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="reasonCode" from="answer.reasonCode"/>
             <set field="postalCode" from="answer.postalCode"/>
             <set field="countryGeoId" from="answer.countryGeoId"/>
+            <set field="address1" from="answer.address1"/>
+            <set field="address2" from="answer.address2"/>
+            <set field="city" from="answer.city"/>
         </actions>
     </service>
     <service verb="store" noun="PostalAddressPlace">
@@ -86,6 +89,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="reasonCode" from="answer.reasonCode"/>
             <set field="postalCode" from="answer.postalCode"/>
             <set field="countryGeoId" from="answer.countryGeoId"/>
+            <set field="address1" from="answer.address1"/>
+            <set field="address2" from="answer.address2"/>
+            <set field="city" from="answer.city"/>
         </actions>
     </service>
     <service verb="store" noun="PartyPlace">
@@ -120,6 +126,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="reasonCode" from="answer.reasonCode"/>
             <set field="postalCode" from="answer.postalCode"/>
             <set field="countryGeoId" from="answer.countryGeoId"/>
+            <set field="address1" from="answer.address1"/>
+            <set field="address2" from="answer.address2"/>
+            <set field="city" from="answer.city"/>
         </actions>
     </service>
     <service verb="store" noun="FacilityPlace">
@@ -166,6 +175,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="reasonCode" from="answer.reasonCode"/>
             <set field="postalCode" from="answer.postalCode"/>
             <set field="countryGeoId" from="answer.countryGeoId"/>
+            <set field="address1" from="answer.address1"/>
+            <set field="address2" from="answer.address2"/>
+            <set field="city" from="answer.city"/>
         </actions>
     </service>
     <service verb="store" noun="AssetPlace">
@@ -219,6 +231,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="reasonCode" from="answer.reasonCode"/>
             <set field="postalCode" from="answer.postalCode"/>
             <set field="countryGeoId" from="answer.countryGeoId"/>
+            <set field="address1" from="answer.address1"/>
+            <set field="address2" from="answer.address2"/>
+            <set field="city" from="answer.city"/>
         </actions>
     </service>
 </services>

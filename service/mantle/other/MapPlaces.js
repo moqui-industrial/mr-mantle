@@ -329,12 +329,20 @@ function pointPlace(geoPointId, fingerprint) {
     }
 }
 const legacySource = () => L("Recorded location") + "; " + L(LEGACY_PRECISION)
-// An address's place: its own point when it is still this address's, else its postal code and country for the framework's
-// approximate postal-area position (never written to the address).
+// An address's place: its own point when it is still this address's, else its street line, locality, postal code and country
+// for the framework's local address match (an installation's own geocoder of Overture addresses, no outside request) and its
+// approximate postal-area position (neither written to the address).
 function addressPlace(address) {
     const own = pointPlace(address.geoPointId, addressFingerprint(address))
     if (own) return own
-    return {postalCode: text(address.postalCode), countryGeoId: text(address.countryGeoId)}
+    return {
+        address1: text(address.address1),
+        // the unit, as the framework's matching reads a second line only when it names one
+        address2: text(address.unitNumber) ? "#" + text(address.unitNumber) : text(address.address2),
+        city: text(address.city),
+        postalCode: text(address.postalCode),
+        countryGeoId: text(address.countryGeoId)
+    }
 }
 function addressVersion(address) {
     return "address:" + address.contactMechId + ":" + addressFingerprint(address).slice(0, 16) + ":" + (address.geoPointId || "-")
@@ -830,6 +838,9 @@ function context(kind, p) {
         links: target.links || [],
         postalCode: place.geometry ? null : place.postalCode || null,
         countryGeoId: place.geometry ? null : place.countryGeoId || null,
+        address1: place.geometry ? null : place.address1 || null,
+        address2: place.geometry ? null : place.address2 || null,
+        city: place.geometry ? null : place.city || null,
         reasonCode: null
     }
 }

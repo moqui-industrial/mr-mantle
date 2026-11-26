@@ -457,6 +457,10 @@ feature(
             direct.geometry == null
             direct.postalCode == "99951"
             direct.countryGeoId == "USA"
+            // the street line and city, for the installation's local address match (none is enabled here)
+            direct.address1 == "1 Spec Way"
+            direct.address2 == null
+            direct.city == "Spec City"
             framed.record.approximate == true
             framed.record.precisionEnumId == "GPP_POSTAL_AREA"
             framed.points.length == 1
