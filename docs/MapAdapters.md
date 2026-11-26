@@ -19,7 +19,9 @@ layers in `data/15-seed-initial/MapLayers.xml`.
 An app opens the dialog with the key and the record's key fields as JSON, for example
 `parameter-map="{adapterKey: 'facility', recordKey: JSON.stringify({facilityId})}"`, under its own route by the
 thin-wrapper rule of Maps.md. A record layer is shown by asking for its layer ID (`layerIds`) or by adding it to a map
-profile. Links in an answer are route keys the app resolves: `partyDetail`, `facilityDetail`, `assetDetail`.
+profile. Links in an answer are route keys the app resolves: `partyDetail`, `facilityDetail`, `assetDetail`. Mantle has no
+screens and registers no `moqui.maps.MapRoute` rows: an app that shows these maps registers its own for these keys, with its
+`routeApp` (Maps.md "Record links").
 
 `transactionAddress` shows the address a document was made with, its own contact mechanism: an order part's ship-to
 (`postalContactMechId`, as `PostalShippingDest`) and its postal `OrderPartContactMech` rows (only the parts of the
