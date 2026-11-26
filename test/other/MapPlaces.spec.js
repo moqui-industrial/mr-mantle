@@ -4,7 +4,8 @@
 // is refused, and a save makes a new point with its provenance; an estimate does not replace a recorded point; an address with
 // no point answers its postal code (approximate through the framework) and nothing is written to its geoPointId; its
 // postalCodeGeoId is the code's Geo, or null; a coworker reads a person's work address and not their home address, which the
-// person reads and may locate; a changed address does not show the point chosen for the old one; the facility and asset
+// person reads and may locate; an internal organization's own address is located only by a settings manager of it
+// (ADMIN_SETTINGS_MANAGE beside PARTY_LOCATION_EDIT); a changed address does not show the point chosen for the old one; the facility and asset
 // layers answer only the viewport and the caller's organizations, at most the limit. The users are in spec-local groups.
 // Beyond these: only the caller's organizations reach other parties (a user of none and an outside user, EXTERNAL_USER, are
 // refused, and so are a disabled party and another organization's customer; a personal contact is its owner's), a room with no
@@ -76,6 +77,8 @@ spec({
             ensureGroup("MPL_EDITORS", ["FACILITY_EDIT", "PARTY_LOCATION_EDIT"])
             ensureGroup("MPL_READERS", [])
             ensureGroup("MPL_EXTERNALS", ["EXTERNAL_USER"])
+            // an internal organization's own places are its settings manager's (SEC-BOS-89)
+            ensureGroup("MPL_SETTERS", ["PARTY_LOCATION_EDIT", "ADMIN_SETTINGS_MANAGE"])
             for (const partyId of ["MPL_ORG", "MPL_OTHER"]) {
                 call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyOrganization"})
                 call("create#mantle.party.Organization", {partyId, organizationName: partyId})
@@ -84,6 +87,7 @@ spec({
             for (const [partyId, userGroupId, orgId] of [
                 ["MPL_EDITOR", "MPL_EDITORS", "MPL_ORG"],
                 ["MPL_READER", "MPL_READERS", "MPL_ORG"],
+                ["MPL_SETTER", "MPL_SETTERS", "MPL_ORG"],
                 ["MPL_OUTSIDER", "MPL_EDITORS", "MPL_OTHER"],
                 // a user of no organization, and an outside user of the organization
                 ["MPL_LONER", "MPL_EDITORS", null],
@@ -356,7 +360,7 @@ feature(
     }
 )
 
-feature("a coworker reads a person's work address and not their home address, which the person reads and may locate", {
+feature("a coworker reads a person's work address and not their home address, which the person reads and may locate; an internal organization's own address is located by its settings manager alone", {
     when() {
         const home = as("mpl_editor", () => place("get", "PartyPlace", {partyId: "MPL_READER"}, {addressPurpose: "PostalHome"}))
         const work = as("mpl_editor", () => place("get", "PartyPlace", {partyId: "MPL_READER"}, {addressPurpose: "PostalWork"}))
@@ -369,10 +373,11 @@ feature("a coworker reads a person's work address and not their home address, wh
         const byAddress = as("mpl_editor", () => place("get", "PostalAddressPlace", {contactMechId: homeLink.contactMechId}))
         const organization = as("mpl_reader", () => place("get", "PartyPlace", {partyId: "MPL_ORG"}))
         const editorOrganization = as("mpl_editor", () => place("get", "PartyPlace", {partyId: "MPL_ORG"}))
+        const setterOrganization = as("mpl_setter", () => place("get", "PartyPlace", {partyId: "MPL_ORG"}))
         const outsider = as("mpl_outsider", () => place("get", "PartyPlace", {partyId: "MPL_ORG"}))
-        return {home, work, fallback, own, byAddress, organization, editorOrganization, outsider}
+        return {home, work, fallback, own, byAddress, organization, editorOrganization, setterOrganization, outsider}
     },
-    then({home, work, fallback, own, byAddress, organization, editorOrganization, outsider}) {
+    then({home, work, fallback, own, byAddress, organization, editorOrganization, setterOrganization, outsider}) {
         home.reasonCode == "RECORD_UNAVAILABLE"
         home.postalCode == null
         work.reasonCode == null
@@ -386,7 +391,10 @@ feature("a coworker reads a person's work address and not their home address, wh
         byAddress.reasonCode == "RECORD_UNAVAILABLE"
         organization.postalCode == "00000"
         !organization.permittedActions.includes("chooseLocation")
-        editorOrganization.permittedActions.includes("chooseLocation")
+        // the internal organization's own address: PARTY_LOCATION_EDIT alone does not locate it, its settings manager does
+        editorOrganization.postalCode == "00000"
+        !editorOrganization.permittedActions.includes("chooseLocation")
+        setterOrganization.permittedActions.includes("chooseLocation")
         outsider.reasonCode == "RECORD_UNAVAILABLE"
     }
 })
@@ -524,9 +532,9 @@ feature("an asset's point, an organization's own point and an address's point ar
             contactMechPurposeId: "PostalPrimary"
         }).one()
         const office = {contactMechId: officeLink.contactMechId}
-        const before = as("mpl_editor", () => place("get", "PostalAddressPlace", office))
+        const before = as("mpl_setter", () => place("get", "PostalAddressPlace", office))
         const readerSave = as("mpl_reader", () => save("PostalAddressPlace", office, before.recordVersion))
-        const addressSave = as("mpl_editor", () =>
+        const addressSave = as("mpl_setter", () =>
             save("PostalAddressPlace", office, before.recordVersion, {longitude: -75, latitude: 40})
         )
         const officeRow = one("mantle.party.contact.PostalAddress", office)

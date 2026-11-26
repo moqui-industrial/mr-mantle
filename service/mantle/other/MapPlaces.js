@@ -145,7 +145,10 @@ function employersOf(partyId) {
 // purpose narrows (purposeAllowed). Beyond the party themselves and a personal contact's owner, a caller reaches only with
 // organizations of their own, as Mantle's party filter (MANTLE_USER_ORG): one of their organizations, a party owned by _NA_
 // or by one of them; the staff of an internal organization (or of a unit under an internal top-level one, a department)
-// and such an organization itself only under one of the caller's top-level organizations, and write only within theirs.
+// and such an organization itself only under one of the caller's top-level organizations, and write only within theirs. An
+// internal organization's own places, and a unit's under one, are its configuration's (SEC-BOS-89, as BOSS's contact record):
+// written only with ADMIN_SETTINGS_MANAGE too, by a caller who works in it (or in the unit's top-level organization). A shared
+// party (owned by _NA_) is read, never written.
 function partyAccess(who, party) {
     const none = {read: false, write: false}
     if (!party || !who.userId) return none
@@ -159,11 +162,14 @@ function partyAccess(who, party) {
     if (organizations == null) return {read: true, write: editor, person}
     if (!organizations.length) return none
     const reach = (read, write) => ({read, write: read && write && editor, person})
-    if (organizations.includes(party.partyId)) return reach(true, true)
     const tenantOf = orgId => {
         const root = rootOf(orgId, who.roots)
         return internalParty(orgId) || internalParty(root) ? root : null
     }
+    // an internal organization or a unit under one: its settings manager's to write
+    const settings = () => access.has("ADMIN_SETTINGS_MANAGE")
+    if (organizations.includes(party.partyId))
+        return reach(true, !tenantOf(party.partyId) || settings())
     // staff of internal organizations (their units included)
     const staffOf = employersOf(party.partyId).filter(orgId => tenantOf(orgId))
     if (staffOf.length)
@@ -173,7 +179,7 @@ function partyAccess(who, party) {
         )
     // an internal organization, or a unit under one: its tenant's
     const tenant = tenantOf(party.partyId)
-    if (tenant) return reach(who.organizationRoots().has(tenant), organizations.includes(tenant))
+    if (tenant) return reach(who.organizationRoots().has(tenant), organizations.includes(tenant) && settings())
     const owner = party.ownerPartyId
     return reach(owner === "_NA_" || organizations.includes(owner), organizations.includes(owner))
 }

@@ -34,13 +34,16 @@ own grants reach no service. A record that is not there and one the caller may n
   personal contact. Of such a party they read only its business addresses: an organization's but its home address, and a person's work address alone. A
   readable party is not a readable home address. A party's own point (`PartyGeoPoint`) is an organization's business
   place and a person's private one. Choosing those locations needs `PARTY_LOCATION_EDIT` and a party of the user's
-  organizations.
+  organizations. An internal organization's own places, and a unit's under one, are its configuration's (as BOSS's contact
+  record, SEC-BOS-89): they need `ADMIN_SETTINGS_MANAGE` too, and the user working in it (or in the unit's top-level
+  organization). A shared party (owned by `_NA_`) is read and never located.
 - **Facilities:** read in the user's facility scope (`FacilityScope.js`); located with `FACILITY_EDIT` there.
 - **Assets:** read in the stock scope (`StockScope.js`: its owner's or its facility's owner's organization); located with
   `MAINTENANCE_RESOURCE_EDIT` or `FACILITY_EDIT` there.
 - An outside user (the framework's `EXTERNAL_USER`, or `PROJECT_CLIENT`) reads only its own and its personal contacts'
   places.
-- `PARTY_LOCATION_EDIT` is granted to no group: a system administrator passes Mantle's permission checks without one.
+- `PARTY_LOCATION_EDIT` is granted to no group here: a system administrator passes Mantle's permission checks without one,
+  and an application grants it to the groups that keep contacts' addresses (IronStone BOSS: its contact admins).
 
 ## Places, saves and provenance
 
@@ -76,7 +79,8 @@ only for an installation that called it.
 
 `test/other/MapPlaces.spec.js` (`./moq test mr-mantle --spec MapPlaces`): a holder's place and Choose location, a reader
 and another organization's record, also through the framework's `get#EffectiveConfig`; a reader's save, a stale version
-and a saved point's provenance; the postal fallback and `postalCodeGeoId`; home and work addresses; a changed address;
+and a saved point's provenance; the postal fallback and `postalCodeGeoId`; home and work addresses; an internal organization's address located only by its
+settings manager; a changed address;
 the bounded, organization-scoped layers (an ownerless room, the antimeridian); a user of no organization, an outside user,
 a disabled party, another organization's customer and a personal contact; asset, party-point and address saves; and the
 `postalCodeGeoId` update paths.
