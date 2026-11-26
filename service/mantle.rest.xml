@@ -37,8 +37,8 @@ along with this software (see the LICENSE.md file). If not, see
         <resource name="noticeCounts"><method type="get">
             <service name="mantle.party.PartyServices.get#UserNoticeCounts"/></method></resource>
         <!-- key-scope tasks: a key made for the task panel alone (a dev instance's connection, mr-moqui
-            plans/design-dev-aide.md question 18) reads the user's tasks here and a repository's issues below, and nothing
-            else of this API -->
+            plans/design-dev-aide.md question 18) reads the user's tasks here, and reads and files a repository's issues
+            below (a scope is a resource's, each method of it), and nothing else of this API -->
         <resource name="tasks" key-scope="tasks"><method type="get">
             <service name="mantle.work.TaskServices.get#MyTasks"/></method></resource>
         <!-- A card payment in a browser with Accept.js (docs/AuthorizeNet.md): the payment's public configuration, then its
