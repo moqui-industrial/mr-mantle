@@ -152,6 +152,11 @@ feature("the offer names Smithy's REST of the host's site, its forks and Mantle'
         offer.rest.reviewThreads == true
         offer.application.name == "smithy"
         offer.application.restBase == REST
+        // a repository's pages on the site's own host, as templates the Dev AIDE fills (Open on the server)
+        offer.application.pages.file.startsWith("https://" + HOST + "/")
+        offer.application.pages.file.endsWith("/{repositoryPath}/-/blob/{ref}/{file}#L{line}")
+        offer.application.pages.commit.endsWith("/{repositoryPath}/-/commit/{commitId}")
+        offer.application.pages.branch.endsWith("/{repositoryPath}/-/tree/{branch}")
         offer.forks == true
         offer.tasks.kind == "moqui-rest"
         offer.tasks.path == "/rest/s1/mantle/my/tasks"
