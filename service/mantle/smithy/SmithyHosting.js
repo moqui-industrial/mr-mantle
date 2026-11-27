@@ -174,12 +174,26 @@ const MISSING = {
     account: "an account here with this address",
     fileInvalid: "an agreement file Smithy can read"
 }
+/* Whether an address is one of the signed-in account's own: a confirmed (verified) address, or its account's own address. */
+function ownAddress(address) {
+    const typed = text(address).trim().toLowerCase()
+    if (!ec.user.userId || !typed) return false
+    if (text(ec.user.userAccount?.emailAddress).toLowerCase() === typed) return true
+    return Array.from(
+        ec.entity.find("moqui.security.public.VerifiedAddress").condition("userId", ec.user.userId).disableAuthz().list()
+    ).some(row => !!row.verifiedAt && text(row.emailAddress).trim().toLowerCase() === typed)
+}
 /* check#GitAuthorSigned over Smithy's get#AuthorSigned, for a repository Smithy keeps (known false for any other):
    whether the author has signed the agreement file at the default branch, what is missing, and where to sign (the
    file's edit page on the default branch, on the site's canonical host when it has one). */
 function authorSignedCheck(p) {
     const repo = p?.repositoryId ? one(REPOSITORY, {repositoryId: p.repositoryId}) : null
     if (!repo) return {known: false}
+    const core = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyCore.js")
+    const maintainer = () => !!ec.user.userId && core.repositoryRights(repo, core.actor()).rank >= core.RANK.SmrMaintainer
+    // whether an address is that of a member who signed is told only to the address's own account or a Maintainer of the
+    // repository (SEC-PFS-111): a signature line shows a handle and a name, never an address; anyone else is told nothing
+    if (p.authorEmail && !ownAddress(p.authorEmail) && !maintainer()) return {known: false}
     const answer = ec.resource
         .script("component://mr-mantle/service/mantle/smithy/Smithy.js")
         .authorSigned({repositoryId: repo.repositoryId, userId: p.authorUserId || null, emailAddress: p.authorEmail || null})
@@ -191,10 +205,8 @@ function authorSignedCheck(p) {
     const missing = Array.from(answer.missing || [], String)
     // what is missing tells whether an address is a member's confirmed one: it is the author's own to read, or a
     // Maintainer's of the repository; anyone else learns signed or not
-    const core = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyCore.js")
-    const own = !!ec.user.userId && p.authorUserId === ec.user.userId && !p.authorEmail
-    const detail =
-        own || (!!ec.user.userId && core.repositoryRights(repo, core.actor()).rank >= core.RANK.SmrMaintainer)
+    const own = !!ec.user.userId && ((p.authorUserId === ec.user.userId && !p.authorEmail) || ownAddress(p.authorEmail))
+    const detail = own || maintainer()
     return {
         known: true,
         required: answer.required === true,

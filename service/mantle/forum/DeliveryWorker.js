@@ -920,6 +920,20 @@ function reconcile(p) {
         )
     return { state: v?.state }
 }
+/* At most max of rows (oldest first) taken a site at a time in turn (SEC-PFS-107): a site with thousands of every-post
+   subscribers does not put every other site's notices behind its own. */
+function bySiteTurns(rows, max) {
+    const sites = new Map()
+    for (const row of rows) {
+        if (!sites.has(row.siteId)) sites.set(row.siteId, [])
+        sites.get(row.siteId).push(row)
+    }
+    const queues = Array.from(sites.values())
+    const out = []
+    for (let i = 0; out.length < max && queues.some((queue) => i < queue.length); i++)
+        for (const queue of queues) if (i < queue.length && out.length < max) out.push(queue[i])
+    return out
+}
 function dispatch() {
     const failures = []
     let processed = 0
@@ -948,17 +962,22 @@ function dispatch() {
             failures.push(item.deliveryId)
         }
     }
-    const items = Array.from(
-        find(F + 'ForumOutbox', { state: 'pending' })
-            .orderBy('createdAt,outboxId')
-            .limit(100)
-            .list(),
+    let open = bySiteTurns(
+        Array.from(
+            find(F + 'ForumOutbox', { state: 'pending' })
+                .orderBy('createdAt,outboxId')
+                .limit(500)
+                .list(),
+        ),
+        100,
     )
-    // Each page is its own transaction; keep preparing until done or the run's time budget is spent.
+    // Each page is its own transaction; one page of each outbox in turn, sites taking turns, until done or the run's time
+    // budget is spent (SEC-PFS-107: a large list's outbox no longer takes the whole run)
     const deadline = time() + 20000
-    for (const item of items) {
-        try {
-            for (;;) {
+    while (open.length && time() <= deadline) {
+        const more = []
+        for (const item of open) {
+            try {
                 const page = ec.service
                     .sync()
                     .throwOnError(true)
@@ -967,24 +986,25 @@ function dispatch() {
                     .requireNewTransaction(true)
                     .call().result
                 processed++
-                if (page.done || time() > deadline) break
+                if (!page.done) more.push(item)
+            } catch (e) {
+                ec.message.clearErrors()
+                ec.logger.error(
+                    'Forum outbox ' + item.outboxId + ' failed: ' + firstLine(e),
+                )
+                failures.push(item.outboxId)
             }
-        } catch (e) {
-            ec.message.clearErrors()
-            ec.logger.error(
-                'Forum outbox ' + item.outboxId + ' failed: ' + firstLine(e),
-            )
-            failures.push(item.outboxId)
+            if (time() > deadline) break
         }
-        if (time() > deadline) break
+        open = more
     }
-    for (const item of Array.from(
+    for (const item of bySiteTurns(Array.from(
         find(F + 'ForumDelivery', {})
             .condition('state', 'in', ['pending', 'retry'])
             .orderBy('dueAt,deliveryId')
-            .limit(100)
+            .limit(500)
             .list(),
-    )) {
+    ), 100)) {
         try {
             const c = ec.service
                 .sync()

@@ -374,15 +374,23 @@
             '/' +
             imp.archiveName
         const staging = imp.stagingLocation
+        // what the operator's archive unpacks to at most (SEC-PFS-112): pass@import-max-bytes for the archive and again for
+        // its dump, pass@import-max-entries entries, not the framework's general 4 GiB and million entries
+        const conf = (name, fallback) => {
+            const value = Number(ec.factory.getConfValue('pass@' + name) || 0)
+            return value > 0 ? value : fallback
+        }
+        const maxBytes = conf('import-max-bytes', 2147483648)
+        const maxEntries = conf('import-max-entries', 200000)
         let skipped = []
         if (/\.sql\.gz$/.test(imp.archiveName))
-            ec.resource.gunzip(source, staging + '/dump.sql')
+            ec.resource.gunzip(source, staging + '/dump.sql', maxBytes)
         else if (/\.sql$/.test(imp.archiveName))
             ec.resource
                 .getLocationReference(staging + '/dump.sql')
                 .putText(ec.resource.getLocationText(source))
         else {
-            const out = ec.resource.extractArchive(source, staging, {})
+            const out = ec.resource.extractArchive(source, staging, { maxBytes, maxEntries })
             skipped = out.skipped
             const dump = out.entries.find((e) =>
                 /(^|\/)dump\.sql(\.gz)?$/.test(e.path),
@@ -392,6 +400,7 @@
                 ec.resource.gunzip(
                     staging + '/' + dump.path,
                     staging + '/dump.sql',
+                    maxBytes,
                 )
             else if (dump.path !== 'dump.sql')
                 ec.resource

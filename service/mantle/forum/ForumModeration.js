@@ -612,6 +612,9 @@
     methods.applyTopicAction = (p) => {
         requireUser()
         site(p.siteId)
+        // the caller's right first, then the locks, so a refused call holds none (SEC-PFS-105)
+        if (!topic(p.rootCommEventId, p.siteId).a.canModerate)
+            fail('Unauthorized', 'Moderator access required')
         one(S + 'PublicSite', { siteId: p.siteId }, true)
         const { t, event, a } = topic(p.rootCommEventId, p.siteId, true)
         if (!a.canModerate) fail('Unauthorized', 'Moderator access required')
@@ -970,6 +973,10 @@
         })
     methods.endSanction = (p) => {
         site(p.siteId)
+        // the caller's right first, then the locks, so a refused call holds none (SEC-PFS-105)
+        const seen = one(F + 'ForumSanction', { siteId: p.siteId, sanctionId: p.sanctionId })
+        if (!seen) missing()
+        staff(p.siteId, seen.contactListId)
         one(S + 'PublicSite', { siteId: p.siteId }, true)
         const sanction = one(
             F + 'ForumSanction',
@@ -1317,8 +1324,9 @@
                 /\\[1-9]/.test(pattern)
             )
                 invalid('Nested repetition and back references are not allowed')
+            // the pattern as the rules match it, in linear time (ForumCore ruleRegex, SEC-PFS-90): look-around is refused too
             try {
-                new RegExp(pattern, 'i')
+                StringUtilities.regexTest(String(pattern), '', true)
             } catch (e) {
                 invalid('Invalid pattern')
             }
@@ -1384,6 +1392,10 @@
     /* A bounded test against sample text: what each action would do, with no post written. */
     methods.testRule = (p) => {
         site(p.siteId, true)
+        // counted against the requester (SEC-PFS-90): each test compiles and runs a pattern on a sample
+        ec.resource
+            .script('component://mr-mantle/service/mantle/party/ExternalAccess.js')
+            .throttle('forum-rule-test', 60, 'Wait a few minutes before testing a rule again')
         validRule(p.ruleType, p.pattern)
         if (String(p.body || '').length > 10000)
             invalid('Sample text is limited to 10000 characters')
@@ -1735,12 +1747,16 @@
                 results.push({ reviewId, ok: true, state: out.state })
             } catch (e) {
                 ec.message.clearErrors()
+                // each item's failure as the authority's envelope shows a failure (SEC-PFS-104): a refusal's reason and its
+                // own text, never a nested call's internal text, which stays in the log under the correlation id
+                const shown = ec.resource
+                    .script('component://mr-mantle/script/PassAuthority.js')
+                    .envelope(e)
                 results.push({
                     reviewId,
                     ok: false,
-                    error: String(e?.message || e)
-                        .split('\n')[0]
-                        .replace(/^(Error: )+/, ''),
+                    reason: shown.reason || null,
+                    error: shown.message,
                 })
             }
         }

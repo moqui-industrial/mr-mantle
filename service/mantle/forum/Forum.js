@@ -515,6 +515,15 @@ methods.setMembership = (p) => {
     if (!p.reason?.trim()) invalid('A membership decision reason is required')
     if (!['active', 'pending', 'suspended', 'ended'].includes(p.state))
         invalid('Invalid member state')
+    // a member who left (ended by the member) comes back only by joining again, never by staff (SEC-PFS-95): the listing,
+    // the messages and the mail of the old watch preferences would start again without consent. Staff change no state of
+    // such a membership (a suspension would be one step from active); a sanction keeps a person out
+    if (
+        m.state === 'ended' &&
+        m.stateSetByPartyId === m.partyId &&
+        p.state !== 'ended'
+    )
+        fail('Conflict', 'This member left the site; only they can join again')
     if (m.role === 'owner' && p.state !== 'active')
         protectOwner(p.siteId, m.partyId)
     // an owner's membership takes away or gives back an owner's rights, as a role change does
@@ -3256,6 +3265,9 @@ methods.findCategoryMembers = (p) => {
     }
 }
 methods.setCategoryMember = (p) => {
+    // the caller's right first, then the locks, so a refused call holds none (SEC-PFS-105)
+    if (!category(p.contactListId, p.siteId).canModerate)
+        fail('Unauthorized', 'Category moderator access required')
     one(S + 'PublicSite', { siteId: p.siteId }, true)
     // Serialize decisions, including first membership creation, with the category.
     one(F + 'ForumCategory', { contactListId: p.contactListId }, true)
@@ -3893,6 +3905,10 @@ methods.findTags = (p) =>
                 .list(),
         )
         const list = []
+        // the topics one call inspects to count, 50 a tag and 1,000 across its tags (SEC-PFS-98): a page of 100 tags of
+        // 1,000 topics each was 100,000 topic reads for one anonymous request; a count past its share is a lower bound
+        // (topicCountMore)
+        let budget = 1000
         for (const tag of candidates.slice(0, pg.limit)) {
             if (!tagDiscoverable(tag)) continue
             // in a scope: the tags that are used there, each with the count of its topics there
@@ -3905,11 +3921,11 @@ methods.findTags = (p) =>
                 continue
             // Count only topics this reader may see; the inspected window is bounded.
             let count = 0
-            for (const tt of rows(
-                F + 'ForumTopicTag',
-                { tagId: tag.tagId },
-                1000,
-            ))
+            const window = Math.max(0, Math.min(50, budget))
+            const tagged = window ? rows(F + 'ForumTopicTag', { tagId: tag.tagId }, window + 1) : []
+            const more = tagged.length > window
+            budget -= Math.min(tagged.length, window)
+            for (const tt of tagged.slice(0, window))
                 try {
                     const { t, a } = topic(tt.rootCommEventId, p.siteId)
                     if (scope && !scope.has(t.contactListId)) continue
@@ -3921,6 +3937,7 @@ methods.findTags = (p) =>
                 ...pick(tag, 'tagId name description revision'),
                 allowedCategories: json(tag.allowedCategories, []),
                 topicCount: count,
+                topicCountMore: more || !window,
             })
         }
         return {
@@ -5763,6 +5780,8 @@ function feedback(siteId, ua, text) {
     }
 }
 /* A delivery report for one of our messages: a permanent failure stops email to that member until they choose again. */
+/* The hard bounces of a member's deliveries that stop the member's forum mail (SEC-PFS-106). */
+const BOUNCES_TO_SUPPRESS = 3
 function bounce(siteId, parts) {
     const text = parts.map((b) => b.contentText || '').join('\n')
     const permanent = /^Status:\s*5\.\d+\.\d+/im.test(text)
@@ -5783,6 +5802,19 @@ function bounce(siteId, parts) {
             lastError: 'Hard bounce reported',
             revision: Number(d.revision || 0) + 1,
         })
+        // a report is no authenticated sender's word, and one leaked Message-ID is enough to write one (SEC-PFS-106): the
+        // member's forum mail stops only once reports name three of their deliveries; one report fails that delivery alone
+        const reported = find(F + 'ForumDelivery', {
+            siteId,
+            partyId: d.partyId,
+            channel: 'email',
+            state: 'failed',
+            lastError: 'Hard bounce reported',
+        })
+            .limit(3)
+            .count()
+        if (reported < BOUNCES_TO_SUPPRESS)
+            return 'Hard bounce for delivery ' + d.deliveryId + ' (' + reported + ' of ' + BOUNCES_TO_SUPPRESS + ')'
         const key = {
             siteId,
             partyId: d.partyId,

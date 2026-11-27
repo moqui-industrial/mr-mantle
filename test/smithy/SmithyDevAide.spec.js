@@ -176,16 +176,22 @@ feature("the agreement check answers for a repository Smithy keeps and leaves an
             other: hook("check#AuthorSigned", {repositoryId: "SDA_NOT_SMITHY", authorUserId: "SDA_DEV"}),
             // what is missing is the author's own to read (or a Maintainer's): another account learns signed or not
             own: lib.as("SDA_DEV", () => hook("check#AuthorSigned", {repositoryId: ids.repositoryId, authorUserId: "SDA_DEV"})),
+            // whether an address is a signed member's is the address's own account's to ask, or a Maintainer's; another
+            // account is told nothing (SEC-PFS-111)
             byAddress: lib.as("SDA_OTHER", () =>
+                hook("check#AuthorSigned", {repositoryId: ids.repositoryId, authorEmail: "sda_dev@smithy.test"})
+            ),
+            ownAddress: lib.as("SDA_DEV", () =>
                 hook("check#AuthorSigned", {repositoryId: ids.repositoryId, authorEmail: "sda_dev@smithy.test"})
             )
         }
     },
-    then({kept, other, own, byAddress}) {
+    then({kept, other, own, byAddress, ownAddress}) {
         own.signed == false
         own.message.includes("missing")
-        byAddress.signed == false
-        !byAddress.message.includes("missing")
+        byAddress.known == false
+        !byAddress.signed
+        ownAddress.known == true && ownAddress.message.includes("missing")
         kept.known == true
         kept.required == false
         kept.signUrl.startsWith("https://" + HOST + "/code/sdagroup/code/-/edit/main/")

@@ -379,8 +379,10 @@ kit => {
                     fullName: text(facts.full_name) || source,
                     cloneUrl: text(facts.clone_url) || null,
                     defaultBranch: text(facts.default_branch) || null,
-                    // importedHistory is set only on a repository the import made
-                    createdByImport
+                    // importedHistory is set only on a repository the import made, and only on an operator's word
+                    // (SEC-PFS-110): a commit's author address alone makes a signature its author's own there
+                    createdByImport,
+                    byOperator: forum.isOperator()
                 }),
                 countsJson: "{}",
                 reportJson: JSON.stringify({items: [], notCarried: {}}),
@@ -631,6 +633,7 @@ kit => {
         cloneUrl: cursor.cloneUrl,
         defaultBranch: cursor.defaultBranch,
         createdByImport: cursor.createdByImport === true,
+        byOperator: cursor.byOperator === true,
         projectId: cursor.projectId,
         scopeId: cursor.scopeId,
         errors: 0
@@ -1604,9 +1607,11 @@ kit => {
         )
         update(repo, {
             nextIssueNumber: next,
-            // the agreement takes imported commits by their authors' GitHub logins only in a repository the import made:
-            // one that had history of its own keeps its commits judged by who pushed them
-            ...(ctx.cursor.createdByImport ? {importedHistory: "Y"} : {}),
+            // the agreement takes imported commits by their authors' GitHub logins only in a repository the import made,
+            // and only when an operator started it (SEC-PFS-110: a group Owner controls the GitHub history it imports, so a
+            // commit authored with a member's address would make that member's signature); one that had history of its own,
+            // or a group Owner's import, keeps its commits judged by who pushed them
+            ...(ctx.cursor.createdByImport && ctx.cursor.byOperator ? {importedHistory: "Y"} : {}),
             ...(ctx.options.issues ? {issuesEnabled: "Y"} : {}),
             revision: Number(repo.revision || 1) + 1
         })

@@ -211,3 +211,23 @@ feature("a participant's report still files a private message's review", {
         reviews.map(review => review.reasonFamily) == ["flag"]
     }
 })
+
+// SEC-PFS-90: a site owner's regex rule is matched in time linear in the text, so a pattern that would backtrack answers at
+// once; look-around, which the linear matcher does not take, is no pattern
+feature("a site owner's regex rule matches in linear time, and look-around is no pattern (SEC-PFS-90)", {
+    when() {
+        const test = (pattern, body) => lib.op("PMR_OWNER", SITE, "testRule", {ruleType: "regex", pattern, body})
+        const started = Date.now()
+        const backtracking = test("(a|aa)*c", "a".repeat(9000) + "b")
+        const took = Date.now() - started
+        const censored = test("sp[a@]m", "no spam, no sp@m here")
+        const lookAround = test("foo(?=bar)", "foobar")
+        return {backtracking, took, censored, lookAround}
+    },
+    then({backtracking, took, censored, lookAround}) {
+        backtracking.matched == false
+        took < 2000
+        censored.matched == true && censored.censored == "no ■■■■, no ■■■■ here"
+        lookAround.kind == "Unprocessable"
+    }
+})

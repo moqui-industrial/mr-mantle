@@ -201,6 +201,77 @@ feature("SEC-PFS-96: an owner's membership is changed only after a recent sign-i
     }
 })
 
+feature("SEC-PFS-95: a member who left the site is not made active, pending or suspended by staff; only joining brings them back", {
+    when() {
+        lib.account(SITE, "FSR_LEFT", {member: true, handle: "fsrleft"})
+        lib.settled(SITE, "FSR_LEFT")
+        const left = op("FSR_LEFT", "leaveSite", {expectedRevision: membershipRevision("FSR_LEFT")})
+        const set = state =>
+            op("FSR_OWNER", "setMembership", {
+                targetPartyId: "FSR_LEFT",
+                state,
+                expectedRevision: membershipRevision("FSR_LEFT"),
+                reason: "Back again"
+            })
+        const active = set("active")
+        const pending = set("pending")
+        const suspended = set("suspended")
+        return {left, active, pending, suspended, state: lib.row("mantle.public.PublicSiteParty", {siteId: SITE, partyId: "FSR_LEFT"}).state}
+    },
+    then({left, active, pending, suspended, state}) {
+        left.state == "ended"
+        active.kind == "Conflict"
+        pending.kind == "Conflict"
+        suspended.kind == "Conflict"
+        state == "ended"
+    }
+})
+feature("SEC-PFS-98: GET tags counts at most 50 topics of a tag, and says when there are more", {
+    when() {
+        const tagId = lib.make("mantle.forum.ForumTag", {
+            siteId: SITE,
+            name: "fsrcrowded",
+            normalizedName: "fsrcrowded",
+            revision: 1,
+            createdAt: ec.user.nowTimestamp
+        }).tagId
+        for (let i = 0; i < 51; i++) {
+            const rootCommEventId = lib.make("mantle.party.communication.CommunicationEvent", {
+                communicationEventTypeId: "Message",
+                subject: "FSR crowded " + i,
+                entryDate: ec.user.nowTimestamp
+            }).communicationEventId
+            lib.make("mantle.forum.ForumTopic", {rootCommEventId, siteId: SITE, kind: "category", contactListId: ids.general, revision: 1, nextOrdinal: 2})
+            lib.make("mantle.forum.ForumTopicTag", {rootCommEventId, tagId, siteId: SITE})
+        }
+        const found = op(null, "findTags", {query: "fsrcrowded"})
+        return {tag: (found.tagList || []).find(row => row.tagId == tagId)}
+    },
+    then({tag}) {
+        tag.topicCountMore == true
+        tag.topicCount <= 50
+    }
+})
+feature("SEC-PFS-104: a bulk review decision answers each item's failure as the authority's envelope does", {
+    when() {
+        const topic = op("FSR_ANN", "publishPost", {
+            contactListId: ids.general,
+            title: "FSR bulk",
+            body: "<p>FSR bulk review</p>",
+            operationId: operationId()
+        })
+        const flagged = op("FSR_BEN", "flagPost", {postId: topic.rootCommEventId, reason: "Spam", operationId: operationId()})
+        // a member who is no staff decides it: each item's refusal, with its reason, and the envelope's fixed text
+        const out = op("FSR_BEN", "decideReviews", {reviewIds: [flagged.reviewId], decision: "approve", reason: "Bulk"})
+        return {flagged, out}
+    },
+    then({flagged, out}) {
+        flagged.reviewId != null
+        out.results.length == 1
+        out.results[0].ok == false
+        out.results[0].error == "Action is not permitted"
+    }
+})
 feature("SEC-PFS-86: the author or staff hide a post's earlier versions from readers, as they edit or later, and show them again", {
     when() {
         lib.settled(SITE, "FSR_ANN")

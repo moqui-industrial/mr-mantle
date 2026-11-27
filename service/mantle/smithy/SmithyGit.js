@@ -182,6 +182,11 @@ kit => {
         if (!hook || hook.repositoryId !== p.repositoryId) missing()
         return hook
     }
+    /* A webhook's address as Maintainers read it (SEC-PFS-65): its query, which may carry a token, masked; a user or
+       password in the address is refused when it is stored, as a mirror's is. Saving the masked address back keeps the
+       stored one. */
+    const maskedUrl = url => String(url || "").replace(/\?[^#]*/, "?…")
+    const USER_INFO = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*@/
     methods.findWebhooks = p => {
         maintained(p)
         const {out, problem} = called(GIT + "find#GitWebhooks", {repositoryId: p.repositoryId})
@@ -189,7 +194,7 @@ kit => {
         return {
             webhookList: Array.from(out.webhookList || []).map(hook => ({
                 webhookId: hook.webhookId,
-                url: hook.url,
+                url: maskedUrl(hook.url),
                 events: words(hook.events),
                 active: hook.active !== "N",
                 description: hook.description || "",
@@ -201,11 +206,12 @@ kit => {
     }
     methods.storeWebhook = p => {
         repositoryFor(p, "SmrMaintainer")
+        let url = text(p.url).trim()
         const store = () => {
             const {out, problem} = called(GIT + "store#GitWebhook", {
                 webhookId: p.webhookId || null,
                 repositoryId: p.repositoryId,
-                url: text(p.url).trim(),
+                url,
                 events: words(p.events).join(",") || null,
                 // kept when left empty on an edit
                 secret: p.secret || null,
@@ -217,9 +223,12 @@ kit => {
             maintainerAudit(p, "storeWebhook", out.webhookId)
             return {webhookId: out.webhookId}
         }
-        if (!text(p.url).trim()) invalid("url is required")
+        if (!url) invalid("url is required")
+        if (USER_INFO.test(url)) invalid("url: Put a credential in the secret, not in the address")
         if (p.webhookId) {
-            hookOf(p, p.webhookId)
+            const hook = hookOf(p, p.webhookId)
+            // the masked address findWebhooks answered, saved back unchanged, is the stored one
+            if (url === maskedUrl(hook.url)) url = hook.url
             return store()
         }
         // the receipt's stored hash of the input leaves the secret out, as storeMirror's does (SEC-PFS-62): a short secret

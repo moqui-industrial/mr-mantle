@@ -196,7 +196,8 @@ feature("numbers are kept; the rate limit holds a run until it resets, and the r
             .join() == "2,4"
         // what is filed now takes a number past GitHub's
         Number(repo.nextIssueNumber) == 5
-        repo.importedHistory == "Y"
+        // a group Owner's import is no operator's word: its history's commits are judged by who pushed them (SEC-PFS-110)
+        repo.importedHistory == null
         repo.issuesEnabled == "Y"
         issue.title == "Widgets <b>break</b> on resize"
         issue.state == "open"

@@ -266,6 +266,40 @@ feature("a Maintainer keeps the webhooks, and a secret is never read back", {
     }
 })
 
+// SEC-PFS-65: a webhook's address is answered with its query masked, a user or password in it is refused, and the masked
+// address saved back keeps the stored one. SEC-PFS-102: a webhook whose maker loses the repository is turned off.
+feature("a webhook's query is masked and its address holds no credential; a maker who loses the repository loses its webhooks", {
+    when() {
+        const withUser = on("SRS_MAINTAINER", "storeWebhook", {url: "https://bot:pw@hooks.example.test/x", operationId: "srs-hook-5"})
+        const stored = on("SRS_MAINTAINER", "storeWebhook", {url: "https://hooks.example.test/ci?token=srs-hook-token", operationId: "srs-hook-6"})
+        const listed = on("SRS_MAINTAINER", "findWebhooks").webhookList.find(hook => hook.webhookId == stored.webhookId)
+        on("SRS_MAINTAINER", "storeWebhook", {webhookId: stored.webhookId, url: listed.url, description: "kept"})
+        const kept = lib.row("moqui.resource.GitWebhook", {webhookId: stored.webhookId}).url
+        on("SRS_MAINTAINER", "deleteWebhook", {webhookId: stored.webhookId})
+        // a Maintainer of one repository by its own role makes a webhook there, and an Owner then removes the role
+        lib.account(SITE, "SRS_HOOKER", {handle: "srshooker"})
+        op("SRS_OWNER", "setRepositoryMember", {repositoryId: ids.spare, handle: "srshooker", role: "maintainer"})
+        const hook = op("SRS_HOOKER", "storeWebhook", {
+            repositoryId: ids.spare,
+            url: "https://hooks.example.test/hooker",
+            operationId: "srs-hook-7"
+        })
+        const before = lib.row("moqui.resource.GitWebhook", {webhookId: hook.webhookId}).active
+        // a change that leaves the maker its right leaves the webhook on
+        op("SRS_OWNER", "setRepositoryMember", {repositoryId: ids.spare, handle: "srsreporter", role: "developer"})
+        const unrelated = lib.row("moqui.resource.GitWebhook", {webhookId: hook.webhookId}).active
+        op("SRS_OWNER", "setRepositoryMember", {repositoryId: ids.spare, handle: "srshooker", role: "", expectedRevision: 1})
+        const after = lib.row("moqui.resource.GitWebhook", {webhookId: hook.webhookId}).active
+        return {withUser, listed, kept, before, unrelated, after}
+    },
+    then({withUser, listed, kept, before, unrelated, after}) {
+        withUser.kind == "Unprocessable"
+        listed.url == "https://hooks.example.test/ci?…"
+        kept == "https://hooks.example.test/ci?token=srs-hook-token"
+        before == "Y" && unrelated == "Y"
+        after == "N"
+    }
+})
 feature("an Owner archives a repository, which then takes no write and no push", {
     when() {
         const archive = (username, archived) => on(username, "setRepositoryArchived", {archived, expectedRevision: revision()})
