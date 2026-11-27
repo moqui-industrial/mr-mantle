@@ -173,17 +173,15 @@ function createShare(p) {
 }
 
 /** The mails that carry a link, by its selector: the template's rows whose body holds the guest page's path. */
-// The LIKE takes the selector only up to its first "_" (LIKE's one-character wildcard; a selector holds no "%"), so no
-// wildcard of it reaches the database, whatever its escape character; the exact path is then matched here.
-const mailsOf = selector => {
-    const prefix = String(selector).split("_")[0]
-    return Array.from(
+// The whole selector in the LIKE: it holds no "%" or "\" (randomString's letters), and a "_" in it, LIKE's one-character
+// wildcard, matches at most a mail of another selector differing there, which the exact match here leaves out.
+const mailsOf = selector =>
+    Array.from(
         find(MESSAGE)
             .condition("emailTemplateId", TEMPLATE)
-            .condition("body", "like", "%/location/" + prefix + "%")
+            .condition("body", "like", "%/location/" + selector + "#%")
             .list()
     ).filter(row => String(row.body || "").includes("/location/" + selector + "#"))
-}
 
 /**
  * send#RecordGuestLink: the link of a guest share of the caller's own, for a record, mailed to the record's customer: the
