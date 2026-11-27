@@ -26,6 +26,14 @@
     <moqui.security.user.NotificationTopic topic="RecordFollow" inboxEnumId="NinUpdates" description="Activity on a Followed Record" typeString="info"
             showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${authorName} on ${recordName}: ${summary}" linkTemplate=""/>
+    <!-- the same to a user not found to open the record (SH-UI-009; notify#RecordMention, notify#RecordFollowers): the author's
+        name alone, with no record, text or link. It says nothing of why, since a check that could not run withholds it too. -->
+    <moqui.security.user.NotificationTopic topic="ChatterMentionHidden" description="Mentioned on a Record, Without It" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} mentioned you on a record" linkTemplate=""/>
+    <moqui.security.user.NotificationTopic topic="RecordFollowHidden" inboxEnumId="NinUpdates" description="Activity on a Followed Record, Without It"
+            typeString="info" showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} added to a record you follow" linkTemplate=""/>
 
     <!-- Notification: the other topics of the IronStone shell. No link templates: the app passes the link. Each title names
         the message fields its sender puts in the message map, besides recordEntityName and recordId when it is on a

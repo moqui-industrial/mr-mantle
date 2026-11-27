@@ -3,7 +3,8 @@
 // delete#RequestComment): the author changes a note, which is marked edited and notifies only the users newly mentioned;
 // another user may not change it; a user in the ADMIN group deletes another's note; a note with replies and a message
 // are refused. The Mantle side of IronStone Chatter's edit and delete. The notices of a note on a confidential record type
-// (ConfidentialRecordType) go to their named users alone. New spec, no Groovy original.
+// (ConfidentialRecordType) go to their named users alone. A user mentioned who may not open the record is told without it,
+// and with it once they may (SH-UI-009). New spec, no Groovy original.
 function errorOf(name, params) {
     try { call(name, params) } catch (e) { ec.message.clearErrors(); return String(e.message) }
     return null
@@ -28,6 +29,18 @@ const notices = (userId, topic) => Array.from(ec.entity.find("moqui.security.use
         .map((row) => ec.entity.find("moqui.security.user.NotificationMessage").condition("notificationMessageId", row.notificationMessageId).one())
         .filter((notice) => notice && notice.topic === topic && JSON.parse(notice.messageJson || "{}").recordId === "RN-R1")
 const mention = (userId, name) => `<span data-mention-id="${userId}">@${name}</span>`
+// a spec-local screen whose grant (an app root's: allow, inherited, the organization filter) joe.developer and Mia hold, and a
+// call from it, so a recipient's access is checked under that grant (filter#RecordVisibleUsers)
+const SCREEN = "component://mr-mantle/test/party/RecordNotesScreen.xml"
+function fromScreen(run) {
+    ec.artifactExecution.push(SCREEN, "AT_XML_SCREEN", "AUTHZA_VIEW", false)
+    try { return run() } finally { ec.artifactExecution.pop() }
+}
+// the notices a user has without the record (SH-UI-009), newest last
+const hiddenNotices = (userId) => Array.from(ec.entity.find("moqui.security.user.NotificationMessageUser").condition("userId", userId).list())
+        .map((row) => ec.entity.find("moqui.security.user.NotificationMessage").condition("notificationMessageId", row.notificationMessageId).one())
+        .filter((notice) => notice && notice.topic === "ChatterMentionHidden")
+        .sort((a, b) => String(a.notificationMessageId).localeCompare(String(b.notificationMessageId)))
 
 spec({
     stepwise: true,
@@ -49,10 +62,22 @@ feature("a request, a task and a shipment with notes, and a user to mention", {
         const partyId = call("mantle.party.PartyServices.create#Person", { firstName: "Mia", lastName: "Recordnote" }).partyId
         miaUserId = call("mantle.party.PartyServices.create#PartyUserAccount", { partyId, emailAddress: "rn.mia@example.com", username: "rn.mia",
                 newPassword: "moqui1!!", newPasswordVerify: "moqui1!!" }).userId
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "RN_SCREEN", description: "Record notes spec screen" })
+        call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "RN_SCREEN", artifactName: SCREEN, artifactTypeEnumId: "AT_XML_SCREEN",
+                nameIsPattern: "N", inheritAuthz: "Y" })
+        call("create#moqui.security.UserGroup", { userGroupId: "RN_SCREEN_USERS", description: "Record notes spec users" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "RN_SCREEN_USERS", userGroupId: "RN_SCREEN_USERS", artifactGroupId: "RN_SCREEN",
+                authzTypeEnumId: "AUTHZT_ALLOW", authzActionEnumId: "AUTHZA_ALL" })
+        call("create#moqui.security.ArtifactAuthzFilter", { artifactAuthzId: "RN_SCREEN_USERS", entityFilterSetId: "MANTLE_USER_ORG" })
+        // from before the run's clock, which the grant is read at
+        for (const userId of [JOE, miaUserId]) call("create#moqui.security.UserGroupMember", { userGroupId: "RN_SCREEN_USERS", userId,
+                fromDate: effectiveTime - 60 * minute })
+        // joe.developer is on the request, so he may open it; Mia is not
+        call("create#mantle.request.RequestParty", { requestId: "RN-R1", partyId: JOE, roleTypeId: "Reporter", fromDate: ec.user.nowTimestamp })
         at(2)
-        noteId = call("mantle.party.CommunicationServices.log#RecordNote", { recordEntityName: REQUEST, recordId: "RN-R1", subject: "Access",
-                body: `<p>Please look at the access, ${mention(JOE, "Joe Developer")}</p>`, contentType: "text/html", mentionUserIds: [JOE],
-                recordUrl: requestUrl }).communicationEventId
+        noteId = fromScreen(() => call("mantle.party.CommunicationServices.log#RecordNote", { recordEntityName: REQUEST, recordId: "RN-R1",
+                subject: "Access", body: `<p>Please look at the access, ${mention(JOE, "Joe Developer")}</p>`, contentType: "text/html",
+                mentionUserIds: [JOE], recordUrl: requestUrl }).communicationEventId)
         at(3)
         shipmentNoteId = call("mantle.party.CommunicationServices.log#RecordNote", { recordEntityName: SHIPMENT, recordId: "RN-S1",
                 body: "Packed in two boxes" }).communicationEventId
@@ -72,19 +97,27 @@ feature("a request, a task and a shipment with notes, and a user to mention", {
     },
 })
 
+// SH-UI-009: Mia, mentioned, may not open the request: she is told who mentioned her, with no record, text or link
 feature("the author changes a note: the text and edited date change, the subject stays, and only the user newly mentioned is notified", {
     when() {
         at(5)
-        const out = call("mantle.party.CommunicationServices.update#RecordNote", { recordEntityName: REQUEST, recordId: "RN-R1", communicationEventId: noteId,
-                body: `<p>Please look at the access today, ${mention(JOE, "Joe Developer")} and ${mention(miaUserId, "Mia Recordnote")}</p>`,
-                contentType: "text/html", mentionUserIds: [JOE, miaUserId], recordUrl: requestUrl })
+        const out = fromScreen(() => call("mantle.party.CommunicationServices.update#RecordNote", { recordEntityName: REQUEST, recordId: "RN-R1",
+                communicationEventId: noteId, contentType: "text/html", mentionUserIds: [JOE, miaUserId], recordUrl: requestUrl,
+                body: `<p>Please look at the access today, ${mention(JOE, "Joe Developer")} and ${mention(miaUserId, "Mia Recordnote")}</p>` }))
         const entry = call("mantle.party.CommunicationServices.get#RecordTimeline", { recordEntityName: REQUEST, recordId: "RN-R1" }).entryList
                 .find((item) => item.communicationEventId === noteId)
         return { out, note: ce(noteId), joeMentions: notices(JOE, "ChatterMention").length, miaMentions: notices(miaUserId, "ChatterMention"),
-            joins: count("mantle.request.RequestCommEvent", { requestId: "RN-R1", communicationEventId: noteId }), entry }
+            miaHidden: hiddenNotices(miaUserId), joins: count("mantle.request.RequestCommEvent", { requestId: "RN-R1", communicationEventId: noteId }), entry }
     },
-    then({ out, note, joeMentions, miaMentions, joins, entry }) {
+    then({ out, note, joeMentions, miaMentions, miaHidden, joins, entry }) {
         out.mentionedUserIds == [miaUserId]
+        out.withheldUserIds == [miaUserId]
+        miaMentions.length == 0
+        miaHidden.length == 1
+        miaHidden[0].titleText == "John Doe mentioned you on a record"
+        !miaHidden[0].titleText.includes("RN-R1") && !miaHidden[0].titleText.includes("access")
+        !String(miaHidden[0].messageJson).includes("RN-R1") && !String(miaHidden[0].messageJson).includes("access")
+        !miaHidden[0].linkText
         out.editedDate != null
         note.body.includes("access today")
         note.subject == "Access"
@@ -92,9 +125,30 @@ feature("the author changes a note: the text and edited date change, the subject
         note.editedDate != null
         joins == 1
         joeMentions == 1
-        miaMentions.length == 1
-        miaMentions[0].linkText == requestUrl
         entry.editedDate != null
+    },
+})
+
+// SH-UI-009: once Mia is on the request she is told of it, its text and its link; the screen named (accessScreenLocation) as a
+// caller from no screen names it
+feature("a user mentioned who may open the record is told of it, with its text and link", {
+    when() {
+        at(5)
+        call("create#mantle.request.RequestParty", { requestId: "RN-R1", partyId: ec.entity.find("moqui.security.UserAccount")
+                .condition("userId", miaUserId).one().partyId, roleTypeId: "Reporter", fromDate: ec.user.nowTimestamp })
+        const out = call("mantle.party.CommunicationServices.notify#RecordMention", { recordEntityName: REQUEST, recordId: "RN-R1",
+                mentionUserIds: [miaUserId], subject: "Access", body: "<p>Please look at the access today</p>", recordUrl: requestUrl,
+                accessScreenLocation: SCREEN })
+        return { out, miaMentions: notices(miaUserId, "ChatterMention"), miaHidden: hiddenNotices(miaUserId).length }
+    },
+    then({ out, miaMentions, miaHidden }) {
+        out.notifiedUserIds == [miaUserId]
+        out.withheldUserIds.length == 0
+        miaMentions.length == 1
+        miaMentions[0].titleText.includes("RN-R1")
+        miaMentions[0].titleText.includes("Access")
+        miaMentions[0].linkText == requestUrl
+        miaHidden == 1
     },
 })
 
@@ -202,33 +256,46 @@ feature("a request comment: its author changes and deletes it through update#Req
 // The user's call of Nov 12, 2026 (People follow-up 1): the notices of a note on a confidential record type
 // (ConfidentialRecordType: IronStone People's employment, application and qualification) go to the users told alone, so a
 // subscriber to every message of ChatterMention or RecordFollow (john.doe of the ADMIN group, as Tools sets it) receives none;
-// a note on another app's record (a Projects work effort) still reaches the subscriber
-feature("a mention or a follower notice of an employment note goes to its named users alone; one of a project note reaches a subscriber to every message", {
+// a note on another app's record (a Projects work effort) still reaches the subscriber. SH-UI-009: Mia, who may open neither
+// record, is told without it each time; a subscriber is told only of what they may open (Noel, holding no screen, is not),
+// and a notice nobody may open is not kept.
+feature("notices of an employment note go to their named users alone; one of a project note reaches a subscriber who may open it; Mia is told without either record", {
     when() {
         at(11)
         const EMPLOYMENT = "mantle.humanres.employment.Employment"
-        const subscriptions = ["ChatterMention", "RecordFollow"].map((topic) => ({ topic, userId: "EX_JOHN_DOE" }))
+        const noelPartyId = call("mantle.party.PartyServices.create#Person", { firstName: "Noel", lastName: "Recordnote" }).partyId
+        const noelUserId = call("mantle.party.PartyServices.create#PartyUserAccount", { partyId: noelPartyId, emailAddress: "rn.noel@example.com",
+                username: "rn.noel", newPassword: "moqui1!!", newPasswordVerify: "moqui1!!" }).userId
+        call("create#moqui.security.UserGroupMember", { userGroupId: "RN_SCREEN_USERS", userId: "EX_JOHN_DOE", fromDate: effectiveTime - 60 * minute })
+        const subscriptions = ["ChatterMention", "RecordFollow"].flatMap((topic) => ["EX_JOHN_DOE", noelUserId].map((userId) => ({ topic, userId })))
         for (const subscription of subscriptions)
             ec.entity.makeValue("moqui.security.user.NotificationTopicUser").setAll(subscription).set("allNotifications", "Y").create()
         call("create#mantle.party.communication.RecordFollower", { recordEntityName: EMPLOYMENT, recordId: "RN-EMP1", userId: miaUserId,
                 notifyNotes: "Y", fromDate: ec.user.nowTimestamp })
-        const told = (name, params) => Array.from(call(`mantle.party.CommunicationServices.${name}`, Object.assign({ authorUserId: JOE,
-                body: "<p>About the review</p>" }, params)).notifiedUserIds || []).slice().sort().join()
+        const notify = (name, params) => call(`mantle.party.CommunicationServices.${name}`, Object.assign({ authorUserId: JOE,
+                body: "<p>About the review</p>", accessScreenLocation: SCREEN }, params))
+        const told = (out) => Array.from(out.notifiedUserIds || []).slice().sort().join()
         try {
+            const project = notify("notify#RecordMention", { recordEntityName: WORK, recordId: "RN-T1", mentionUserIds: [miaUserId] })
             return {
-                employmentMention: told("notify#RecordMention", { recordEntityName: EMPLOYMENT, recordId: "RN-EMP1", mentionUserIds: [miaUserId] }),
-                employmentFollow: told("notify#RecordFollowers", { recordEntityName: EMPLOYMENT, recordId: "RN-EMP1", kind: "notes" }),
-                projectMention: told("notify#RecordMention", { recordEntityName: WORK, recordId: "RN-T1", mentionUserIds: [miaUserId] }),
+                employmentMention: told(notify("notify#RecordMention", { recordEntityName: EMPLOYMENT, recordId: "RN-EMP1", mentionUserIds: [miaUserId] })),
+                employmentFollow: told(notify("notify#RecordFollowers", { recordEntityName: EMPLOYMENT, recordId: "RN-EMP1", kind: "notes" })),
+                projectMention: told(project), projectWithheld: Array.from(project.withheldUserIds || []), noelUserId,
+                kept: Array.from(ec.entity.find("moqui.security.user.NotificationMessage").condition("topic", "in", ["ChatterMention", "RecordFollow"])
+                        .condition("messageJson", "like", "%RN-EMP1%").list()).length,
                 confidential: call("mantle.party.CommunicationServices.check#ConfidentialRecordType", { recordEntityName: "Employment" }).confidential,
             }
         } finally {
             for (const subscription of subscriptions) ec.entity.find("moqui.security.user.NotificationTopicUser").condition(subscription).deleteAll()
         }
     },
-    then({ employmentMention, employmentFollow, projectMention, confidential }) {
+    then({ employmentMention, employmentFollow, projectMention, projectWithheld, noelUserId, kept, confidential }) {
         employmentMention == miaUserId
         employmentFollow == miaUserId
+        kept == 0
         projectMention == ["EX_JOHN_DOE", miaUserId].sort().join()
+        !projectMention.includes(noelUserId)
+        projectWithheld == [miaUserId]
         confidential == true
     },
 })
