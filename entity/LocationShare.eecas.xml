@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Guest location shares for a record (mr-moqui plans/Location-Sharing.md §3.7; service/mantle/other/LocationShareServices.xml):
+    a Maintenance work order that completes, closes or is cancelled ends the guest shares made for it, so its customer's link
+    shows nothing once the visit is over. Only the status change of a maintenance work order's root runs it; it never fails
+    the change (run-on-error false, the stop each share's own transaction, its errors logged) and checks nothing, as it only
+    stops shares named for this record. -->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
+    <eeca id="LocationShareWorkOrderEnded" entity="mantle.work.effort.WorkEffort" on-update="true" run-on-error="false"
+            get-entire-entity="true" get-original-value="true">
+        <condition><expression>originalValue != null &amp;&amp; originalValue.statusId != statusId &amp;&amp; purposeEnumId == 'WepMaintenance'
+            &amp;&amp; ['WeComplete', 'WeClosed', 'WeCancelled'].includes(statusId)</expression></condition>
+        <actions><service-call name="mantle.other.LocationShareServices.end#RecordGuestShares" disable-authz="true"
+                in-map="{workEffortId:workEffortId}"/></actions>
+    </eeca>
+</eecas>

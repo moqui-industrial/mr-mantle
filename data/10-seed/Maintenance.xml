@@ -238,6 +238,12 @@
     <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntCompleted" toStatusId="AsMntInProcess" transitionName="Reopen"/>
     <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntScheduled" toStatusId="AsMntCreated" transitionName="Unschedule"/>
 
+    <!-- A technician's location shared with a work order's customer (mr-moqui plans/Location-Sharing.md §3.7;
+        mantle.other.LocationShareServices.create#RecordGuestShare): the guest link mailed by the work order's organization,
+        its subject and body made by the service, which holds the link only in the mail it sends -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_LOCATION_GUEST_LINK" description="Technician's location link to the customer"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+
     <!-- MaintenanceWork (design §1.2): a work order assigned to the user, told on this topic only (the generic WorkItemAssigned
         notice leaves managed work out). Its title names the work order and its target, never a cost or a reporter; an app sets
         its link. Registered for Admin's Topics (impl-maintenance F52): its audience is who executes maintenance work. -->
