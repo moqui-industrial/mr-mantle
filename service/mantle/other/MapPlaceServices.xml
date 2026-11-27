@@ -12,7 +12,7 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<!-- Mantle's map adapters (mr-moqui plans/Maps.md §3.2, docs/tools/Maps.md "Record adapters"; MapPlaces.js): the framework's
+<!-- Mantle's map adapters (mr-moqui plans/archive/Maps.md §3.2, docs/tools/Maps.md "Record adapters"; MapPlaces.js): the framework's
     local-map dialog and record layers call these services as the user, resolved by the adapter keys of data/10-seed/MapPlaces.xml
     (postalAddress, party, facility, asset, and the read-only transactionAddress). Each checks the caller itself, on every call, from permissions and organization scope
     (MapPlaces.js says who reads and who writes), so every user may call them (MantleMapPlaceServices); a record that is not there

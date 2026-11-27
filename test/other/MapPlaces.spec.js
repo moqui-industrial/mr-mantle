@@ -1,4 +1,4 @@
-// Mantle's map adapters (mantle.other.MapPlaceServices, MapPlaces.js; mr-moqui plans/Maps.md §9 P3): a facility editor sees
+// Mantle's map adapters (mantle.other.MapPlaceServices, MapPlaces.js; mr-moqui plans/archive/Maps.md §9 P3): a facility editor sees
 // a facility's place with Choose location and a reader of the organization without it, and another organization's facility is
 // refused, also through the framework's get#EffectiveConfig with authorization on; a reader's save is refused, a stale version
 // is refused, and a save makes a new point with its provenance; an estimate does not replace a recorded point; an address with
