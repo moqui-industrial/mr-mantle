@@ -540,6 +540,9 @@ along with this software (see the LICENSE.md file). If not, see
                         in-map="{paymentMethodId:paymentMethodId, need:returnNeed}"/>
                 <if condition="ec.message.hasError()"><return/></if>
             </if>
+            <!-- a return file is at most 10 MB, refused before it is parsed (SEC-BOS-124) -->
+            <if condition="String(nachaString).length &gt; 10485760">
+                <return error="true" message="RETURN_TOO_LARGE: A return file may be at most 10 MB"/></if>
             <entity-find-one entity-name="mantle.account.method.PaymentMethod" value-field="bankMethod" disable-authz="true"/>
             <if condition="bankMethod == null">
                 <return error="true" message="Bank account ${paymentMethodId} is not available"/></if>

@@ -10,6 +10,10 @@ const DAY = 86400000
 const LOOK_BACK_DAYS = 30
 const LOOK_AHEAD_DAYS = 5
 const MAX_ROWS = 5000
+// a statement file's text is at most 10 MB, refused before it is parsed (SEC-BOS-124): 5,000 lines of any format are far less
+const MAX_TEXT = 10485760
+// an amount: digits with one optional decimal point, a pattern that never backtracks, after a length check (SEC-BOS-124)
+const amountText = value => value.length <= 40 && /^[+-]?(\d+(\.\d+)?|\.\d+)$/.test(value)
 
 // ---------- scope ----------
 
@@ -316,7 +320,7 @@ function ofxAmount(text) {
     const value = String(text || "")
         .trim()
         .replace(/,/g, ".")
-    return /^[+-]?\d*\.?\d+$/.test(value) ? value : null
+    return amountText(value) ? value : null
 }
 function parseOfx(text, method, bankAccount) {
     const result = {rows: [], fileErrors: [], warnings: [], balance: {}, currencyUomId: null}
@@ -472,7 +476,7 @@ function csvAmount(text) {
         value = value.slice(0, -1)
     }
     value = value.replace(/,(?=\d{3}(\D|$))/g, "")
-    if (!/^[+-]?\d*\.?\d+$/.test(value)) return undefined
+    if (!amountText(value)) return undefined
     let amount = toDecimal(value)
     if (negative) amount = amount.multiply(-1)
     return amount
@@ -541,6 +545,7 @@ function parseCsv(text, method, mapping = {}) {
 // A statement file of the format, read for the bank account: its rows, each new, a duplicate or rejected (status),
 // the file's errors, which refuse the whole file, and its warnings.
 function statement(p) {
+    if (String(p.text ?? "").length > MAX_TEXT) denied("STATEMENT_TOO_LARGE", "A statement file may be at most 10 MB")
     const method = p.method || one("mantle.account.method.PaymentMethod", {paymentMethodId: p.paymentMethodId})
     const bankAccount = one("mantle.account.method.BankAccount", {paymentMethodId: method.paymentMethodId})
     const parsers = {
