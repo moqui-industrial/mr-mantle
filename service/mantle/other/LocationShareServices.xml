@@ -14,27 +14,30 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- Guest location shares for a record (mr-moqui plans/Location-Sharing.md §3.7; LocationRecordShares.js): the person on a
     service visit shares their own location with the record's customer by the framework's guest link, until no later than
-    the record's planned end; the record's completion or cancellation ends it (entity/LocationShare.eecas.xml). The share,
-    its link and its guest page are the framework's (org.moqui.maps.LocationServices, Maps/SharedLocation.xml); these
-    services check the record by Mantle's own rules (MaintenanceAccess.js) and send the link by the record's organization.
-    Not remote: an app's screen calls them after its own access check. -->
+    the record's planned end (kept on the share, so no extension passes it); the record's completion or cancellation ends
+    it (entity/LocationShare.eecas.xml). Two steps, so the customer hears of nothing the technician has not confirmed:
+    create#RecordGuestShare makes the share and answers its link once, and send#RecordGuestLink mails it once the
+    technician's app confirmed the share (or at the press, in a browser). The mail's EmailMessage row stays for the mail
+    queue; its link's secret is blanked from its body when the share ends or is stopped (blank#RecordGuestLinkMail). The
+    share, its link and its guest page are the framework's (org.moqui.maps.LocationServices, Maps/SharedLocation.xml);
+    these services check the record by Mantle's own rules (MaintenanceAccess.js). Not remote: an app's screen calls them
+    after its own access check. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-service-definition.xsd">
 
     <service verb="create" noun="RecordGuestShare" allow-remote="false" no-remember-parameters="true">
-        <description>Share the caller's own location with a record's customer by a guest link: recordType workOrder (a
-            Maintenance work order, recordId its WorkEffort or a step of it) on which the caller is assigned with
-            MAINTENANCE_EXECUTE or MAINTENANCE_SUPERVISE, open (not complete, closed or cancelled), with a planned end
-            (estimatedCompletionDate) and a customer (a customer repair's claim customer). The share ends at thruDate
-            (after now, no later than the planned end; the planned end when not given), exact or approximate
-            (precisionEnumId), with the caller's purposeText (an ETA); it is the framework's create#Share with a link
-            audience, made as the caller, and names the work order (store#ShareRecord), so its completion or cancellation
-            stops it. The link (linkUrl, answered this once: baseUrl, else this server's web root, and the guest page's
-            /location/selector#secret) is mailed to the customer's primary email address by the work order's organization
-            (MANTLE_LOCATION_GUEST_LINK); mailSent false with mailReason (NO_CUSTOMER_EMAIL, NO_SENDER, MAIL_FAILED) when
-            it was not, the share made still. recordType delivery is refused with RECORD_KIND_NOT_READY until the warehouse
-            trips (WH-TRIP) give a Delivery its driver and status. Refused: RECORD_KIND_UNKNOWN, PERMISSION_DENIED,
-            RECORD_UNAVAILABLE, NOT_ASSIGNED, WORK_CLOSED, NO_PLANNED_END, NO_CUSTOMER, BAD_UNTIL, END_AFTER_PLANNED,
-            NO_SITE_ROOT, and create#Share's reasons.</description>
+        <description>Share the caller's own location by a guest link for a record's customer: recordType workOrder (a
+            Maintenance work order, recordId its WorkEffort or a step of it) to which the caller is assigned (a current
+            Assignee row) with MAINTENANCE_EXECUTE or MAINTENANCE_SUPERVISE, open (not complete, closed or cancelled), with a
+            planned end (estimatedCompletionDate) not yet past and a customer (a customer repair's claim customer). The
+            share ends at thruDate (after now, no later than the planned end; the planned end when not given), exact or
+            approximate (precisionEnumId), with the caller's purposeText (an ETA); it is the framework's create#Share with a
+            link audience, made as the caller, and names the work order and its planned end (store#ShareRecord), so no
+            extension passes that end and the work order's completion or cancellation stops it. The link (linkUrl: this
+            server's https web root and the guest page's /location/selector#secret) is answered this once and mailed only
+            by send#RecordGuestLink. recordType delivery is refused with RECORD_KIND_NOT_READY until the warehouse trips
+            (WH-TRIP) give a Delivery its driver and status. Refused: RECORD_KIND_UNKNOWN, PERMISSION_DENIED,
+            RECORD_UNAVAILABLE (another organization's), NOT_ASSIGNED, WORK_CLOSED, NO_PLANNED_END, OVERDUE, NO_CUSTOMER,
+            BAD_UNTIL, END_AFTER_PLANNED, NO_SITE_ROOT, and create#Share's reasons.</description>
         <in-parameters>
             <parameter name="recordType" required="true"/>
             <parameter name="recordId" required="true"/>
@@ -42,24 +45,52 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="precisionEnumId" default-value="LspExact"/>
             <parameter name="label"/>
             <parameter name="purposeText"/>
-            <parameter name="baseUrl"><description>The site root of the link, such as https://boss.example.com</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="shareId"/>
             <parameter name="thruDate" type="Timestamp"/>
             <parameter name="linkUrl"><description>The guest page's link, answered this once</description></parameter>
-            <parameter name="mailSent" type="Boolean"/>
-            <parameter name="mailReason"/>
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/other/LocationRecordShares.js').execute('createShare', context))</script></actions>
     </service>
 
-    <service verb="end" noun="RecordGuestShares" allow-remote="false">
-        <description>A Maintenance work order completed, closed or cancelled (the EECA LocationShareWorkOrderEnded): every
-            guest share still on for it is stopped (the framework's stop#RecordShares), each on its own. Out:
+    <service verb="send" noun="RecordGuestLink" allow-remote="false" no-remember-parameters="true">
+        <description>Mail the guest link of a share of the caller's own made by create#RecordGuestShare to its record's
+            customer, by the record's organization (MANTLE_LOCATION_GUEST_LINK, its date in the customer's or the
+            organization's time zone): once the technician's app confirmed the share, or at once in a browser. The share
+            must be active, its record pass create#RecordGuestShare's checks again, linkSecret be its own link's secret
+            (the fragment of linkUrl), and the link not have been mailed. mailSent false with mailReason
+            NO_CUSTOMER_EMAIL, NO_SENDER (the organization has no email address), NO_MAIL_SERVER (the mail is queued:
+            its server has no host) or MAIL_FAILED. Refused: SHARE_NOT_FOUND, SHARE_ENDED, LINK_MISMATCH, ALREADY_SENT,
+            NO_SITE_ROOT, and the record's refusals.</description>
+        <in-parameters>
+            <parameter name="shareId" required="true"/>
+            <parameter name="linkSecret" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="mailSent" type="Boolean"/>
+            <parameter name="mailReason"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/other/LocationRecordShares.js').execute('sendLink', context))</script></actions>
+    </service>
+
+    <service verb="end" noun="RecordGuestShares" authenticate="anonymous-all" allow-remote="false" transaction="ignore">
+        <description>A Maintenance work order completed, closed or cancelled (the EECA LocationShareWorkOrderEnded), by a
+            user, an import or a job: every guest share still on for it is stopped (the framework's stop#RecordShares,
+            each in its own transaction). It never fails the status change: an error is logged. Out:
             stoppedCount.</description>
         <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
         <out-parameters><parameter name="stoppedCount" type="Integer"/></out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/other/LocationRecordShares.js').execute('endShares', context))</script></actions>
+    </service>
+
+    <service verb="blank" noun="RecordGuestLinkMail" authenticate="anonymous-all" allow-remote="false" transaction="force-new">
+        <description>A guest share for a record ended or stopped (the EECA LocationShareGuestEnded, however it ended: its
+            end, its owner's stop, its record's completion, its device's revoke): the link's secret is blanked from the
+            body of the mail that carried it (/location/selector#ended), whose EmailMessage row stays for the mail queue.
+            In a transaction of its own, so it never fails the end: an error is logged. Out: blankedCount.</description>
+        <in-parameters><parameter name="shareId" required="true"/></in-parameters>
+        <out-parameters><parameter name="blankedCount" type="Integer"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/other/LocationRecordShares.js').execute('blankMail', context))</script></actions>
     </service>
 </services>
