@@ -944,6 +944,22 @@ function findBookable(p) {
     return Object.assign({}, paged, {canEdit: !!caps.policyEdit})
 }
 
+// Why the user may not book an asset (SEC-BAP-104), or null: equipment is bookable (Asset.bookable Y), and an asset whose owner,
+// or whose facility's owner, is an organization is booked only by that organization's people (get#PartyOrganizationInfo
+// userOrgIds); a shared one (_NA_) or one of no organization by anyone. A caller with authorization disabled (internal work,
+// People's rooms as the system) answers for its booking.
+function assetReachRefusal(asset) {
+    if (ec.artifactExecution.authzDisabled()) return null
+    const name = asset?.assetName || asset?.assetId || "The asset"
+    if (!asset) return "The asset is not available to book"
+    if (asset.assetTypeEnumId === "AstTpEquipment" && asset.bookable !== "Y") return name + " is not available to book"
+    const facility = asset.facilityId ? one("mantle.facility.Facility", {facilityId: asset.facilityId}) : null
+    const owner = asset.ownerPartyId || facility?.ownerPartyId || null
+    if (!owner || owner === "_NA_") return null
+    const userOrgIds = Array.from(call("mantle.party.PartyServices.get#PartyOrganizationInfo").userOrgIds || [])
+    return userOrgIds.includes(owner) ? null : name + " is not available to book"
+}
+
 ;({
     policyAt,
     approversOf,
@@ -951,6 +967,7 @@ function findBookable(p) {
     guard,
     lockCenters,
     lockResource,
+    assetReachRefusal,
     resourceOf,
     policyText,
     partyName,

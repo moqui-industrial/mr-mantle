@@ -637,7 +637,10 @@ along with this software (see the LICENSE.md file). If not, see
                 policy and availability; any other is assigned at once as before, unless an outage or a blackout covers the event -->
             <if condition="assetId"><script><![CDATA[
                 const policies = ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js')
-                if (policies.policyAt({assetId: assetId})) {
+                // equipment bookable, and of the user's organizations or shared (SEC-BAP-104), as book#Resource holds it
+                const reach = policies.assetReachRefusal(ec.entity.find('mantle.product.asset.Asset').condition('assetId', assetId).disableAuthz().one())
+                if (reach) ec.message.addError(reach)
+                else if (policies.policyAt({assetId: assetId})) {
                     ec.service.sync().name('mantle.work.EventServices.book#Resource').parameters({workEffortId: workEffortId, assetId: assetId}).call()
                 } else {
                     const span = ec.service.sync().name('mantle.work.WorkEffortServices.get#WorkEffortStartEnd').parameters({workEffortId: workEffortId}).call()
@@ -2143,7 +2146,8 @@ along with this software (see the LICENSE.md file). If not, see
             once (WefAssigned, WeaaAssigned); a resource with a policy is requested (WefRequested, WeaaRequested) and waits
             for its approvers. The policy is a placeholder until Maintenance designs it: a resource needs approval when it
             has a current approver, a FacilityParty (a facility) or AssetPartyAssignment (an asset) of role BookingApprover,
-            unless the user is one. A booking that overlaps another of the same resource (not denied, not cancelled) is
+            unless the user is one. Equipment that is not bookable, and an asset whose owner (or whose facility's owner) is an
+            organization the user does not work for, are refused, unless the caller disabled authorization (SEC-BAP-104). A booking that overlaps another of the same resource (not denied, not cancelled) is
             refused, unless allowConflicts, which books it and returns the conflicts. A denied booking asked again is asked
             again; a current one is returned as it is.
 
@@ -2202,6 +2206,9 @@ along with this software (see the LICENSE.md file). If not, see
             const resource = facilityId ? ec.entity.find('mantle.facility.Facility').condition('facilityId', facilityId).forUpdate(true).one()
                     : ec.entity.find('mantle.product.asset.Asset').condition('assetId', assetId).forUpdate(true).one()
             if (resource == null) { ec.message.addError(facilityId ? `Facility ${facilityId} not found` : `Asset ${assetId} not found`); return }
+            // equipment bookable, and of the user's organizations or shared, on every path (SEC-BAP-104)
+            const reach = assetId ? policies.assetReachRefusal(resource) : null
+            if (reach) { ec.message.addError(reach); return }
             const resourceName = (facilityId ? resource.facilityName : resource.assetName) || facilityId || assetId
             const now = ec.user.nowTimestamp
             const nowMs = toMillis(now)
