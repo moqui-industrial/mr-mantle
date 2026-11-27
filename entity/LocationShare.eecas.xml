@@ -12,7 +12,7 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<!-- Guest location shares for a record (mr-moqui plans/Location-Sharing.md §3.7; service/mantle/other/LocationShareServices.xml):
+<!-- Guest location shares for a record (mr-moqui plans/archive/Location-Sharing.md §3.7; service/mantle/other/LocationShareServices.xml):
     a Maintenance work order that completes, closes or is cancelled ends the guest shares made for it, so its customer's link
     shows nothing once the visit is over, and the link's secret is blanked from the mail that carried it once the share has
     ended. Only the status change of a maintenance work order and the end of a share for one run them; they never fail the

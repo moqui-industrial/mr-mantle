@@ -1,4 +1,4 @@
-// Guest location shares for a record (mr-moqui plans/Location-Sharing.md §3.7; LocationShareServices.xml): the person on
+// Guest location shares for a record (mr-moqui plans/archive/Location-Sharing.md §3.7; LocationShareServices.xml): the person on
 // a service visit shares their own location with the record's customer by a guest link, for the visit only. The share
 // is the framework's (org.moqui.maps.LocationServices create#Share with a link audience, made as the caller: only the
 // person's act starts it, §1), the record and its planned end named on it (store#ShareRecord), so that the share never
@@ -150,7 +150,7 @@ function createShare(p) {
         denied("END_AFTER_PLANNED", "The share ends no later than the work order's planned end")
     const root = siteRoot()
     if (!root) denied("NO_SITE_ROOT", "This server's web address is not known: the link cannot be made")
-    // the framework's share, as the caller: only their act starts it (plans/Location-Sharing.md §1); its link is made with
+    // the framework's share, as the caller: only their act starts it (plans/archive/Location-Sharing.md §1); its link is made with
     // it, so the app's own confirmation names "anyone with the guest link" among whom it reaches
     const made = call(
         SHARES + "create#Share",

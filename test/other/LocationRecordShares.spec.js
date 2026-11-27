@@ -1,4 +1,4 @@
-// A technician's location shared with a work order's customer by a guest link (mr-moqui plans/Location-Sharing.md §3.7;
+// A technician's location shared with a work order's customer by a guest link (mr-moqui plans/archive/Location-Sharing.md §3.7;
 // mantle.other.LocationShareServices, LocationRecordShares.js, entity/LocationShare.eecas.xml): only the technician
 // assigned (Assignee) to the open customer repair shares, until no later than its planned end; the share is the
 // framework's, made as the technician with a link audience, names the work order and its end; the customer is mailed only

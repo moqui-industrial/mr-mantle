@@ -12,7 +12,7 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<!-- Guest location shares for a record (mr-moqui plans/Location-Sharing.md §3.7; LocationRecordShares.js): the person on a
+<!-- Guest location shares for a record (mr-moqui plans/archive/Location-Sharing.md §3.7; LocationRecordShares.js): the person on a
     service visit shares their own location with the record's customer by the framework's guest link, until no later than
     the record's planned end (kept on the share, so no extension passes it); the record's completion or cancellation ends
     it (entity/LocationShare.eecas.xml). Two steps, so the customer hears of nothing the technician has not confirmed:
