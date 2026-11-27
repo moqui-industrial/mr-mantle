@@ -27,9 +27,14 @@ feature("lookup by an id finds the record of each kind", {
         const product = call("mantle.GeneralServices.lookup#ById", { lookupId: "DEMO_1_1" })
         const facility = call("mantle.GeneralServices.lookup#ById", { lookupId: "ZIRET_WH" })
         const unknown = call("mantle.GeneralServices.lookup#ById", { lookupId: "NO-SUCH-ID-ANYWHERE" })
-        return { none, party, product, facility, unknown }
+        // SEC-BAP-115: an identification number names no party
+        call("create#mantle.party.PartyIdentification", { partyId: "ORG_ZIZI_RETAIL", partyIdTypeEnumId: "PtidPassport", idValue: "LOOKUP-PASS-98-7654321" })
+        const identification = call("mantle.GeneralServices.lookup#ById", { lookupId: "LOOKUP-PASS-98-7654321" })
+        ec.entity.find("mantle.party.PartyIdentification").condition({ partyId: "ORG_ZIZI_RETAIL", partyIdTypeEnumId: "PtidPassport" }).deleteAll()
+        return { none, party, product, facility, unknown, identification }
     },
-    then({ none, party, product, facility, unknown }) {
+    then({ none, party, product, facility, unknown, identification }) {
+        identification.partyId == null
         none.partyId == null
         party.partyId == "ORG_ZIZI_RETAIL"
         party.party.partyId == "ORG_ZIZI_RETAIL"
