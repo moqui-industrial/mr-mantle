@@ -256,6 +256,7 @@ function bookingsOver(resource, fromMs, thruMs) {
                         start: dayText(fromMs),
                         end: dayText(thruMs),
                         excludeCancelled: true,
+                        maxRangeDays: 0,
                         titleGString: "${workEffort.workEffortName || workEffort.workEffortId}"
                     },
                     keyOf(resource)

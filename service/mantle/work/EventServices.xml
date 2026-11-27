@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>
             Events (WorkEffort, WetEvent by default) for a calendar grid such as the FullCalendar JS library
             (http://fullcalendar.io/) in a range of days (start and end, yyyy-MM-dd in the user's time zone, or time stamps
-            taken as their days; at most 400 days, SEC-BOS-109). An event is in
+            taken as their days; at most maxRangeDays, 400 by default, SEC-BOS-109). An event is in
             when it overlaps the range and is:
             - in a calendar of calendarIdList the user may see (mantle.work.CalendarServices.check#CalendarAccess; one the
               user may not see is left out and named in skippedCalendarIdList; one with free/busy permission only shows its
@@ -65,6 +65,8 @@ along with this software (see the LICENSE.md file). If not, see
             an event that is in only because another asked party owns it or is on it, when the user may not open it.
         </description>
         <in-parameters>
+            <parameter name="maxRangeDays" type="Integer"><description>The widest range in days, 400 when empty; 0 for none, for a
+                booking's own checks over its event's span (a caller-facing read never passes it: Marble's calendars set 400)</description></parameter>
             <parameter name="facilityId"/>
             <parameter name="facilityIdList" type="List"><parameter name="facilityId"/></parameter>
             <parameter name="partyId"/>
@@ -139,9 +141,12 @@ along with this software (see the LICENSE.md file). If not, see
             const startTs = ec.l10n.parseTimestamp(startText + ' 00:00:00.000', pattern)
             const endTs = ec.l10n.parseTimestamp(endText + ' 23:59:59.999', pattern)
             if (startTs == null || endTs == null) { ec.message.addError(`The range ${start} to ${end} is not two days (yyyy-MM-dd)`); return }
-            // every recurring event is expanded over the range, so a range is at most 400 days (SEC-BOS-109): the anonymous
-            // published calendar and the signed-in grids ask a month or a year
-            if (toMillis(endTs) - toMillis(startTs) > 400 * 86400000) { ec.message.addError(ec.l10n.localize('A calendar range covers at most 400 days')); return }
+            // every recurring event is expanded over the range, so a range is at most maxRangeDays (400 by default; SEC-BOS-109):
+            // the anonymous published calendar and the signed-in grids ask a month or a year; a booking's own checks (book#Resource,
+            // check#ResourceBookings, the resource policy, capacity) pass 0, no limit, over the event's own span
+            const rangeDays = maxRangeDays == null || maxRangeDays === '' ? 400 : Number(maxRangeDays)
+            if (rangeDays > 0 && toMillis(endTs) - toMillis(startTs) > rangeDays * 86400000) {
+                ec.message.addError(ec.resource.expand('A calendar range covers at most ${days} days', '', {days: rangeDays})); return }
             const startDate = ec.l10n.parseDate(startText, 'yyyy-MM-dd')
             const endDate = ec.l10n.parseDate(endText, 'yyyy-MM-dd')
             const rangeStartMs = toMillis(startTs)
@@ -2230,7 +2235,7 @@ along with this software (see the LICENSE.md file). If not, see
             const endMs = toMillis(span?.endDate) ?? startMs + 3600000
             const dayText = (millis) => ec.l10n.format(String(millis), 'yyyy-MM-dd')
             const events = ec.service.sync().name('mantle.work.EventServices.get#FullCalendarData').parameters({facilityId: facilityId, assetId: assetId,
-                start: dayText(startMs), end: dayText(endMs), excludeCancelled: true,
+                start: dayText(startMs), end: dayText(endMs), excludeCancelled: true, maxRangeDays: 0,
                 titleGString: '${workEffort.workEffortName || workEffort.workEffortId}'}).call()?.eventList || []
             if (ec.message.hasError()) return
             for (const event of Array.from(events)) {
@@ -2399,7 +2404,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // (impl-maintenance P16 review)
                 if (!checkOnly) ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js').lockResource({facilityId: facilityId, assetId: assetId})
                 const events = ec.service.sync().name('mantle.work.EventServices.get#FullCalendarData').parameters({facilityId: facilityId,
-                    assetId: assetId, start: dayText(startMs), end: dayText(endMs), excludeCancelled: true,
+                    assetId: assetId, start: dayText(startMs), end: dayText(endMs), excludeCancelled: true, maxRangeDays: 0,
                     titleGString: '${workEffort.workEffortName || workEffort.workEffortId}'}).call()?.eventList || []
                 if (ec.message.hasError()) return
                 const conflicts = []

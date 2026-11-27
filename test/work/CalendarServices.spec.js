@@ -638,16 +638,22 @@ feature("reminders: stored per party, sent once each, a snoozed one held back an
 })
 
 // SEC-BOS-109: every recurring event is expanded over the range, so a range is at most 400 days
-feature("get#FullCalendarData answers a year and refuses a range of more than 400 days", {
+feature("get#FullCalendarData answers a year and refuses a range of more than 400 days; a booking over a longer event is checked", {
     when() {
+        // an event of 500 days books Room B: book#Resource reads its own span with no limit
+        const long = event("Long works", {estimatedStartDate: at(60 * 24), estimatedCompletionDate: at(560 * 24), assignToPartyId: party.Ada})
         return {
             year: call(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2027-12-31", partyId: party.Ada}).eventList,
-            wide: errorOf(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2029-01-01", partyId: party.Ada})
+            wide: errorOf(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2029-01-01", partyId: party.Ada}),
+            internal: errorOf(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2029-01-01", partyId: party.Ada, maxRangeDays: 0}),
+            longBooking: errorOf(`${EV}.book#Resource`, {workEffortId: long, facilityId: "CS_ROOM_B"})
         }
     },
-    then({year, wide}) {
+    then({year, wide, internal, longBooking}) {
         year.length > 0
         wide.includes("at most 400 days")
+        internal == null
+        longBooking == null || !longBooking.includes("at most")
     }
 })
 
