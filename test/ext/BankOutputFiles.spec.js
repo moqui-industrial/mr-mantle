@@ -87,6 +87,37 @@ feature("a second NACHA run has nothing to send, and bad configuration is refuse
     },
 })
 
+// SEC-BOS-123: a payee's name with a line break or a letter whose upper case is longer (ß) neither splits nor lengthens a
+// record: NACHA's name is upper case printable ASCII cut to its 22 columns, Positive Pay's printable ASCII
+feature("a payee's name with a line break stays one field of one record in NACHA and Positive Pay", {
+    when() {
+        const oddId = call("mantle.party.PartyServices.create#Person", { firstName: "Pat\nEvil", lastName: "Straße" }).partyId
+        const oddBankId = call("mantle.account.PaymentMethodServices.create#BankAccount", { ownerPartyId: oddId, description: "Odd Checking",
+                bankName: "Payee Bank", routingNumber: "011000015", accountNumber: "444555666", typeEnumId: "BatChecking" }).paymentMethodId
+        call("mantle.account.PaymentServices.create#Payment", { fromPartyId: organizationPartyId, toPartyId: oddId, amount: "12.00",
+                amountUomId: "USD", paymentMethodId: companyBankId, toPaymentMethodId: oddBankId, paymentInstrumentEnumId: "PiAch",
+                statusId: "PmntAuthorized", effectiveDate: effectiveTime - 3600000 })
+        const nacha = call("mantle.ext.account.NachaServices.generate#NachaFile", { paymentMethodId: companyBankId, addNewLine: true,
+                effectiveEntryDate: "2026-12-16" }).fileText.split("\n").filter(l => l.length)
+        const checkBankId = call("mantle.account.PaymentMethodServices.create#BankAccount", { ownerPartyId: organizationPartyId,
+                description: "PosPay odd payee", bankName: "Test Bank", routingNumber: "021000021", accountNumber: "7770009999",
+                typeEnumId: "BatChecking", currencyUomId: "USD", posPayFormatEnumId: "PmftCityBankCnb", posPayBankNumber: "123" }).paymentMethodId
+        call("mantle.account.PaymentServices.create#Payment", { fromPartyId: organizationPartyId, toPartyId: oddId, amount: "30.00", amountUomId: "USD",
+                paymentMethodId: checkBankId, paymentRefNum: "3001", paymentInstrumentEnumId: "PiCompanyCheck", statusId: "PmntDelivered",
+                effectiveDate: effectiveTime - 3600000 })
+        const posPay = call("mantle.ext.account.PositivePayServices.generate#PositivePayFile", { paymentMethodId: checkBankId })
+                .fileText.split("\n").filter(l => l.length)
+        return { nacha, posPay }
+    },
+    then({ nacha, posPay }) {
+        nacha.length == 10
+        nacha.every(l => l.length == 94 && !/[^\x20-\x7E]/.test(l))
+        nacha[2].includes("PAT EVIL STRASSE")
+        posPay.length == 1
+        posPay[0].length == 87 && posPay[0].includes("Pat Evil Straße".normalize("NFKD").replace(/[^\x20-\x7E]/g, " "))
+    },
+})
+
 // SEC-BAP-08: a caller whom an app root's grant lets run the bank file services, with no finance authority, is refused by
 // the services themselves (check#BankAccess); the holder's runs are the features above, with authorization off as a job's
 feature("the bank file services refuse a caller without finance authority in the bank account's organization", {
