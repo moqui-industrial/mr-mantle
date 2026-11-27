@@ -421,7 +421,8 @@ feature("a processor's results wait for a live group, then become a pay run appr
         const calculate = code(run(state.payroll, R + "calculate#Run", {payrollRunId}))
         const firstAsk = run(state.payroll, R + "submit#Run", {payrollRunId})
         // P28 review: Eve's results from a second importer join the run: the request waiting is superseded, and that importer
-        // prepared the run too, so they never approve it
+        // prepared the run too, so they never approve it; the importer who uploads and reconciles the file prepared it though
+        // another user executes it (SEC-BOS-115)
         const eveValues = {
             exchangeKind: "results",
             payrollGroupId: state.ext,
@@ -433,7 +434,7 @@ feature("a processor's results wait for a live group, then become a pay run appr
         }
         const evePreviewed = run(state.importer2, X + "preview#Batch", eveValues)
         run(state.importer2, X + "reconcile#Batch", {payrollExchangeBatchId: evePreviewed.payrollExchangeBatchId})
-        const eveExecuted = run(state.importer2, X + "execute#Batch", {
+        const eveExecuted = run(state.payroll, X + "execute#Batch", {
             payrollExchangeBatchId: evePreviewed.payrollExchangeBatchId
         })
         const firstAskState = one("mantle.humanres.approval.PeopleApproval", {

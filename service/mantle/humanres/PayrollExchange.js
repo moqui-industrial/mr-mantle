@@ -1069,6 +1069,9 @@ function executeResults(batch) {
     obligations().requireProjection(batch.organizationPartyId)
     const period = inputs().periodOf(group, batch.timePeriodId)
     const activeRunKey = group.payrollGroupId + ":" + period.timePeriodId + ":PrkRegular"
+    // who prepared the run's amounts: whoever executes the batch, and its uploader and reconciler, who chose the file and
+    // signed off its totals, so none of them approves the run (SEC-BOS-115)
+    const batchPreparers = [ec.user.userId, batch.createdByUserId, batch.reconciledByUserId].filter(Boolean)
     let payrollRunId = null
     ec.transaction.runRequireNew(null, "Making the pay run of exchange " + batch.payrollExchangeBatchId + " failed", () => {
         const existing = find(RUN, {activeRunKey}).forUpdate(true).one()
@@ -1086,8 +1089,9 @@ function executeResults(batch) {
                 .split(",")
                 .map(id => id.trim())
                 .filter(Boolean)
-            if (ec.user.userId && !preparers.includes(ec.user.userId)) {
-                preparers.push(ec.user.userId)
+            const added = batchPreparers.filter(id => !preparers.includes(id))
+            if (added.length) {
+                preparers.push(...new Set(added))
                 call("update#" + RUN, {payrollRunId, preparedByUserIds: preparers.join(",")})
             }
         } else
@@ -1103,7 +1107,7 @@ function executeResults(batch) {
                 exchangeBatchId: batch.payrollExchangeBatchId,
                 description:
                     "Results of " + (batch.sourceSystem || "the processor") + ", exchange " + batch.payrollExchangeBatchId,
-                preparedByUserIds: ec.user.userId || null,
+                preparedByUserIds: [...new Set(batchPreparers)].join(",") || null,
                 createdByUserId: ec.user.userId || null,
                 createdDate: ec.user.nowTimestamp,
                 calculatedDate: ec.user.nowTimestamp
