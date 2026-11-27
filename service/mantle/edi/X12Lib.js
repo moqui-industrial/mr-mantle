@@ -114,8 +114,25 @@ function el(segment, position) {
     const value = segment?.elements?.[position]
     return value == null ? "" : text(value).trim()
 }
+// A profile document's grammar (SEC-BAP-135): a script file of a component's edi/x12 directory, as the profiles name them; the
+// handler runs the file as script, so a row the generic tools wrote naming another file (a file: or plain path) is refused.
+function grammarOf(location) {
+    const found = text(location).trim()
+    if (!/^component:\/\/[\w.-]+\/service\/([\w-]+\/)*edi\/x12\/[\w.-]+\.js$/.test(found) || found.includes(".."))
+        denied("GRAMMAR_INVALID", "An EDI grammar is a script of a component's edi/x12 directory, not " + found)
+    return found
+}
+// Whether a profile document's mapping service is one (SEC-BAP-135): an apply# or produce# service of a document, which it
+// names by ediDocumentId, never another service the generic tools wrote into the row.
+function mappingValid(name) {
+    const found = text(name).trim()
+    if (!/^[\w.]+\.(apply|produce)#\w+$/.test(found)) return false
+    const definition = ec.service.getServiceDefinition(found)
+    return !!definition && Array.from(definition.inParameterNames || []).includes("ediDocumentId")
+}
 // Parse a transaction set's text (ST to SE) on its grammar: {st, errors}, errors EdiHandler's segment errors.
 function parseSet(documentText, separators, grammarLocation) {
+    grammarLocation = grammarOf(grammarLocation)
     const edi = new EdiHandler(ec)
         .loadEnvelope(grammarLocation)
         .loadBody(grammarLocation)
@@ -221,6 +238,7 @@ function purchaseOrderOf(orderId) {
     segmentsOf,
     el,
     parseSet,
+    mappingValid,
     kids,
     isR,
     isN,

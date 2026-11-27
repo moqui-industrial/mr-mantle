@@ -969,6 +969,8 @@ function applyInbound(p) {
     const c = x.connection(doc.systemMessageRemoteId)
     const pdoc = x.profileDocument(c, doc.transactionSetId, IN)
     if (!pdoc?.mappingServiceName) denied("UNSUPPORTED_DOCUMENT", "The profile has no mapping for " + doc.transactionSetId)
+    if (!x.mappingValid(pdoc.mappingServiceName))
+        denied("MAPPING_INVALID", "The profile's mapping " + pdoc.mappingServiceName + " is not an EDI document's service")
     call(pdoc.mappingServiceName, {ediDocumentId: doc.ediDocumentId})
     return {statusId: one(E.DOCUMENT, {ediDocumentId: doc.ediDocumentId}).statusId}
 }
@@ -1173,6 +1175,8 @@ function produceDocument(p) {
             "The connection's remote needs its interchange IDs and qualifiers and a usage code T or P"
         )
     if (!pdoc?.mappingServiceName) return refuse("UNSUPPORTED_DOCUMENT", "The profile does not send " + doc.transactionSetId)
+    if (!x.mappingValid(pdoc.mappingServiceName))
+        return refuse("MAPPING_INVALID", "The profile's mapping " + pdoc.mappingServiceName + " is not an EDI document's service")
     let body
     try {
         body = probe(pdoc.mappingServiceName, {ediDocumentId: doc.ediDocumentId}).bodyEdiMap
