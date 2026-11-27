@@ -1,5 +1,5 @@
 // Whom a user reaches as people to message or look up (mantle.party.PartyServices.filter#VisibleParties, and
-// mantle.party.CommunicationServices.create#Message for an internal message; plans/Security-Review-Medium.md SEC-BOS-98,
+// mantle.party.CommunicationServices.create#Message for an internal message; plans/archive/Security-Review-Medium.md SEC-BOS-98,
 // SEC-BOS-99, SEC-BOS-100, the owner's decision of 2026-11-19): with authorization on, under the calling app's
 // MANTLE_USER_ORG filter, a party shared by every organization (_NA_) is reached unless it is staff of an internal
 // organization the user may not see; a colleague of the user's own organization is reached, a staff member of another

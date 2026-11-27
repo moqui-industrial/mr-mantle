@@ -1,4 +1,4 @@
-// The forum's staff and member limits (plans/Security-Review-Low.md, the SEC-PFS and SEC-PSF entries named in each feature):
+// The forum's staff and member limits (plans/archive/Security-Review-Low.md, the SEC-PFS and SEC-PSF entries named in each feature):
 // ending a sanction asks a rank above its member's, as setting one does (ForumModeration.js endSanction); a category's own
 // staff read a member's scope, not the member's site-wide state (getMember); a join request is asked once, by a member in
 // good standing (Forum.js joinCategory); an owner's membership is changed only after a recent sign-in (setMembership,

@@ -1,4 +1,4 @@
-// A site export holds only the topics of the categories its starter moderates (plans/Security-Review-Medium.md SEC-PFS-84;
+// A site export holds only the topics of the categories its starter moderates (plans/archive/Security-Review-Medium.md SEC-PFS-84;
 // ForumOperations.js exportTopic): a site owner with no role in a private Smithy group reads and moderates nothing in the
 // group's category, so its topics are not exported, while a public category's are; the moderation report leaves out
 // that category's actions the same way. Spec-local site, accounts, group and topics (rows, as a post leaves them), the

@@ -1,5 +1,5 @@
 // Whom a user reaches as people to message, call, mention or look up (mantle.party.PartyServices filter#VisibleParties;
-// plans/Security-Review-Medium.md SEC-BOS-98, SEC-BOS-99, SEC-BOS-100, the owner's decisions of 2026-11-19).
+// plans/archive/Security-Review-Medium.md SEC-BOS-98, SEC-BOS-99, SEC-BOS-100, the owner's decisions of 2026-11-19).
 // visibleParties(partyIdList, includeDisabled): of the parties, those read with authorization on under the caller's own
 // entity filters (not another user's personal contact, not disabled unless includeDisabled), and a person working for an
 // internal organization (or a unit whose PrtOrgRollup root is one) only when one of those organizations is one the user may

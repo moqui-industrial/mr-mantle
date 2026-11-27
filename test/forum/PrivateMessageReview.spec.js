@@ -1,4 +1,4 @@
-// A private message reaches a site's staff only through a participant's report (plans/Security-Review-Medium.md
+// A private message reaches a site's staff only through a participant's report (plans/archive/Security-Review-Medium.md
 // SEC-PFS-83; mr-pass plan/design-forum.md: staff do not browse private messages): a site rule that would flag or hold a
 // post files a review item for a topic of a category, never for a private conversation's post or its edit; a
 // participant's report still files one; a reply the mail gateway held as spam files none either: it is shown held to its
