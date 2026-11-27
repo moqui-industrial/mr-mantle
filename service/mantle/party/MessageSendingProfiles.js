@@ -114,6 +114,44 @@ function signedDomains() {
         )
     )
 }
+// The organizations a mail domain is another's of (SEC-BAP-100): those whose sending profiles send from it, or own a hosted or
+// shared mail account at it, but organizationPartyId. A domain that is any of them is not this organization's to send as;
+// one no organization uses yet is the first profile's. Empty when the domain is the organization's or no one's.
+function domainOfOthers(domain, organizationPartyId, sendingProfileId) {
+    if (!domain) return []
+    const factory = ec.entity.conditionFactory
+    const owners = new Set()
+    for (const row of Array.from(
+        find("mantle.party.MessageSendingProfile")
+            .condition(factory.makeCondition("fromAddress", "like", "%@" + domain).ignoreCase())
+            .selectField("sendingProfileId")
+            .selectField("organizationPartyId")
+            .list()
+    ))
+        if (row.sendingProfileId !== sendingProfileId && row.organizationPartyId) owners.add(row.organizationPartyId)
+    for (const row of Array.from(
+        find("moqui.basic.email.EmailAccount")
+            .condition(factory.makeCondition("emailAddress", "like", "%@" + domain).ignoreCase())
+            .condition("accountKindEnumId", "in", ["EakHosted", "EakShared"])
+            .condition("statusId", "not-equals", "EasRemoved")
+            .selectField("ownerPartyId")
+            .list()
+    ))
+        if (row.ownerPartyId) owners.add(row.ownerPartyId)
+    return owners.has(organizationPartyId) ? [] : Array.from(owners)
+}
+// The organizations a public site's enabled app mounts are bound to (an organization, or a store's organization): a site
+// bound to others only is not this organization's unsubscribe page (SEC-BAP-100). Empty when it is bound to it, or to none.
+function siteOfOthers(siteId, organizationPartyId) {
+    if (!siteId) return []
+    const owners = new Set()
+    for (const mount of Array.from(find("mantle.public.PublicSiteApp").condition({siteId, enabled: "Y"}).list())) {
+        if (!mount.targetId) continue
+        const store = one("mantle.product.store.ProductStore", {productStoreId: mount.targetId})
+        owners.add(store ? store.organizationPartyId : mount.targetId)
+    }
+    return owners.size === 0 || owners.has(organizationPartyId) ? [] : Array.from(owners)
+}
 // The hosted or shared mail account that receives bounces@ a domain (its address, or one of its identities'), not removed.
 function bounceAccount(domain) {
     if (!domain) return null
@@ -190,7 +228,10 @@ function readinessOf(profile) {
     if (!emailPattern.test(from)) add("sender", "Sender", "blocked", "Give the sender's address", fixRoutes.profile)
     else {
         const domain = from.split("@")[1]
-        if (signedDomains().includes(domain))
+        // a domain another organization sends from or receives at is not this one's (SEC-BAP-100), whatever signs it
+        if (domainOfOthers(domain, profile.organizationPartyId, profile.sendingProfileId).length)
+            add("sender", "Sender", "blocked", "Its domain " + domain + " is another organization's", fixRoutes.profile)
+        else if (signedDomains().includes(domain))
             add("sender", "Sender", "ready", "Its domain " + domain + " is signed by this server")
         else if (relayTested) add("sender", "Sender", "ready", "Sent through a relay that passed its test")
         else
@@ -227,6 +268,14 @@ function readinessOf(profile) {
             mounted = false
         }
         if (!site) add("unsubscribe", "Unsubscribe page", "blocked", "The site is not there", fixRoutes.profile)
+        else if (siteOfOthers(profile.siteId, profile.organizationPartyId).length)
+            add(
+                "unsubscribe",
+                "Unsubscribe page",
+                "blocked",
+                "The site " + (site.name || site.siteId) + " is another organization's",
+                fixRoutes.profile
+            )
         else if (!mounted)
             add(
                 "unsubscribe",
@@ -422,6 +471,8 @@ function storeProfile(p) {
         denied("RELAY_INVALID", "Choose a relay Admin approved")
     const fromAddress = text(value("fromAddress")).toLowerCase()
     if (!emailPattern.test(fromAddress)) denied("ADDRESS_INVALID", "Give the sender's address")
+    if (domainOfOthers(fromAddress.split("@")[1], organizationPartyId, existing?.sendingProfileId).length)
+        denied("DOMAIN_OF_ANOTHER", "The sender's domain " + fromAddress.split("@")[1] + " is another organization's")
     const replyToAddress = text(value("replyToAddress")).toLowerCase() || null
     if (replyToAddress && !emailPattern.test(replyToAddress)) denied("ADDRESS_INVALID", "The reply-to is one address")
     const fromName =
@@ -446,6 +497,8 @@ function storeProfile(p) {
     if (!domainPattern.test(bounceDomain)) denied("DOMAIN_INVALID", "Give the bounce domain, as bounce.example.com")
     const siteId = text(value("siteId")) || null
     if (siteId && !one("mantle.public.PublicSite", {siteId})) denied("VALUE_INVALID", "Unknown site " + siteId)
+    if (siteOfOthers(siteId, organizationPartyId).length)
+        denied("SITE_OF_ANOTHER", "The site " + siteId + " is another organization's")
     const fromDate = value("fromDate") || ec.user.nowTimestamp
     const thruDate = value("thruDate") || null
     if (thruDate && ms(thruDate) <= ms(fromDate)) denied("DATE_INVALID", "A profile ends after it begins")
