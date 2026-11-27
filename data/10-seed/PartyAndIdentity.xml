@@ -276,7 +276,7 @@
     <!-- An invitation is read under an app's organization filters by its organization (the Users area's MANTLE_USER_ORG for
         the identity operator, MANTLE_ACTIVE_ORG for the administrator), beside the services' own scope check -->
     <moqui.security.EntityFilter entityFilterId="MANTLE_USER_ORG_UINV" entityFilterSetId="MANTLE_USER_ORG"
-            entityName="mantle.party.UserInvitation" filterMap="({organizationPartyId: filterOrgIds})"/>
+            entityName="mantle.party.UserInvitation" filterMap="({organizationPartyId: (filterOrgIds || [])})"/>
     <moqui.security.EntityFilter entityFilterId="MANTLE_ACTIVE_ORG_UINV" entityFilterSetId="MANTLE_ACTIVE_ORG"
             entityName="mantle.party.UserInvitation" filterMap="({organizationPartyId: activeOrgId})"/>
 
@@ -339,7 +339,7 @@
         MANTLE_USER_ORG for the identity operator, MANTLE_ACTIVE_ORG for the administrator), beside the services' own checks; its
         steps are read only through it -->
     <moqui.security.EntityFilter entityFilterId="MANTLE_USER_ORG_ULOP" entityFilterSetId="MANTLE_USER_ORG"
-            entityName="mantle.party.UserLifecycleOperation" filterMap="({organizationPartyId: filterOrgIds})"/>
+            entityName="mantle.party.UserLifecycleOperation" filterMap="({organizationPartyId: (filterOrgIds || [])})"/>
     <moqui.security.EntityFilter entityFilterId="MANTLE_ACTIVE_ORG_ULOP" entityFilterSetId="MANTLE_ACTIVE_ORG"
             entityName="mantle.party.UserLifecycleOperation" filterMap="({organizationPartyId: activeOrgId})"/>
 

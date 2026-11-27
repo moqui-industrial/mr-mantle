@@ -552,6 +552,15 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!partyId">
                 <log level="warn" message="Cannot setup#UserOrganizationInfo, no user with partyId logged in"/>
                 <return/>
+                <!-- no organization, said so: an unset filterOrgIds would make each MANTLE_USER_ORG map's equality an IS NULL and
+                    show the rows with no organization (SEC-DAT-88); an empty list matches none -->
+                <script>
+                    ec.user.context.userOrgIds = []
+                    ec.user.context.filterOrgIds = []
+                    ec.user.context.activeOrgId = null
+                </script>
+                <set field="userOrgIds" from="[]"/>
+                <set field="filterOrgIds" from="[]"/>
             </if>
 
             <!-- get activeOrgId, userOrgIds, filterOrgIds -->

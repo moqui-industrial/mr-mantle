@@ -6,22 +6,22 @@
     <!-- User organization entity filters; see mantle.party.PartyServices.setup#UserOrganizationInfo -->
 
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_1" entityName="mantle.account.invoice.Invoice" joinOr="Y"
-            filterMap="({fromPartyId: filterOrgIds, toPartyId: filterOrgIds})"/>
+            filterMap="({fromPartyId: (filterOrgIds || []), toPartyId: (filterOrgIds || [])})"/>
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_2" entityName="mantle.account.payment.Payment" joinOr="Y"
-            filterMap="({fromPartyId: filterOrgIds, toPartyId: filterOrgIds})"/>
+            filterMap="({fromPartyId: (filterOrgIds || []), toPartyId: (filterOrgIds || [])})"/>
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_3" entityName="mantle.order.OrderPart" joinOr="Y"
-            filterMap="({vendorPartyId: filterOrgIds, customerPartyId: filterOrgIds})"/>
+            filterMap="({vendorPartyId: (filterOrgIds || []), customerPartyId: (filterOrgIds || [])})"/>
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_3R" entityName="mantle.order.return.ReturnHeader" joinOr="Y"
-            filterMap="({vendorPartyId: filterOrgIds, customerPartyId: filterOrgIds})"/>
+            filterMap="({vendorPartyId: (filterOrgIds || []), customerPartyId: (filterOrgIds || [])})"/>
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_4" entityName="mantle.shipment.Shipment" joinOr="Y"
-            filterMap="({fromPartyId: filterOrgIds, toPartyId: filterOrgIds})"/>
-    <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_5" entityName="mantle.account.financial.FinancialAccount" filterMap="({organizationPartyId: filterOrgIds})"/>
-    <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_6" entityName="mantle.ledger.transaction.AcctgTrans" filterMap="({organizationPartyId: filterOrgIds})"/>
-    <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_7" entityName="mantle.party.time.TimePeriod" filterMap="({partyId: filterOrgIds})"/>
+            filterMap="({fromPartyId: (filterOrgIds || []), toPartyId: (filterOrgIds || [])})"/>
+    <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_5" entityName="mantle.account.financial.FinancialAccount" filterMap="({organizationPartyId: (filterOrgIds || [])})"/>
+    <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_6" entityName="mantle.ledger.transaction.AcctgTrans" filterMap="({organizationPartyId: (filterOrgIds || [])})"/>
+    <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_7" entityName="mantle.party.time.TimePeriod" filterMap="({partyId: (filterOrgIds || [])})"/>
     <!-- PartyRelationship: toPartyId in filterOrgIds OR relationshipTypeEnumId != PrtEmployee -->
     <!-- don't include by default, adds overhead and only applicable to very specific HR or payroll use cases:
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_8" entityName="mantle.party.PartyRelationship"
-            filterMap="({_join: 'or', _list: [{toPartyId: filterOrgIds, _comp: 'in'}, {relationshipTypeEnumId: (filterOrgIds ? 'PrtEmployee' : null), _comp: '!='}]})"/>
+            filterMap="({_join: 'or', _list: [{toPartyId: filterOrgIds || [], _comp: 'in'}, {relationshipTypeEnumId: 'PrtEmployee', _comp: '!='}]})"/>
     -->
     <!-- Party filter allows _NA_ for user org, needed for general/shared parties like carriers, etc -->
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_9" entityName="mantle.party.Party" joinOr="Y"
@@ -36,8 +36,8 @@
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_B" entityName="mantle.product.category.ProductCategory" filterMap="({ownerPartyId: ['_NA_'].concat(filterOrgIds || [])})"/>
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_C" entityName="mantle.product.feature.ProductFeature" filterMap="({ownerPartyId: ['_NA_'].concat(filterOrgIds || [])})"/>
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_FG" entityName="mantle.product.feature.ProductFeatureGroup" filterMap="({_join:'or',_list:[{ownerPartyId:null},{ownerPartyId:['_NA_'].concat(filterOrgIds || [])}]})"/>
-    <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_D" entityName="mantle.product.store.ProductStore" filterMap="({organizationPartyId: filterOrgIds})"/>
-    <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_F" entityName="mantle.facility.Facility" filterMap="({ownerPartyId: filterOrgIds})"/>
+    <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_D" entityName="mantle.product.store.ProductStore" filterMap="({organizationPartyId: (filterOrgIds || [])})"/>
+    <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_F" entityName="mantle.facility.Facility" filterMap="({ownerPartyId: (filterOrgIds || [])})"/>
     <!-- Records of no organization of their own, through views joining them back to their internal organizations
         (PartyViewEntities; mr-boss impl-admin §4): a user account by the organizations its party works for, and the internal
         organizations themselves (Mantle's identity scope, mantle.party.IdentityServices) -->
@@ -49,11 +49,11 @@
         internal-organization party row's copy), a forecast and an agreement by theirs; each Sales service checks the
         organization again (mantle/sales/SalesAccess.js) -->
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_SOPP" entityName="mantle.sales.opportunity.SalesOpportunity"
-            filterMap="({organizationPartyId: filterOrgIds})"/>
+            filterMap="({organizationPartyId: (filterOrgIds || [])})"/>
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_SFC" entityName="mantle.sales.forecast.SalesForecast"
-            filterMap="({organizationPartyId: filterOrgIds})"/>
+            filterMap="({organizationPartyId: (filterOrgIds || [])})"/>
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_AGR" entityName="mantle.party.agreement.Agreement"
-            filterMap="({organizationPartyId: filterOrgIds})"/>
+            filterMap="({organizationPartyId: (filterOrgIds || [])})"/>
 
     <!-- Marketing (impl-marketing P1, X12; design-marketing §1.1): a campaign by its organization
         (MarketingCampaign.organizationPartyId, the effective MarketingOrganization party row's copy), a segment and a list by
@@ -63,9 +63,9 @@
         visibility rules (ContactListServices get#ContactListAccess). Each Marketing service checks the organization again
         (mantle/marketing/MarketingAccess.js). -->
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_MCMP" entityName="mantle.marketing.campaign.MarketingCampaign"
-            filterMap="({organizationPartyId: filterOrgIds})"/>
+            filterMap="({organizationPartyId: (filterOrgIds || [])})"/>
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_MSEG" entityName="mantle.marketing.segment.MarketSegment"
-            filterMap="({ownerPartyId: filterOrgIds})"/>
+            filterMap="({ownerPartyId: (filterOrgIds || [])})"/>
     <moqui.security.EntityFilter entityFilterSetId="MANTLE_USER_ORG" entityFilterId="MANTLE_USER_ORG_CLST" entityName="mantle.marketing.contact.ContactList"
             filterMap="({_join: 'or', _list: [{contactListTypeEnumId: 'MAILBOX'}, {ownerPartyId: filterOrgIds || [], _comp: 'in'}]})"/>
 
