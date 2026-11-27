@@ -24,7 +24,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="fileDate" type="Timestamp" default="ec.user.nowTimestamp"><description>The date/time used
                 in various fields and set on PaymentMethodFile.fileDate</description></parameter>
             <parameter name="formatServiceName"><description>Extension mechanism, generally empty and determined based
-                on BankAccount.posPayFormatEnumId</description></parameter>
+                on BankAccount.posPayFormatEnumId; a generate# service with generate#PositivePayInterface's parameters
+                (FORMAT_INVALID for any other)</description></parameter>
             <parameter name="paymentIdList" type="List"><description>Only these payments (a payment run's), when
                 given</description></parameter>
         </in-parameters>
@@ -49,6 +50,15 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!bankAccount"><return error="true" message="Payment method ${paymentMethodId} is not a bank account"/></if>
             <if condition="!bankAccount.posPayFormatEnumId">
                 <return error="true" message="No Pos. Pay File Format set for bank account ${paymentMethodId}"/></if>
+            <!-- a format service a caller names is a generate# service with every parameter of generate#PositivePayInterface (as
+                one that implements it has), never another service run with this call's context (SEC-BOS-125) -->
+            <if condition="formatServiceName">
+                <set field="formatDefinition" from="ec.service.getServiceDefinition(String(formatServiceName))"/>
+                <set field="formatInterfaceNames" from="Array.from(ec.service.getServiceDefinition('mantle.ext.account.PositivePayServices.generate#PositivePayInterface').inParameterNames)"/>
+                <if condition="!formatDefinition || formatDefinition.verb != 'generate' ||
+                        !formatInterfaceNames.every(name => Array.from(formatDefinition.inParameterNames).includes(name))">
+                    <return error="true" message="FORMAT_INVALID: ${formatServiceName} is not a Positive Pay format service"/></if>
+            </if>
 
             <entity-find entity-name="mantle.account.payment.Payment" list="originalPaymentList" for-update="true">
                 <econdition field-name="fromPartyId" from="paymentMethod.ownerPartyId"/>

@@ -232,13 +232,26 @@ feature("generate Positive Pay files #format", {
     },
 })
 
-feature("Positive Pay is refused without a format", {
+feature("Positive Pay is refused without a format, and with a format service that is not one", {
     when() {
         const noFormat = errorOf("mantle.ext.account.PositivePayServices.generate#PositivePayFile", { paymentMethodId: companyBankId })
-        return { noFormat }
+        // SEC-BOS-125: a named format service implements generate#PositivePayInterface; another service is not run
+        const bankId = call("mantle.account.PaymentMethodServices.create#BankAccount", { ownerPartyId: organizationPartyId,
+                description: "PosPay named format", bankName: "Test Bank", routingNumber: "021000021", accountNumber: "7770005555",
+                typeEnumId: "BatChecking", currencyUomId: "USD", posPayFormatEnumId: "PmftCityBankCnb", posPayBankNumber: "123" }).paymentMethodId
+        call("mantle.account.PaymentServices.create#Payment", { fromPartyId: organizationPartyId, toPartyId: payeeId, amount: "40.00", amountUomId: "USD",
+                paymentMethodId: bankId, paymentRefNum: "4001", paymentInstrumentEnumId: "PiCompanyCheck", statusId: "PmntDelivered",
+                effectiveDate: effectiveTime - 3600000 })
+        const notFormat = errorOf("mantle.ext.account.PositivePayServices.generate#PositivePayFile", { paymentMethodId: bankId,
+                formatServiceName: "mantle.party.PartyServices.create#Person" })
+        const named = call("mantle.ext.account.PositivePayServices.generate#PositivePayFile", { paymentMethodId: bankId,
+                formatServiceName: "mantle.ext.account.PositivePayServices.generate#PmftCityBankCnb" })
+        return { noFormat, notFormat, named }
     },
-    then({ noFormat }) {
+    then({ noFormat, notFormat, named }) {
         noFormat.includes("No Pos. Pay File Format")
+        notFormat.includes("FORMAT_INVALID")
+        named.paymentCount == 1
     },
 })
 
