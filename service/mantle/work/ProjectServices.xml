@@ -1331,7 +1331,9 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="activeOrgId" from="ec.user.context?.activeOrgId"/>
                     <set field="filterOrgIds" from="ec.user.context?.filterOrgIds"/>
                     <set field="findFilters" from="ec.artifactExecution.getFindFiltersForUser('mantle.party.Party')"/>
-                    <if condition="findFilters"><set field="entityFilterSetId" from="findFilters[0].entityFilterSetId"/></if>
+                    <!-- every filter set of the user's authorization, in no set order: the organization set need not be the first
+                        (MANTLE_PRIVATE_CONTACT and others beside it), so it is looked for among them all (SEC-DAT-86) -->
+                    <set field="entityFilterSetIds" from="Array.from(findFilters || []).map(filter =&gt; filter.entityFilterSetId)"/>
                     <!-- <log level="warn" message="Doing party search with activeOrgId ${activeOrgId} filterOrgIds ${filterOrgIds} entityFilterSetId ${entityFilterSetId}"/> -->
 
                     <script><![CDATA[
@@ -1342,8 +1344,8 @@ along with this software (see the LICENSE.md file). If not, see
 
                         // the org limit is a trusted filter, so it does not change scores and the user query cannot widen it
                         let ownerPartyIds = null
-                        if ('MANTLE_USER_ORG' === entityFilterSetId) ownerPartyIds = (filterOrgIds || []).concat(['_NA_'])
-                        else if ('MANTLE_ACTIVE_ORG' === entityFilterSetId && activeOrgId) ownerPartyIds = [activeOrgId, '_NA_']
+                        if (entityFilterSetIds.includes('MANTLE_USER_ORG')) ownerPartyIds = (filterOrgIds || []).concat(['_NA_'])
+                        else if (entityFilterSetIds.includes('MANTLE_ACTIVE_ORG') && activeOrgId) ownerPartyIds = [activeOrgId, '_NA_']
                         // a personal contact (privateOwnerUserId) only for its owner, with or without an org filter
                         const notPrivate = {field: {name: 'privateOwnerUserId', op: 'exists', negate: true}}
                         const privateFilter = ec.user.userId ? {bool: {any: [notPrivate,

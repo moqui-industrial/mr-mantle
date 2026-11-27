@@ -398,6 +398,32 @@ feature("as the IronStone apps' authz has it, the private contact set hides a pe
     },
 })
 
+// SEC-DAT-86: an authorization's organization set need not be its first; search#Party looks for it among every set, so the
+// private contact set read first does not lift the organization limit
+feature("search#Party keeps to the user's organizations when the organization set is not the authorization's first", {
+    when() {
+        ec.entity.find("moqui.security.ArtifactAuthzFilter").condition("artifactAuthzId", "CBK_FILTERED").deleteAll()
+        for (const entityFilterSetId of ["MANTLE_PRIVATE_CONTACT", "MANTLE_USER_ORG"])
+            call("create#moqui.security.ArtifactAuthzFilter", { artifactAuthzId: "CBK_FILTERED", entityFilterSetId })
+        const ownId = call("mantle.party.PartyServices.create#Organization", { organizationName: "Twosets Retail" }).partyId
+        const otherId = call("mantle.party.PartyServices.create#Organization", { organizationName: "Twosets Services" }).partyId
+        call("update#mantle.party.Party", { partyId: ownId, ownerPartyId: "ORG_ZIZI_RETAIL" })
+        call("update#mantle.party.Party", { partyId: otherId, ownerPartyId: "ORG_ZIZI_SERVICES" })
+        indexParty(ownId)
+        indexParty(otherId)
+        const found = filteredAs("cbk.avery", () => ({ search: searchParty("Twosets") }))
+        // back to the IronStone apps' sets the next features use
+        ec.entity.find("moqui.security.ArtifactAuthzFilter").condition("artifactAuthzId", "CBK_FILTERED").deleteAll()
+        for (const entityFilterSetId of ["MANTLE_ACTIVE_ORG", "MANTLE_PRIVATE_CONTACT"])
+            call("create#moqui.security.ArtifactAuthzFilter", { artifactAuthzId: "CBK_FILTERED", entityFilterSetId })
+        return { found, ownId, otherId }
+    },
+    then({ found, ownId, otherId }) {
+        found.search.includes(ownId)
+        !found.search.includes(otherId)
+    },
+})
+
 feature("the duplicate scan leaves out personal contacts", {
     when() {
         at(6)
