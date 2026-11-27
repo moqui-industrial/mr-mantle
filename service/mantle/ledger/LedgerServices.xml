@@ -60,6 +60,10 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <set field="partyAcctgPreference" from="sourcePartyAcctgPreference.cloneValue()"/>
             <entity-set value-field="partyAcctgPreference" include="nonpk" set-if-empty="false"/>
+            <!-- self approval, the source's or the request's, is on only for a holder of ACCOUNTING_SELF_APPROVAL (SEC-BOS-06), as
+                store#Preferences turns it on -->
+            <if condition="!ec.user.hasPermission('ACCOUNTING_SELF_APPROVAL')">
+                <set field="partyAcctgPreference.allowAccountingSelfApproval" value="N"/></if>
             <service-call name="create#mantle.ledger.config.PartyAcctgPreference" in-map="Object.assign({}, partyAcctgPreference, {organizationPartyId:organizationPartyId, errorGlJournalId:errorGlJournalId})"/>
             <!-- copy mantle.ledger.account.GlAccountOrganization -->
             <entity-find entity-name="mantle.ledger.account.GlAccountOrganization" list="recordList">

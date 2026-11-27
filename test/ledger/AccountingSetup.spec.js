@@ -521,3 +521,30 @@ feature("turning self approval on takes ACCOUNTING_SELF_APPROVAL; keeping it on 
         turnedOff == "N"
     }
 })
+
+// SEC-BOS-06 follow-up: an organization's accounting configuration made from a source with self approval on starts with it
+// off unless its maker holds ACCOUNTING_SELF_APPROVAL
+feature("a configuration cloned from a source with self approval on starts with it off for a finance administrator", {
+    when() {
+        login("john.doe")
+        const source = prefix + "_SELFSRC",
+            made = prefix + "_SELFNEW"
+        party(source, "OrgInternal")
+        party(made, "OrgInternal")
+        svc("mantle.ledger.LedgerServices.init#PartyAccountingConfiguration", {organizationPartyId: source, sourcePartyId: "DefaultSettings",
+            baseCurrencyUomId: "USD"})
+        svc("update#mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: source, allowAccountingSelfApproval: "Y"})
+        login(users.admin)
+        ec.service.sync().name("mantle.ledger.LedgerServices.init#PartyAccountingConfiguration")
+            .parameters({organizationPartyId: made, sourcePartyId: source, baseCurrencyUomId: "USD", allowAccountingSelfApproval: "Y"}).call()
+        login("john.doe")
+        return {
+            source: one("mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: source}).allowAccountingSelfApproval,
+            made: one("mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: made})?.allowAccountingSelfApproval
+        }
+    },
+    then({source, made}) {
+        source == "Y"
+        made == "N"
+    }
+})
