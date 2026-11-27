@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>
             Events (WorkEffort, WetEvent by default) for a calendar grid such as the FullCalendar JS library
             (http://fullcalendar.io/) in a range of days (start and end, yyyy-MM-dd in the user's time zone, or time stamps
-            taken as their days). An event is in
+            taken as their days; at most 400 days, SEC-BOS-109). An event is in
             when it overlaps the range and is:
             - in a calendar of calendarIdList the user may see (mantle.work.CalendarServices.check#CalendarAccess; one the
               user may not see is left out and named in skippedCalendarIdList; one with free/busy permission only shows its
@@ -139,6 +139,9 @@ along with this software (see the LICENSE.md file). If not, see
             const startTs = ec.l10n.parseTimestamp(startText + ' 00:00:00.000', pattern)
             const endTs = ec.l10n.parseTimestamp(endText + ' 23:59:59.999', pattern)
             if (startTs == null || endTs == null) { ec.message.addError(`The range ${start} to ${end} is not two days (yyyy-MM-dd)`); return }
+            // every recurring event is expanded over the range, so a range is at most 400 days (SEC-BOS-109): the anonymous
+            // published calendar and the signed-in grids ask a month or a year
+            if (toMillis(endTs) - toMillis(startTs) > 400 * 86400000) { ec.message.addError(ec.l10n.localize('A calendar range covers at most 400 days')); return }
             const startDate = ec.l10n.parseDate(startText, 'yyyy-MM-dd')
             const endDate = ec.l10n.parseDate(endText, 'yyyy-MM-dd')
             const rangeStartMs = toMillis(startTs)

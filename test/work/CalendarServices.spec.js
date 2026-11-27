@@ -637,6 +637,20 @@ feature("reminders: stored per party, sent once each, a snoozed one held back an
     },
 })
 
+// SEC-BOS-109: every recurring event is expanded over the range, so a range is at most 400 days
+feature("get#FullCalendarData answers a year and refuses a range of more than 400 days", {
+    when() {
+        return {
+            year: call(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2027-12-31", partyId: party.Ada}).eventList,
+            wide: errorOf(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2029-01-01", partyId: party.Ada})
+        }
+    },
+    then({year, wide}) {
+        year.length > 0
+        wide.includes("at most 400 days")
+    }
+})
+
 feature("a recurring event: without the ICalendar tool the series' first instance only, and a changed instance replaces it", {
     when() {
         setTime(13)
