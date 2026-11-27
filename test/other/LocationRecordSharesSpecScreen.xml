@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The LocationRecordShares spec's screen (test only, never mounted): its call transition runs one of
+    mantle.other.LocationShareServices' record share services in a request, as the signed-in user, since the guest link
+    starts with this server's web root, which only a request knows; and answers the result or the refusal as JSON.
+    Authorization is not what the spec tests (the services' own checks are), so the call runs with it off, in a transaction
+    of its own. -->
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-xml-screen.xsd"
+        require-authentication="false" standalone="true" default-menu-title="Location record shares spec">
+    <transition name="call">
+        <actions><script><![CDATA[
+            const given = name => (typeof ec.context[name] === 'undefined' || ec.context[name] === '' ? null : ec.context[name])
+            const services = {create: 'create#RecordGuestShare', send: 'send#RecordGuestLink'}
+            let out = {}
+            let error = ''
+            ec.message.pushErrors()
+            try {
+                const thru = Number(given('thruDate'))
+                out = ec.service.sync().name('mantle.other.LocationShareServices.' + services[given('op')])
+                    .parameters({recordType: given('recordType'), recordId: given('recordId'), thruDate: thru ? new Date(thru) : null,
+                        purposeText: given('purposeText'), shareId: given('shareId'), linkSecret: given('linkSecret')})
+                    .disableAuthz().requireNewTransaction(true).call() || {}
+                if (ec.message.hasError()) error = ec.message.getErrorsString()
+            } catch (e) {
+                error = String(e.message || e)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+            if (out.thruDate) out.thruDate = ec.user.timestampMillis(out.thruDate)
+            ec.web.sendJsonResponse({out, error})
+        ]]></script></actions>
+        <default-response type="none"/>
+    </transition>
+    <widgets>
+        <label text="Location record shares spec"/>
+    </widgets>
+</screen>

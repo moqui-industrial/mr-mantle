@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Guest location shares for a record (mr-moqui plans/archive/Location-Sharing.md §3.7; service/mantle/other/LocationShareServices.xml):
+    a Maintenance work order that completes, closes or is cancelled ends the guest shares made for it, so its customer's link
+    shows nothing once the visit is over, and the link's secret is blanked from the mail that carried it once the share has
+    ended. Only the status change of a maintenance work order and the end of a share for one run them; they never fail the
+    change (run-on-error false, the stop each share's own transaction, the blank its own, their errors logged) and check
+    nothing, as they only end shares named for this record and blank their own mail. -->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
+    <eeca id="LocationShareWorkOrderEnded" entity="mantle.work.effort.WorkEffort" on-update="true" run-on-error="false"
+            get-entire-entity="true" get-original-value="true">
+        <condition><expression>originalValue != null &amp;&amp; originalValue.statusId != statusId &amp;&amp; purposeEnumId == 'WepMaintenance'
+            &amp;&amp; ['WeComplete', 'WeClosed', 'WeCancelled'].includes(statusId)</expression></condition>
+        <actions><service-call name="mantle.other.LocationShareServices.end#RecordGuestShares" disable-authz="true"
+                in-map="{workEffortId:workEffortId}"/></actions>
+    </eeca>
+    <!-- A work order's guest share ended, however (its end by time, its owner's stop, the work order's end above, its device's
+        revoke: the framework's endShare sets endedDate once): the link's secret is blanked from the mail that carried it, whose
+        EmailMessage row stays for the mail queue (the user's decision of November 27, 2026). Only the setting of endedDate on a
+        share for a work order runs it, in a transaction of its own. -->
+    <eeca id="LocationShareGuestEnded" entity="moqui.maps.LocationShare" on-update="true" run-on-error="false"
+            get-entire-entity="true" get-original-value="true">
+        <condition><expression>originalValue != null &amp;&amp; originalValue.endedDate == null &amp;&amp; endedDate != null
+            &amp;&amp; recordAdapterKey == 'maintenanceWorkOrder'</expression></condition>
+        <actions><service-call name="mantle.other.LocationShareServices.blank#RecordGuestLinkMail" disable-authz="true"
+                in-map="{shareId:shareId}"/></actions>
+    </eeca>
+    <!-- A work order's guest share whose link alone its owner took out (revoke#Audience: revokedDate set on its LsaLink entry):
+        that link's secret is blanked from its mail as at the share's end. The share's record is read only for an LsaLink entry
+        newly revoked. -->
+    <eeca id="LocationShareGuestLinkRevoked" entity="moqui.maps.LocationShareAudience" on-update="true" run-on-error="false"
+            get-entire-entity="true" get-original-value="true">
+        <condition><expression>audienceTypeEnumId == 'LsaLink' &amp;&amp; originalValue != null &amp;&amp; originalValue.revokedDate == null
+            &amp;&amp; revokedDate != null &amp;&amp; ec.entity.find('moqui.maps.LocationShare').condition('shareId', shareId)
+                .condition('recordAdapterKey', 'maintenanceWorkOrder').disableAuthz().count() > 0</expression></condition>
+        <actions><service-call name="mantle.other.LocationShareServices.blank#RecordGuestLinkMail" disable-authz="true"
+                in-map="{shareId:shareId, audienceSeqId:audienceSeqId}"/></actions>
+    </eeca>
+</eecas>
