@@ -291,7 +291,7 @@ function validate(p, lock = false) {
         }
         const domain = ec.resource.script("component://mr-mantle/service/mantle/product/ProductAccess.js")
         const orgs =
-            domain.systemAdmin() || domain.has("ACCOUNTING_ADMIN") || portalPayment(tx)
+            domain.systemAdmin() || domain.has("ACCOUNTING_ALL_ORGANIZATIONS") || portalPayment(tx)
                 ? null
                 : lib.call("mantle.party.PartyServices.get#PartyOrganizationInfo").userOrgIds || []
         if (orgs && !orgs.includes(tx.organizationPartyId)) fail("ORGANIZATION", "Posting organization is not available")

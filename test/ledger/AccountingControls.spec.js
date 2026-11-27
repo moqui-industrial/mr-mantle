@@ -1843,3 +1843,51 @@ feature("a posting lock holds while the posting guard is off", {
         unpost.includes("SOFT_LOCK") && afterUnpost == "Y"
     },
 })
+
+// SEC-BOS-140: with the posting guard on, a finance administrator of another organization (ACCOUNTING_ADMIN alone) does not
+// post to this one; ACCOUNTING_ALL_ORGANIZATIONS does
+feature("the posting guard holds a finance administrator to their own organizations", {
+    when() {
+        const fixtures = ec.resource.script("component://mr-mantle/test/account/AccountingSettlementFixtures.js")
+        const elsewhere = fixtures.user({org: "ORG_ZIZI_RETAIL"}, "FCADMIN", ["ACCOUNTING_ADMIN", "ACCOUNTING_GL_POST"])
+        const everywhere = fixtures.user({org: "ORG_ZIZI_RETAIL"}, "FCALL", [
+            "ACCOUNTING_ADMIN",
+            "ACCOUNTING_GL_POST",
+            "ACCOUNTING_ALL_ORGANIZATIONS"
+        ])
+        const draft = native("JournalServices.store#DraftEntry", {
+            organizationPartyId: org,
+            description: "Other administrator"
+        }).acctgTransId
+        native("JournalServices.store#DraftLine", {acctgTransId: draft, glAccountId: cash, debitCreditFlag: "D", amount: "5"})
+        native("JournalServices.store#DraftLine", {acctgTransId: draft, glAccountId: expense, debitCreditFlag: "C", amount: "5"})
+        const verify = user => {
+            login(user)
+            ec.message.pushErrors()
+            try {
+                const out =
+                    ec.service
+                        .sync()
+                        .name("mantle.ledger.LedgerServices.post#AcctgTrans")
+                        .parameters({acctgTransId: draft, verifyOnly: true})
+                        .disableAuthz()
+                        .requireNewTransaction(true)
+                        .call() || {}
+                return ec.message.hasError() ? ec.message.getErrorsString() : JSON.stringify(out)
+            } catch (error) {
+                return String(error.message)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+                login("john.doe")
+            }
+        }
+        return {refused: verify(elsewhere), allowed: verify(everywhere)}
+    },
+    then({refused, allowed}) {
+        refused.includes("Posting organization is not available")
+        !allowed.includes("Posting organization is not available")
+        // its other findings (an earlier feature's soft lock) are no business of this check
+        allowed.includes("findings")
+    }
+})
