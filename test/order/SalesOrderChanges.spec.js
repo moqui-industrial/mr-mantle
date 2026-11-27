@@ -655,3 +655,36 @@ feature("a price change of a line on a draft invoice billed before shipment is a
         n(r.item.unitAmount) === 5
     }
 })
+
+// SEC-BAP-131 follow-up: a line with a packed shipment's draft invoice and an order-level draft invoice of its other unit: only
+// the packed invoice is released, so the receivables editor's apply is still a billing conflict and the price stays
+feature("an order-level draft invoice beside a packed shipment's is a billing conflict for a price change", {
+    when() {
+        const orderId = salesOrder([["SOC_A", 2, 5]])
+        const out = shipmentOf(orderId)
+        call("mantle.shipment.ShipmentServices.pack#ShipmentProduct", {
+            shipmentId: out.shipmentId,
+            shipmentPackageSeqId: out.shipmentPackageSeqId,
+            productId: "SOC_A",
+            quantity: 1
+        })
+        call("mantle.shipment.ShipmentServices.pack#Shipment", {shipmentId: out.shipmentId})
+        const invoiced = run(state.arChange, "mantle.account.InvoiceServices.create#InvoiceFromSource", {
+            orderId,
+            organizationPartyId: org,
+            operationKey: key()
+        })
+        const change = approvedCommercial(state.requester, orderId, "OckPrice", [{orderItemSeqId: "01", proposedUnitAmount: 4}])
+        const preview = run(state.arChange, S + "preview#OrderChange", {requestId: change.requestId}).preview
+        const applied = salesApply(Object.assign({}, change, {previewVersion: preview?.previewVersion}), {}, state.arChange)
+        const billings = rows("mantle.order.OrderItemBilling", {orderId})
+        return {invoiced, preview, applied, item: itemOf(orderId, "01"), billings}
+    },
+    then(r) {
+        r.invoiced.error == ""
+        new Set(r.billings.map(row => row.invoiceId)).size === 2
+        r.preview.conflicts.some(row => row.code === "BILLING_CONFLICT" && row.message.includes("on a draft invoice"))
+        code(r.applied) === "BILLING_CONFLICT"
+        n(r.item.unitAmount) === 5
+    }
+})

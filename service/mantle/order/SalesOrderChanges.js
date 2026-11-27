@@ -308,14 +308,26 @@ function checkLines(ch, lineRows, strict, tools) {
                         " on a finalized invoice; Accounting corrects it with a credit memo"
                 )
             // a line on a draft invoice billed before it shipped (Accounting's invoice of the order) keeps the old price there:
-            // Accounting changes or cancels that invoice first; a packed shipment's draft invoice is released below (SEC-BAP-131)
-            if (facts.billedInProcess > 0 && facts.packed.size === 0)
+            // Accounting changes or cancels that invoice first. Only a packed shipment's draft invoice is released below, so the
+            // draft quantity past what those invoices bill is a conflict (SEC-BAP-131)
+            const packInvoiceIds = new Set(
+                Array.from(facts.packed.keys()).flatMap(shipmentId =>
+                    tools
+                        .invoicesOf(shipmentId)
+                        .filter(row => row.statusId === "InvoiceInProcess")
+                        .map(row => row.invoiceId)
+                )
+            )
+            const packBilled = rows("mantle.order.OrderItemBilling", {orderId: facts.item.orderId, orderItemSeqId})
+                .filter(row => packInvoiceIds.has(row.invoiceId))
+                .reduce((sum, row) => sum + Number(String(row.quantity ?? 0)), 0)
+            if (facts.billedInProcess > packBilled)
                 conflict(
                     "BILLING_CONFLICT",
                     "Line " +
                         orderItemSeqId +
                         " has " +
-                        quantityText(facts.billedInProcess) +
+                        quantityText(facts.billedInProcess - packBilled) +
                         " on a draft invoice; Accounting changes or cancels it first"
                 )
             // between pack and ship: the packed quantity's draft invoice is released first, by a receivables editor's authority
