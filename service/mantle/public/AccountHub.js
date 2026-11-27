@@ -96,6 +96,26 @@ function siteStores(siteId) {
     return store ? [store] : []
 }
 
+// The organizations a site serves: the target of each enabled mount of an organization app (Billing, Support, Sales,
+// Marketing, Supplier) and the organization of its Shop mount's store. The site's own preferences page shows and ends the
+// account's memberships only of these organizations' lists and of lists of no organization; another organization's lists
+// are the business host's page's (SEC-PSF-89).
+function siteOrganizations(siteId) {
+    const kinds = publicApps().apps
+    const organizations = new Set()
+    for (const m of rows("mantle.public.PublicSiteApp", {siteId, enabled: "Y"})) {
+        if (!m.targetId) continue
+        const target = kinds[m.app]?.target
+        if (target === "organization") organizations.add(m.targetId)
+        else if (target === "productStore") {
+            const store = one("mantle.product.store.ProductStore", {productStoreId: m.targetId})
+            if (store?.organizationPartyId) organizations.add(store.organizationPartyId)
+        }
+    }
+    return organizations
+}
+const siteList = (organizations, list) => !list.ownerPartyId || organizations.has(list.ownerPartyId)
+
 // ===== Marketing's context (impl-marketing P7) =====
 // The opt-out reasons the page offers (design-marketing §13 EmailPreferences), kept as the withdrawal's comments.
 const optOutReasons = [
@@ -233,12 +253,14 @@ function getEmailPreferences(p) {
     if (emailVerified())
         for (const store of stores)
             confirmApart(() => storeTopics().confirmVerified(store.productStoreId, partyId, ec.user.userAccount.emailAddress))
+    const organizations = siteOrganizations(site.siteId)
     const lists = rows("mantle.marketing.contact.ContactListParty", {partyId})
         .filter(row => lib.active(row))
         .map(row => ({row, list: one("mantle.marketing.contact.ContactList", {contactListId: row.contactListId})}))
         .filter(
             ({list}) =>
                 list &&
+                siteList(organizations, list) &&
                 !storeTopics().topicListTypes().includes(list.contactListTypeEnumId) &&
                 list.contactListTypeEnumId !== "MAILBOX" &&
                 !list.archivedDate
@@ -321,7 +343,12 @@ function storeEmailPreferences(p) {
     // unchecked) ends that pending membership, so neither the receipt's link nor a verified sign-in confirms it later
     const declined = choices.decline || {}
     const listOf = value => (Array.isArray(value) ? value : value ? [value] : []).map(text).filter(Boolean)
-    for (const contactListId of listOf(declined.lists)) storeTopics().declinePending(contactListId, partyId)
+    const organizations = siteOrganizations(site.siteId)
+    const ofSite = contactListId => {
+        const list = one("mantle.marketing.contact.ContactList", {contactListId})
+        return !!list && siteList(organizations, list)
+    }
+    for (const contactListId of listOf(declined.lists)) if (ofSite(contactListId)) storeTopics().declinePending(contactListId, partyId)
     const declineStores = siteStores(site.siteId)
     for (const topicId of listOf(declined.topics)) {
         const [topic, productStoreId] = topicId.split(":")
@@ -334,6 +361,8 @@ function storeEmailPreferences(p) {
         )
         // a checkout opt-in waiting for its confirmation is not a subscription to end
         if (!row || on(subscribed) || row.statusId === "CLPT_PENDING") continue
+        // nor a list of an organization the site does not serve (SEC-PSF-89)
+        if (!ofSite(row.contactListId)) continue
         call("mantle.party.ConsentServices.unsubscribe#ContactListParty", {contactListId: row.contactListId, partyId})
     }
     // P7: Marketing's topics of the site's organization

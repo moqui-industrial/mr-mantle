@@ -839,6 +839,10 @@ function findRemoteConsumers(p) {
 function checkLabelUrl(p) {
     const url = text(p.url)
     if (!/^https:\/\//i.test(url)) return {refusal: "the label URL is not an https URL"}
+    // SEC-BAP-118: no user info, backslash or escape in the authority, where this host reading and the client's URL
+    // parser could differ (a client ends an https authority at a backslash, so a.example, not the carrier after the "@")
+    if (/[\\@%]/.test(url.slice(8).split(/[\/?#]/)[0]))
+        return {refusal: "the label URL's host part holds user info, a backslash or an escape"}
     if (!production()) return {refusal: null}
     const host = hostOf(url)
     const hosts = Object.values(shippingTypes).flatMap(type => type.labelHosts || [])

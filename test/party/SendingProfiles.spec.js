@@ -78,6 +78,38 @@ spec({
     }
 })
 
+function otherOrganizationStores() {
+    make("mantle.public.PublicSite", {siteId: prefix + "_SITE_A", name: "Profiles A site"})
+    make("mantle.public.PublicSiteApp", {
+        siteId: prefix + "_SITE_A",
+        appMountId: "billing",
+        app: "billing",
+        pathPrefix: "/billing",
+        enabled: "Y",
+        targetId: orgA
+    })
+    const storeB = fields =>
+        as(
+            users.configurerB,
+            M + "store#SendingProfile",
+            Object.assign(
+                {
+                    organizationPartyId: orgB,
+                    profileName: "B news",
+                    emailServerId: ids.relay,
+                    fromAddress: "news@profiles-b.example.test",
+                    bounceDomain: domain,
+                    purposeEnumId: "MtpPromotional"
+                },
+                fields
+            )
+        )
+    return {
+        asA: storeB({fromAddress: "ceo@profiles.example.test"}),
+        siteOfA: storeB({siteId: prefix + "_SITE_A"}),
+        ownB: storeB({})
+    }
+}
 feature("a profile is not ready without its bounce account and says why; ready with it; no host or credential is told", {
     when() {
         const store = (username, fields = {}) =>
@@ -117,10 +149,16 @@ feature("a profile is not ready without its bounce account and says why; ready w
             otherOrg: as(users.configurerB, M + "get#SendingProfile", {sendingProfileId: profileId}),
             authorStore: store(users.author, {profileName: "Not mine"}),
             ownedRelay: store(users.configurer, {emailServerId: ids.owned}),
-            otherOrgStore: store(users.configurerB)
+            otherOrgStore: store(users.configurerB),
+            // SEC-BAP-100: B's configurer does not send from A's domain, nor point B's unsubscribe page at A's site; B's own
+            // domain and a site bound to none are B's
+            ...otherOrganizationStores()
         }
     },
-    then({made, notReady, ready, found, got, nobody, otherOrg, authorStore, ownedRelay, otherOrgStore}) {
+    then({made, notReady, ready, found, got, nobody, otherOrg, authorStore, ownedRelay, otherOrgStore, asA, siteOfA, ownB}) {
+        asA.refusal.includes("DOMAIN_OF_ANOTHER")
+        siteOfA.refusal.includes("SITE_OF_ANOTHER")
+        ownB.refusal == ""
         made.refusal == ""
         notReady.ready == false
         const bounce = Array.from(notReady.checkList).find(check => check.checkKey == "bounce")

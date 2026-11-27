@@ -162,6 +162,11 @@ along with this software (see the LICENSE.md file). If not, see
                     return String(routingCheckSumMod)
                 }
                 const spaces = (count) => ' '.repeat(count)
+                // a fixed-width text field (SEC-BOS-123): upper case first (a letter whose upper case is longer, ß, is then
+                // cut with the rest), accents dropped, any character outside printable ASCII (a line break, a control
+                // character) a space, then cut and padded to its width, so a name never splits or lengthens a record
+                const field = (value, width) => String(value ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
+                        .replace(/[^\x20-\x7E]/g, ' ').substring(0, width).padEnd(width, ' ')
                 // the decimal as a whole number of cents, as text; fails if there is a fraction of a cent
                 const centsText = (amount) => toDecimal(amount).multiply(100).setScale(0).toString()
 
@@ -191,9 +196,9 @@ along with this software (see the LICENSE.md file). If not, see
                 // 40-40: Format Code: '1'
                 fileHeader += "094101"
                 // 41-63: Immediate Destination Name
-                fileHeader += nachaImmedDestName.toUpperCase().padEnd(23, ' ')
+                fileHeader += field(nachaImmedDestName, 23)
                 // 64-86: Immediate Origin Name
-                fileHeader += nachaImmedOrigName.toUpperCase().padEnd(23, ' ')
+                fileHeader += field(nachaImmedOrigName, 23)
                 // 87-94: Reference Code, not used, just 8 spaces
                 fileHeader += spaces(8)
                 lines.push(fileHeader)
@@ -204,15 +209,15 @@ along with this software (see the LICENSE.md file). If not, see
                 // 02-04: Service Class Code = '200'
                 batchHeader += "5200"
                 // 05-20: Company Name (16 chars)
-                batchHeader += nachaCompanyName.toUpperCase().padEnd(16, ' ')
+                batchHeader += field(nachaCompanyName, 16)
                 // 21-40: Company discretionary data (20 chars)
-                batchHeader += nachaDiscrData.toUpperCase().padEnd(20, ' ')
+                batchHeader += field(nachaDiscrData, 20)
                 // 41-50: Company ID
-                batchHeader += bankAccount.nachaCompanyId.toUpperCase().padEnd(10, ' ')
+                batchHeader += field(bankAccount.nachaCompanyId, 10)
                 // 51-53: Standard Entry Class Code: always use PPD (Prearranged Payment and Deposit) for now, future consider support for CCD, TEL, WEB, etc
                 batchHeader += "PPD"
                 // 54-63: Company Entry Description (for receiver's bank account, 10 chars)
-                batchHeader += nachaEntryDescription.toUpperCase().padEnd(10, ' ')
+                batchHeader += field(nachaEntryDescription, 10)
                 // 64-69: Company Descriptive Date (6 chars); note that this is informational and optional
                 batchHeader += ec.l10n.format(fileDate, "MMM dd").toUpperCase()
                 // 70-75: Effective Entry Date (estimated settlement date, 1 business day later; 6 chars at yyMMdd)
@@ -316,9 +321,9 @@ along with this software (see the LICENSE.md file). If not, see
                     // 30-39: Amount (10 digits, no decimal point, last 2 digits are decimal values, left pad with 0)
                     entry += amountStr.padStart(10, '0')
                     // 40-54: Individual or Company ID for company (15 chars)
-                    entry += individualId.toUpperCase().padEnd(15, ' ')
+                    entry += field(individualId, 15)
                     // 55-76: Individual or Company Name (22 chars)
-                    entry += indName.toUpperCase().padEnd(22, ' ')
+                    entry += field(indName, 22)
                     // 77-78: Discretionary Data (2 chars); leave blank for now, for WEB or other special transactions may need a value
                     entry += "  "
                     // 79-79: Addenda record indicator, always '0' since not using Addenda (7) records (would be '1' if there is one or more addenda records)
@@ -376,7 +381,7 @@ along with this software (see the LICENSE.md file). If not, see
                         // 40-54: Individual or Company ID for company (15 chars)
                         entry += "OFFSET".padEnd(15, ' ')
                         // 55-76: Individual or Company Name (22 chars)
-                        entry += indName.toUpperCase().padEnd(22, ' ')
+                        entry += field(indName, 22)
                         // 77-78: Discretionary Data (2 chars); leave blank for now, for WEB or other special transactions may need a value
                         entry += "  "
                         // 79-79: Addenda record indicator, always '0' since not using Addenda (7) records (would be '1' if there is one or more addenda records)
@@ -411,7 +416,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // 33-44: Total batch credit entry dollar amount (12 digits, std number format pattern)
                 batchControl += creditAmountTotalStr.padStart(12, '0')
                 // 45-54: Company ID (same as in Batch Header)
-                batchControl += bankAccount.nachaCompanyId.toUpperCase().padEnd(10, ' ')
+                batchControl += field(bankAccount.nachaCompanyId, 10)
                 // 55-73: Message authentication code (leave blank, 19 spaces)
                 batchControl += spaces(19)
                 // 74-79: Reserverd blank (leave blank, 6 spaces)
@@ -450,6 +455,7 @@ along with this software (see the LICENSE.md file). If not, see
                 let ftText = ''
                 for (const line of lines) {
                     if (line.length !== 94) ec.message.addError(`Generated line does not have exactly 94 chars: ${line}`)
+                    else if (/[^\x20-\x7E]/.test(line)) ec.message.addError(`Generated line holds a character outside printable ASCII: ${line}`)
                     ftText += line
                     if (addNewLine) ftText += '\n'
                 }
@@ -534,6 +540,9 @@ along with this software (see the LICENSE.md file). If not, see
                         in-map="{paymentMethodId:paymentMethodId, need:returnNeed}"/>
                 <if condition="ec.message.hasError()"><return/></if>
             </if>
+            <!-- a return file is at most 10 MB, refused before it is parsed (SEC-BOS-124) -->
+            <if condition="String(nachaString).length &gt; 10485760">
+                <return error="true" message="RETURN_TOO_LARGE: A return file may be at most 10 MB"/></if>
             <entity-find-one entity-name="mantle.account.method.PaymentMethod" value-field="bankMethod" disable-authz="true"/>
             <if condition="bankMethod == null">
                 <return error="true" message="Bank account ${paymentMethodId} is not available"/></if>

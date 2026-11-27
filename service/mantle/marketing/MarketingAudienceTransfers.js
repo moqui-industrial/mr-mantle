@@ -568,6 +568,15 @@ function applyAudienceImportRow(p) {
         if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
         partyId = made?.partyId || null
         if (!partyId) throw new Error("No contact was made for row " + item.rowNumber)
+        // a contact the import makes is the list's organization's, not the shared directory's every organization reads
+        // (SEC-BAP-123); a matched party keeps its owner
+        if (made.action === "create" && list.ownerPartyId)
+            ec.service
+                .sync()
+                .name("update#mantle.party.Party")
+                .parameters({partyId, ownerPartyId: list.ownerPartyId})
+                .disableAuthz()
+                .call()
     }
     const mech = Array.from(
         find("mantle.party.contact.PartyContactMechInfo")

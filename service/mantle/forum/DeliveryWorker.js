@@ -920,6 +920,39 @@ function reconcile(p) {
         )
     return { state: v?.state }
 }
+/* At most max of rows (oldest first within a site) taken a site at a time in turn (SEC-PFS-107): a site with thousands
+   of every-post subscribers does not put every other site's notices behind its own. */
+function bySiteTurns(rows, max) {
+    const sites = new Map()
+    for (const row of rows) {
+        if (!sites.has(row.siteId)) sites.set(row.siteId, [])
+        sites.get(row.siteId).push(row)
+    }
+    const queues = Array.from(sites.values())
+    const out = []
+    for (let i = 0; out.length < max && queues.some((queue) => i < queue.length); i++)
+        for (const queue of queues) if (i < queue.length && out.length < max) out.push(queue[i])
+    return out
+}
+/* The oldest rows of each site that has any, read site by site (SEC-PFS-107): the sites first (at most 1,000), then a
+   share of max rows of each, oldest first, so one site's backlog cannot fill the read; the sites then go in the order of
+   their oldest row, so with more sites than a run takes the ones waiting longest go first, and bySiteTurns takes them in
+   turn. query() is the entity find with its conditions; ageField the first field of orderBy. */
+function oldestBySite(query, orderBy, ageField, max) {
+    const sites = Array.from(query().selectField('siteId').distinct(true).limit(1000).list())
+        .map((row) => row.siteId)
+        .filter(Boolean)
+    const share = Math.max(5, Math.ceil(max / Math.max(1, sites.length)))
+    const age = (row) => {
+        const value = row[ageField]
+        return value == null ? Number.MAX_SAFE_INTEGER : Number(ec.user.timestampMillis(value))
+    }
+    const groups = sites
+        .map((siteId) => Array.from(query().condition('siteId', siteId).orderBy(orderBy).limit(share).list()))
+        .filter((rows) => rows.length)
+        .sort((a, b) => age(a[0]) - age(b[0]))
+    return bySiteTurns(groups.flat(), max)
+}
 function dispatch() {
     const failures = []
     let processed = 0
@@ -948,17 +981,14 @@ function dispatch() {
             failures.push(item.deliveryId)
         }
     }
-    const items = Array.from(
-        find(F + 'ForumOutbox', { state: 'pending' })
-            .orderBy('createdAt,outboxId')
-            .limit(100)
-            .list(),
-    )
-    // Each page is its own transaction; keep preparing until done or the run's time budget is spent.
+    let open = oldestBySite(() => find(F + 'ForumOutbox', { state: 'pending' }), 'createdAt,outboxId', 'createdAt', 100)
+    // Each page is its own transaction; one page of each outbox in turn, sites taking turns, until done or the run's time
+    // budget is spent (SEC-PFS-107: a large list's outbox no longer takes the whole run)
     const deadline = time() + 20000
-    for (const item of items) {
-        try {
-            for (;;) {
+    while (open.length && time() <= deadline) {
+        const more = []
+        for (const item of open) {
+            try {
                 const page = ec.service
                     .sync()
                     .throwOnError(true)
@@ -967,23 +997,23 @@ function dispatch() {
                     .requireNewTransaction(true)
                     .call().result
                 processed++
-                if (page.done || time() > deadline) break
+                if (!page.done) more.push(item)
+            } catch (e) {
+                ec.message.clearErrors()
+                ec.logger.error(
+                    'Forum outbox ' + item.outboxId + ' failed: ' + firstLine(e),
+                )
+                failures.push(item.outboxId)
             }
-        } catch (e) {
-            ec.message.clearErrors()
-            ec.logger.error(
-                'Forum outbox ' + item.outboxId + ' failed: ' + firstLine(e),
-            )
-            failures.push(item.outboxId)
+            if (time() > deadline) break
         }
-        if (time() > deadline) break
+        open = more
     }
-    for (const item of Array.from(
-        find(F + 'ForumDelivery', {})
-            .condition('state', 'in', ['pending', 'retry'])
-            .orderBy('dueAt,deliveryId')
-            .limit(100)
-            .list(),
+    for (const item of oldestBySite(
+        () => find(F + 'ForumDelivery', {}).condition('state', 'in', ['pending', 'retry']),
+        'dueAt,deliveryId',
+        'dueAt',
+        100,
     )) {
         try {
             const c = ec.service

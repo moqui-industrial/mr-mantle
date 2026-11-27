@@ -637,6 +637,28 @@ feature("reminders: stored per party, sent once each, a snoozed one held back an
     },
 })
 
+// SEC-BOS-109: every recurring event is expanded over the range, so a range is at most 400 days
+feature("get#FullCalendarData answers a year and refuses a range of more than 400 days; a booking over a longer event is checked", {
+    when() {
+        // an event of 500 days books Room B: book#Resource reads its own span with no limit
+        const long = event("Long works", {estimatedStartDate: at(60 * 24), estimatedCompletionDate: at(560 * 24), assignToPartyId: party.Ada})
+        return {
+            year: call(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2027-12-31", partyId: party.Ada}).eventList,
+            wide: errorOf(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2029-01-01", partyId: party.Ada}),
+            internal: errorOf(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2029-01-01", partyId: party.Ada, maxRangeDays: 0}),
+            negative: errorOf(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2029-01-01", partyId: party.Ada, maxRangeDays: -1}),
+            longBooking: errorOf(`${EV}.book#Resource`, {workEffortId: long, facilityId: "CS_ROOM_B"})
+        }
+    },
+    then({year, wide, internal, negative, longBooking}) {
+        negative.includes("at most 400 days")
+        year.length > 0
+        wide.includes("at most 400 days")
+        internal == null
+        longBooking == null || !longBooking.includes("at most")
+    }
+})
+
 feature("a recurring event: without the ICalendar tool the series' first instance only, and a changed instance replaces it", {
     when() {
         setTime(13)
@@ -1246,5 +1268,46 @@ feature("a restricted changed occurrence of an open series is Busy in Ben's cale
         maps.find((map) => map.recurrenceId == null).summary == "Weekly one-to-one"
         appraisal != true
         series == true
+    },
+})
+
+// SEC-BAP-104: with authorization on, book#Resource and create#Event's equipment hold an asset to the user's organizations
+// (its owner's, or its facility's) and equipment to the bookable; Ben's organization's bookable projector is booked
+feature("book#Resource and create#Event book only bookable equipment of the user's organizations", {
+    when() {
+        call("create#mantle.product.asset.Asset", { assetId: "CS_REACH_ACME", assetTypeEnumId: "AstTpEquipment", assetName: "Acme projector",
+            ownerPartyId: "ORG_ACME", bookable: "Y" })
+        call("create#mantle.product.asset.Asset", { assetId: "CS_REACH_OWN", assetTypeEnumId: "AstTpEquipment", assetName: "Own projector",
+            ownerPartyId: "ORG_ZIZI_RETAIL", bookable: "Y" })
+        call("create#moqui.security.UserGroup", { userGroupId: "CS_REACH_CALLER", description: "Spec reach callers" })
+        call("create#moqui.security.UserGroupMember", { userGroupId: "CS_REACH_CALLER", userId: user.Ben, fromDate: 0 })
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "CS_REACH_SERVICES", description: "Spec reach services" })
+        call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "CS_REACH_SERVICES", artifactName: "mantle\\.work\\.EventServices\\..*",
+            artifactTypeEnumId: "AT_SERVICE", nameIsPattern: "Y", inheritAuthz: "Y" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "CS_REACH_AUTHZ", userGroupId: "CS_REACH_CALLER", artifactGroupId: "CS_REACH_SERVICES",
+            authzTypeEnumId: "AUTHZT_ALWAYS", authzActionEnumId: "AUTHZA_ALL" })
+        const asBen = (run) => as("Ben", () => {
+            const wasDisabled = ec.artifactExecution.authzDisabled()
+            ec.artifactExecution.enableAuthz()
+            try { return run() } finally { if (wasDisabled) ec.artifactExecution.disableAuthz() }
+        })
+        try {
+            const created = asBen(() => errorOf(`${EV}.create#Event`, { workEffortName: "Reach with Acme's", estimatedStartDate: at(40 * 24 + 10),
+                estimatedCompletionDate: at(40 * 24 + 11), assignToPartyId: party.Ben, assetId: "CS_REACH_ACME" }))
+            const own = asBen(() => event("Reach with own", { estimatedStartDate: at(40 * 24 + 12), estimatedCompletionDate: at(40 * 24 + 13),
+                assignToPartyId: party.Ben }))
+            const acme = asBen(() => errorOf(`${EV}.book#Resource`, { workEffortId: own, assetId: "CS_REACH_ACME" }))
+            const notBookable = asBen(() => errorOf(`${EV}.book#Resource`, { workEffortId: own, assetId: "CS_PROJECTOR" }))
+            const booked = asBen(() => call(`${EV}.book#Resource`, { workEffortId: own, assetId: "CS_REACH_OWN" }))
+            return { created, acme, notBookable, booked }
+        } finally {
+            ec.entity.find("moqui.security.ArtifactAuthz").condition("artifactAuthzId", "CS_REACH_AUTHZ").deleteAll()
+        }
+    },
+    then({ created, acme, notBookable, booked }) {
+        created != null && created.includes("is not available to book")
+        acme != null && acme.includes("is not available to book")
+        notBookable != null && notBookable.includes("is not available to book")
+        booked.statusId == "WeaaAssigned"
     },
 })

@@ -68,6 +68,13 @@ function shape(entry) {
     return `${entry.kind}:${entry.title}`
 }
 const count = (entityName, fields) => ec.entity.find(entityName).condition(fields).count()
+// a spec-local screen whose grant (an app root's: allow, inherited, the organization filter) Mia and Noah hold, and a call
+// from it, so a recipient's access to the record is checked under that grant (filter#RecordVisibleUsers, SH-UI-009)
+const SCREEN = "component://mr-mantle/test/party/RecordLinksScreen.xml"
+function fromScreen(run) {
+    ec.artifactExecution.push(SCREEN, "AT_XML_SCREEN", "AUTHZA_VIEW", false)
+    try { return run() } finally { ec.artifactExecution.pop() }
+}
 
 feature("records of each kind, a mailbox and two more users", {
     when() {
@@ -276,14 +283,28 @@ feature("a note, a file and a status change on the request", {
     },
 })
 
+// Noah is on the request, so he may open it and is told of it; Mia may not, so she is told only who mentioned her (SH-UI-009)
 feature("followers, and a note that mentions a user notifies them and the followers of notes", {
     when() {
         at(7)
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "RL_SCREEN", description: "Record links spec screen" })
+        call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "RL_SCREEN", artifactName: SCREEN, artifactTypeEnumId: "AT_XML_SCREEN",
+                nameIsPattern: "N", inheritAuthz: "Y" })
+        call("create#moqui.security.UserGroup", { userGroupId: "RL_SCREEN_USERS", description: "Record links spec users" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "RL_SCREEN_USERS", userGroupId: "RL_SCREEN_USERS", artifactGroupId: "RL_SCREEN",
+                authzTypeEnumId: "AUTHZT_ALLOW", authzActionEnumId: "AUTHZA_ALL" })
+        call("create#moqui.security.ArtifactAuthzFilter", { artifactAuthzId: "RL_SCREEN_USERS", entityFilterSetId: "MANTLE_USER_ORG" })
+        // from before the run's clock, which the grant is read at
+        for (const userId of [miaUserId, noahUserId]) call("create#moqui.security.UserGroupMember", { userGroupId: "RL_SCREEN_USERS", userId,
+                fromDate: effectiveTime - 60 * minute })
+        call("create#mantle.request.RequestParty", { requestId: "RL-R1", roleTypeId: "Reporter", fromDate: ec.user.nowTimestamp,
+                partyId: ec.entity.find("moqui.security.UserAccount").condition("userId", noahUserId).one().partyId })
         call("mantle.party.CommunicationServices.follow#Record", { recordEntityName: REQUEST, recordId: "RL-R1", userId: noahUserId })
         call("mantle.party.CommunicationServices.follow#Record", { recordEntityName: REQUEST, recordId: "RL-R1", kinds: "messages" })
         const followers = call("mantle.party.CommunicationServices.get#RecordFollowers", { recordEntityName: REQUEST, recordId: "RL-R1" })
-        const note = call("mantle.party.CommunicationServices.log#RecordNote", { recordEntityName: REQUEST, recordId: "RL-R1", subject: "Check this",
-                body: "<p>Please check the access, @Mia</p>", contentType: "text/html", mentionUserIds: [miaUserId], recordUrl: requestUrl })
+        const note = fromScreen(() => call("mantle.party.CommunicationServices.log#RecordNote", { recordEntityName: REQUEST, recordId: "RL-R1",
+                subject: "Check this", body: "<p>Please check the access, @Mia</p>", contentType: "text/html", mentionUserIds: [miaUserId],
+                recordUrl: requestUrl }))
         // the user's notices of the topic about this spec's request (demo data may give the same users notices of other records)
         const notices = (userId, topic) => Array.from(ec.entity.find("moqui.security.user.NotificationMessageUser").condition("userId", userId).list())
                 .map((row) => ec.entity.find("moqui.security.user.NotificationMessage").condition("notificationMessageId", row.notificationMessageId).one())
@@ -291,9 +312,10 @@ feature("followers, and a note that mentions a user notifies them and the follow
         const comment = ec.entity.find("mantle.party.communication.CommunicationEvent").condition("communicationEventId", note.communicationEventId).one()
         return { followers, note, comment, joinRows: count("mantle.request.RequestCommEvent", { requestId: "RL-R1", communicationEventId: note.communicationEventId }),
             miaMentions: notices(miaUserId, "ChatterMention"), noahFollows: notices(noahUserId, "RecordFollow"), johnFollows: notices("EX_JOHN_DOE", "RecordFollow"),
-            noahMentions: notices(noahUserId, "ChatterMention") }
+            noahMentions: notices(noahUserId, "ChatterMention"), miaHidden: Array.from(ec.entity.find("moqui.security.user.NotificationMessageByUser")
+                .condition("userId", miaUserId).condition("topic", "ChatterMentionHidden").list()) }
     },
-    then({ followers, note, comment, joinRows, miaMentions, noahFollows, johnFollows, noahMentions }) {
+    then({ followers, note, comment, joinRows, miaMentions, noahFollows, johnFollows, noahMentions, miaHidden }) {
         followers.followerList.length == 2
         followers.isFollowing
         followers.followerList.find((follower) => follower.userId === noahUserId).notifyNotes == "Y"
@@ -305,11 +327,13 @@ feature("followers, and a note that mentions a user notifies them and the follow
         comment.fromPartyId == "EX_JOHN_DOE"
         comment.body.includes("Please check the access")
         note.mentionedUserIds == [miaUserId]
+        note.withheldUserIds == [miaUserId]
         note.notifiedFollowerUserIds == [noahUserId]
-        miaMentions.length == 1
-        miaMentions[0].titleText.includes("mentioned you on Request RL-R1: Check this")
-        miaMentions[0].linkText == requestUrl
+        miaMentions.length == 0
+        miaHidden.length == 1
+        miaHidden[0].titleText == "John Doe mentioned you on a record"
         noahFollows.length == 1
+        noahFollows[0].linkText == requestUrl
         noahFollows[0].titleText.includes("on Request RL-R1: Check this")
         noahMentions.length == 0
         johnFollows.length == 0

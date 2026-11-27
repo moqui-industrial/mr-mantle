@@ -144,7 +144,7 @@ capacityList = []
             }
             const calendar = (person, typeId) => {
                 const out = ec.service.sync().name('mantle.work.EventServices.get#FullCalendarData').parameters({partyId: person, start: fromText,
-                    end: dayText(dayNum(thruText) + 1), includeAllUsers: false, excludeCancelled: true, workEffortTypeEnumIds: [typeId], titleGString: '-'}).call()
+                    end: dayText(dayNum(thruText) + 1), includeAllUsers: false, excludeCancelled: true, maxRangeDays: 0, workEffortTypeEnumIds: [typeId], titleGString: '-'}).call()
                 if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
                 return Array.from(out?.eventList || [])
             }

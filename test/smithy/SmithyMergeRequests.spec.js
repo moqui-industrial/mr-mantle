@@ -104,6 +104,26 @@ feature("a Developer opens a merge request from a branch; its number is apart fr
     }
 })
 
+// SEC-PFS-109: the Branches page names a hidden merge request's number only to whom its list shows it: its author, an
+// Owner and the site's staff
+feature("the Branches page gives a hidden merge request's number only to its author and an Owner", {
+    when() {
+        const numberOf = user =>
+            (op(user, "findRefs", {refType: "branch"}).refList || []).find(ref => ref.name == "feature")?.mergeRequestNum ?? null
+        const shown = numberOf("SMQ_STRANGER")
+        const row = hosted(1)
+        lib.set("moqui.resource.GitMergeRequest", {mergeRequestId: row.mergeRequestId}, {hiddenDate: ec.user.nowTimestamp})
+        const hidden = {stranger: numberOf("SMQ_STRANGER"), author: numberOf("SMQ_DEV"), owner: numberOf("SMQ_OWNER")}
+        lib.set("moqui.resource.GitMergeRequest", {mergeRequestId: row.mergeRequestId}, {hiddenDate: null})
+        return {shown, hidden}
+    },
+    then({shown, hidden}) {
+        shown == 1
+        hidden.stranger == null
+        hidden.author == 1
+        hidden.owner == 1
+    }
+})
 feature("a viewer's review is a comment; a decision is a Developer's and never the author's own", {
     when() {
         const review = (username, decision, more = {}) =>

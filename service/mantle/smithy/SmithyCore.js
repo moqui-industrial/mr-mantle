@@ -499,6 +499,34 @@ function rights(repositoryId, userId) {
         confirmed: !!a.userId && confirmedAddress().confirmed(a.userId)
     }
 }
+/* SEC-PFS-102: a webhook sends a repository's pushes to the address the account that set it chose (urlSetByUserId, else
+   the framework's createdByUserId). Each active webhook of the repositories whose setter no longer holds the delete right
+   there (a Maintainer or higher with a confirmed address, as a mirror's giver must; an account gone or disabled holds
+   none) is turned off; a Maintainer turns it on again and is its setter then. A webhook nobody set (the system's) is
+   left. Asked after a change of members and by the outbound check before a push's deliveries, so a right lost some other
+   way (a suspension, an ended membership, a disabled account) stops the deliveries from the next push on. */
+function pauseLostWebhooks(repositoryIds) {
+    const was = ec.artifactExecution.disableAuthz()
+    try {
+        for (const repositoryId of new Set(repositoryIds)) {
+            const hooks = Array.from(
+                ec.entity.find("moqui.resource.GitWebhook").condition({repositoryId, active: "Y"}).limit(100).list()
+            )
+            for (const hook of hooks) {
+                const setter = hook.urlSetByUserId || hook.createdByUserId
+                if (!setter) continue
+                const account = one("moqui.security.UserAccount", {userId: setter})
+                const held = account && account.disabled !== "Y" ? rights(repositoryId, setter) : null
+                if (held && held.rank >= RANK.SmrMaintainer && held.confirmed) continue
+                hook.set("active", "N")
+                hook.update()
+                ec.logger.info("Smithy webhook " + hook.webhookId + " of repository " + repositoryId + " turned off: its setter no longer holds the repository")
+            }
+        }
+    } finally {
+        if (!was) ec.artifactExecution.enableAuthz()
+    }
+}
 /* The accounts that are a repository's Maintainers or Owners now, for a notice: the parties of an active Maintainer or
    Owner row of the repository or its groups and its owner, each account counted as rights() counts it (not
    suspended, the role in effect), without those in exclude; at most 100. */
@@ -977,6 +1005,7 @@ function resolvePath(siteId, path) {
 ;({
     M,
     GIT,
+    pauseLostWebhooks,
     forum,
     VISIBILITY,
     VISIBILITY_CODES,

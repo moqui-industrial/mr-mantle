@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>
             Events (WorkEffort, WetEvent by default) for a calendar grid such as the FullCalendar JS library
             (http://fullcalendar.io/) in a range of days (start and end, yyyy-MM-dd in the user's time zone, or time stamps
-            taken as their days). An event is in
+            taken as their days; at most maxRangeDays, 400 by default, SEC-BOS-109). An event is in
             when it overlaps the range and is:
             - in a calendar of calendarIdList the user may see (mantle.work.CalendarServices.check#CalendarAccess; one the
               user may not see is left out and named in skippedCalendarIdList; one with free/busy permission only shows its
@@ -65,6 +65,8 @@ along with this software (see the LICENSE.md file). If not, see
             an event that is in only because another asked party owns it or is on it, when the user may not open it.
         </description>
         <in-parameters>
+            <parameter name="maxRangeDays" type="Integer"><description>The widest range in days, 400 when empty or negative; 0 for none, for a
+                booking's own checks over its event's span (a caller-facing read never passes it: Marble's calendars set 400)</description></parameter>
             <parameter name="facilityId"/>
             <parameter name="facilityIdList" type="List"><parameter name="facilityId"/></parameter>
             <parameter name="partyId"/>
@@ -139,6 +141,12 @@ along with this software (see the LICENSE.md file). If not, see
             const startTs = ec.l10n.parseTimestamp(startText + ' 00:00:00.000', pattern)
             const endTs = ec.l10n.parseTimestamp(endText + ' 23:59:59.999', pattern)
             if (startTs == null || endTs == null) { ec.message.addError(`The range ${start} to ${end} is not two days (yyyy-MM-dd)`); return }
+            // every recurring event is expanded over the range, so a range is at most maxRangeDays (400 by default; SEC-BOS-109):
+            // the anonymous published calendar and the signed-in grids ask a month or a year; a booking's own checks (book#Resource,
+            // check#ResourceBookings, the resource policy, capacity) pass 0, no limit, over the event's own span
+            const rangeDays = maxRangeDays == null || maxRangeDays === '' || !(Number(maxRangeDays) >= 0) ? 400 : Number(maxRangeDays)
+            if (rangeDays > 0 && toMillis(endTs) - toMillis(startTs) > rangeDays * 86400000) {
+                ec.message.addError(ec.resource.expand('A calendar range covers at most ${days} days', '', {days: rangeDays})); return }
             const startDate = ec.l10n.parseDate(startText, 'yyyy-MM-dd')
             const endDate = ec.l10n.parseDate(endText, 'yyyy-MM-dd')
             const rangeStartMs = toMillis(startTs)
@@ -634,7 +642,10 @@ along with this software (see the LICENSE.md file). If not, see
                 policy and availability; any other is assigned at once as before, unless an outage or a blackout covers the event -->
             <if condition="assetId"><script><![CDATA[
                 const policies = ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js')
-                if (policies.policyAt({assetId: assetId})) {
+                // equipment bookable, and of the user's organizations or shared (SEC-BAP-104), as book#Resource holds it
+                const reach = policies.assetReachRefusal(ec.entity.find('mantle.product.asset.Asset').condition('assetId', assetId).disableAuthz().one())
+                if (reach) ec.message.addError(reach)
+                else if (policies.policyAt({assetId: assetId})) {
                     ec.service.sync().name('mantle.work.EventServices.book#Resource').parameters({workEffortId: workEffortId, assetId: assetId}).call()
                 } else {
                     const span = ec.service.sync().name('mantle.work.WorkEffortServices.get#WorkEffortStartEnd').parameters({workEffortId: workEffortId}).call()
@@ -2140,7 +2151,8 @@ along with this software (see the LICENSE.md file). If not, see
             once (WefAssigned, WeaaAssigned); a resource with a policy is requested (WefRequested, WeaaRequested) and waits
             for its approvers. The policy is a placeholder until Maintenance designs it: a resource needs approval when it
             has a current approver, a FacilityParty (a facility) or AssetPartyAssignment (an asset) of role BookingApprover,
-            unless the user is one. A booking that overlaps another of the same resource (not denied, not cancelled) is
+            unless the user is one. Equipment that is not bookable, and an asset whose owner (or whose facility's owner) is an
+            organization the user does not work for, are refused, unless the caller disabled authorization (SEC-BAP-104). A booking that overlaps another of the same resource (not denied, not cancelled) is
             refused, unless allowConflicts, which books it and returns the conflicts. A denied booking asked again is asked
             again; a current one is returned as it is.
 
@@ -2199,6 +2211,9 @@ along with this software (see the LICENSE.md file). If not, see
             const resource = facilityId ? ec.entity.find('mantle.facility.Facility').condition('facilityId', facilityId).forUpdate(true).one()
                     : ec.entity.find('mantle.product.asset.Asset').condition('assetId', assetId).forUpdate(true).one()
             if (resource == null) { ec.message.addError(facilityId ? `Facility ${facilityId} not found` : `Asset ${assetId} not found`); return }
+            // equipment bookable, and of the user's organizations or shared, on every path (SEC-BAP-104)
+            const reach = assetId ? policies.assetReachRefusal(resource) : null
+            if (reach) { ec.message.addError(reach); return }
             const resourceName = (facilityId ? resource.facilityName : resource.assetName) || facilityId || assetId
             const now = ec.user.nowTimestamp
             const nowMs = toMillis(now)
@@ -2220,7 +2235,7 @@ along with this software (see the LICENSE.md file). If not, see
             const endMs = toMillis(span?.endDate) ?? startMs + 3600000
             const dayText = (millis) => ec.l10n.format(String(millis), 'yyyy-MM-dd')
             const events = ec.service.sync().name('mantle.work.EventServices.get#FullCalendarData').parameters({facilityId: facilityId, assetId: assetId,
-                start: dayText(startMs), end: dayText(endMs), excludeCancelled: true,
+                start: dayText(startMs), end: dayText(endMs), excludeCancelled: true, maxRangeDays: 0,
                 titleGString: '${workEffort.workEffortName || workEffort.workEffortId}'}).call()?.eventList || []
             if (ec.message.hasError()) return
             for (const event of Array.from(events)) {
@@ -2389,7 +2404,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // (impl-maintenance P16 review)
                 if (!checkOnly) ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js').lockResource({facilityId: facilityId, assetId: assetId})
                 const events = ec.service.sync().name('mantle.work.EventServices.get#FullCalendarData').parameters({facilityId: facilityId,
-                    assetId: assetId, start: dayText(startMs), end: dayText(endMs), excludeCancelled: true,
+                    assetId: assetId, start: dayText(startMs), end: dayText(endMs), excludeCancelled: true, maxRangeDays: 0,
                     titleGString: '${workEffort.workEffortName || workEffort.workEffortId}'}).call()?.eventList || []
                 if (ec.message.hasError()) return
                 const conflicts = []

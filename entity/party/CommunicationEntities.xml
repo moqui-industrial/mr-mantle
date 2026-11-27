@@ -334,6 +334,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="linkedDate" type="date-time"/>
         <field name="notifyFollowers" type="text-indicator"/>
         <field name="recordUrl" type="text-medium"><description>The record's screen, for the follower notification's link</description></field>
+        <field name="accessScreenLocation" type="text-long"><description>The screens the user chose the record from, comma-separated:
+            its followers' access is checked under them when the message is filed, after the send, with no screen of its own
+            (notify#RecordFollowers, SH-UI-009)</description></field>
         <relationship type="one-nofk" related="moqui.basic.email.EmailMessage" short-alias="emailMessage"/>
         <relationship type="one-nofk" title="LinkedBy" related="moqui.security.UserAccount" short-alias="linkedByUser">
             <key-map field-name="linkedByUserId" related="userId"/></relationship>

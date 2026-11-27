@@ -665,6 +665,56 @@ feature("a promotion past its limit at the freeze is reviewRequired; nothing due
     }
 })
 
+// SEC-PSS-06: a guest's order with nothing due mails a typed, unverified address with no payment behind it, so an address
+// takes five of them on a site in an hour; the sixth is refused as a rate limit and places nothing
+feature("an address takes a few guest orders with nothing due on a site in an hour (SEC-PSS-06)", {
+    when() {
+        const email = "flood@shco.example.test"
+        // the address's hour already holds five such orders
+        system(() => {
+            for (let i = 0; i < 5; i++)
+                call("org.moqui.public.AccountServices.record#Attempt", {
+                    input: {key: "shop-free-order:" + ids.site + ":" + email, limit: 5, windowMillis: 3600000}
+                })
+        })
+        const token = op(CART + "add#CartItem", {productId: ids.free, quantity: "1"}).result.token
+        checkout("begin#Checkout", {token})
+        checkout("set#CheckoutContact", {token, emailAddress: email, name: "Flo Flood"})
+        const view = checkout("get#Checkout", {token}).result
+        const refused = submit(token, view.checkout.revision)
+        return {refused, after: checkoutRow(token)}
+    },
+    then({refused, after}) {
+        refused.error.includes("RATE_LIMITED")
+        after.statusId != "ScoCompleted" && after.statusId != "ScoPlacementPending"
+    }
+})
+
+// SEC-PSS-93: a receipt's opt-in confirmation code is looked up only after the lookup counts against the requester, 100 in
+// ten minutes, as a list link's token is
+feature("a requester's opt-in confirmation lookups are counted (SEC-PSS-93)", {
+    when() {
+        const H = "mantle.public.AccountHubServices."
+        const requester = ec.resource.script("component://framework/service/org/moqui/public/Account.js").requesterKey()
+        const window = Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 600000)
+        const bucketId = ec.user.singleUseCodeHash("optin-code:" + requester + ":" + window)
+        const lookup = () => op(H + "get#EmailPreferences", {confirm: "SHCO_NONE." + "x".repeat(32)})
+        const room = lookup()
+        system(() => {
+            const row = ec.entity.find("moqui.security.public.AccountAttempt").condition({bucketId}).disableAuthz().one()
+            row.set("attemptCount", 100)
+            row.update()
+        })
+        const full = lookup()
+        system(() => ec.entity.find("moqui.security.public.AccountAttempt").condition({bucketId}).disableAuthz().deleteAll())
+        return {room, full}
+    },
+    then({room, full}) {
+        room.error.includes("NOT_AVAILABLE")
+        full.error.includes("RATE_LIMITED")
+    }
+})
+
 // Commerce P9 follow-up: the store's opt-ins (StoreTopics.js) are offered unchecked; a guest's choice waits as a pending
 // membership until the receipt's link confirms it; nothing checked records nothing; an order without a checkout gets no link
 feature("the store's opt-ins are offered unchecked; a guest's choice waits until the receipt's link confirms it", {

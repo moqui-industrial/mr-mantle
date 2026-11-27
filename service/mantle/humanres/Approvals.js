@@ -261,6 +261,25 @@ const kinds = {
         topic: "PeopleExpenseApproval",
         sourceEntityName: EXPENSE_CLAIM,
         sourceField: "invoiceId",
+        // SEC-BOS-119: who made the claim or changed it or its lines (an HR officer who entered an employee's amounts) decides
+        // it no more than the claimant
+        selfPartyIds(sourceId) {
+            const claim = one(EXPENSE_CLAIM, {invoiceId: sourceId})
+            const userIds = unique(
+                [claim?.createdByUserId].concat(
+                    String(claim?.changedByUserIds || "")
+                        .split(",")
+                        .map(value => value.trim())
+                )
+            ).filter(Boolean)
+            return userIds.length
+                ? unique(
+                      Array.from(find("moqui.security.UserAccount").condition("userId", "in", userIds).list())
+                          .map(account => account.partyId)
+                          .filter(Boolean)
+                  )
+                : []
+        },
         describe(sourceId) {
             const claim = one(EXPENSE_CLAIM, {invoiceId: sourceId})
             if (!claim) return {label: "expense claim " + sourceId}

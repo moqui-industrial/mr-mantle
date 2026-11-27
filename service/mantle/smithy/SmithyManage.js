@@ -27,6 +27,18 @@ kit => {
 
     // ===== what the writes share =====
     const given = value => value !== undefined
+    const pauseLostWebhooks = repositoryIds => core.pauseLostWebhooks(repositoryIds)
+    /* The repositories of a group and its subgroups (four levels at most). */
+    function groupRepositoryIds(groupId) {
+        const ids = []
+        let groups = [groupId]
+        for (let depth = 0; depth < 5 && groups.length; depth++) {
+            for (const repo of Array.from(find(M + "SmithyRepository").condition("groupId", "in", groups).list()))
+                ids.push(repo.repositoryId)
+            groups = Array.from(find(M + "SmithyGroup").condition("parentGroupId", "in", groups).list()).map(group => group.groupId)
+        }
+        return ids
+    }
     const denied = message => fail("Unauthorized", "accessDenied: " + message)
     const revisionOf = row => Number(row?.revision || 1)
     /* An edit names the revision it read (§15.1); 0 for a record that is not there yet. */
@@ -596,7 +608,7 @@ kit => {
     }
     methods.setGroupMember = p => {
         const {r, group, partyId} = groupFor(p, "SmrOwner")
-        return setMember(
+        const answer = setMember(
             M + "SmithyGroupParty",
             {groupId: group.groupId},
             group.groupPath,
@@ -614,6 +626,8 @@ kit => {
                     fail("Conflict", "A group keeps an Owner: give the role to another account first")
             }
         )
+        pauseLostWebhooks(groupRepositoryIds(group.groupId))
+        return answer
     }
     methods.leaveGroup = p => {
         const r = core.group(p.groupId, p.siteId)
@@ -626,6 +640,7 @@ kit => {
             fail("Conflict", "A group keeps an Owner: give the role to another account first")
         audit(p.siteId, null, "group", r.group.groupId, "leaveGroup", ROLE_CODES[row.roleEnumId] || "", revisionOf(row), null)
         row.delete()
+        pauseLostWebhooks(groupRepositoryIds(r.group.groupId))
         return {left: true}
     }
     methods.findRepositoryMembers = p => {
@@ -682,7 +697,7 @@ kit => {
     methods.setRepositoryMember = p => {
         const {repo, partyId} = repositoryFor(p, "SmrOwner")
         // a repository's Owners are its groups' or its namespace's account, so no row here is the last one
-        return setMember(
+        const answer = setMember(
             M + "SmithyRepositoryParty",
             {repositoryId: repo.repositoryId},
             repo.repositoryPath,
@@ -690,6 +705,8 @@ kit => {
             partyId,
             () => {}
         )
+        pauseLostWebhooks([repo.repositoryId])
+        return answer
     }
 
     // ===== repositories =====
@@ -872,6 +889,10 @@ kit => {
                     ? "repositoryHidden: The site's staff hid this repository or a group above it; ask them to move it"
                     : "repositoryHidden: This repository or a group above it is hidden; show it again before moving it")
             )
+        // a repository in a group leaves it only by an Owner of that group (or of a group above it), or the site's staff: an
+        // Owner of the repository alone would take it from the group's Owners (SEC-PFS-108)
+        if (repo.groupId && !r.access.staff && !core.ownsGroup(repo.groupId, partyId))
+            denied("Only an Owner of its group moves a repository out of the group")
         const before = revisionOf(repo)
         fresh(before, p.expectedRevision)
         const s = core.settings(p.siteId)
@@ -940,6 +961,7 @@ kit => {
             before,
             before + 1
         )
+        pauseLostWebhooks([repo.repositoryId])
         return {repositoryPath: newPath, visibility: VISIBILITY_CODES[visibilityEnumId], revision: before + 1}
     }
     methods.setRepositoryArchived = p => {

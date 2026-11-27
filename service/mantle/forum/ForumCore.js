@@ -65,7 +65,9 @@ const member = (siteId, partyId = me()) =>
     partyId ? one(S + 'PublicSiteParty', { siteId, partyId }) : null
 const isOperator = () => ec.user.isInGroup('ADMIN')
 function site(id, staff = false) {
-    const v = one(S + 'PublicSite', { siteId: id }, staff)
+    // read without a lock first: a staff call locks the row only once the caller is found to be its owner or an operator,
+    // so a refused call holds no lock on the site (SEC-PFS-105)
+    let v = one(S + 'PublicSite', { siteId: id })
     if (!v) missing()
     const m = member(id),
         owner =
@@ -75,6 +77,10 @@ function site(id, staff = false) {
             !sanctioned(id, m.partyId, null, 'suspend')
     if (staff && !owner && !isOperator())
         fail('Unauthorized', 'Site owner access required')
+    if (staff) {
+        v = one(S + 'PublicSite', { siteId: id }, true)
+        if (!v) missing()
+    }
     // Internal staff keep using bound mailboxes through Comms before publication; category access still decides
     // what they can read there.
     if (
@@ -1222,26 +1228,30 @@ function policy(siteId) {
 /* ---- Content rules ---- */
 const escapeRegex = (text) =>
     String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/* A rule's matcher: its pattern matched, ignoring case, in time linear in the text by the framework
+   (StringUtilities.regexTest and regexMask, the Rust regex syntax: no back-references or look-around), so a site owner's
+   pattern cannot hold a worker until the deadline on every post of the site (SEC-PFS-90). A pattern the matcher does not
+   take throws here, as a RegExp did. */
 function ruleRegex(r) {
-    if (r.ruleType === 'regex') return new RegExp(r.pattern, 'i')
-    if (r.ruleType === 'link')
-        return new RegExp(
-            '(?:https?://|www\\.)(?:[^\\s/"\'<>]*\\.)?' +
-                escapeRegex(r.pattern),
-            'i',
-        )
-    return new RegExp('\\b' + escapeRegex(r.pattern) + '\\b', 'i')
+    const source =
+        r.ruleType === 'regex'
+            ? String(r.pattern || '')
+            : r.ruleType === 'link'
+              ? '(?:https?://|www\\.)(?:[^\\s/"\'<>]*\\.)?' + escapeRegex(r.pattern)
+              : '\\b' + escapeRegex(r.pattern) + '\\b'
+    StringUtilities.regexTest(source, '', true)
+    return {
+        source,
+        test: (text) => StringUtilities.regexTest(source, String(text ?? ''), true),
+        mask: (text) => StringUtilities.regexMask(source, String(text ?? ''), '■', true),
+    }
 }
 /* Censoring masks matched text outside tags; the author's original stays in the revision source for staff. */
 function censor(html, re) {
-    const global = new RegExp(re.source, re.flags.replace('g', '') + 'g')
     return String(html)
         .split(/(<[^>]*>)/)
-        .map((part) =>
-            part.startsWith('<')
-                ? part
-                : part.replace(global, (m) => '■'.repeat(m.length)),
-        )
+        // a tag, or a piece with nothing to match (empty, white space), is kept as it is without a call
+        .map((part) => (part.startsWith('<') || !part.trim() ? part : re.mask(part)))
         .join('')
 }
 /* ---- Trust ---- */
@@ -1741,7 +1751,12 @@ function applyRules(siteId, contactListId, html) {
         try {
             re = ruleRegex(r)
         } catch (e) {
-            ec.logger.error('Forum rule ' + r.ruleId + ' is invalid; skipped')
+            // a rule stored before the linear matcher (SEC-PFS-90) may hold look-around or back references, which it does
+            // not take: named here, and answered as invalid in the rule list (findRules), until its owner edits it
+            ec.logger.error(
+                'Forum rule ' + r.ruleId + ' of site ' + siteId + ' is not a pattern the rule matcher takes (look-around ' +
+                    'and back references are not), so it is skipped: ' + String(e?.message || e).split('\n')[0],
+            )
             continue
         }
         if (!re.test(r.action === 'censor' ? plainText(out.body) : text))

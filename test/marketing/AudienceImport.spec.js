@@ -225,6 +225,9 @@ feature(
             outcome[5].partyId != party.Pia && row("mantle.party.Party", {partyId: outcome[5].partyId}).privateOwnerUserId == null
             status(listId, party.Pia) == null
             row("mantle.party.Party", {partyId: outcome[2].partyId}).privateOwnerUserId == null
+            // a new contact is the list's organization's, not the shared directory's (SEC-BAP-123)
+            row("mantle.party.Party", {partyId: outcome[5].partyId}).ownerPartyId ==
+                row("mantle.marketing.contact.ContactList", {contactListId: listId}).ownerPartyId
             // each request names the import's row and its own evidence, the column's or the import's
             rows(REQUEST, {sourceRecordId: preview.audienceImportId + ":2"})[0].evidenceText == "Asked at the counter"
             rows(REQUEST, {sourceRecordId: preview.audienceImportId + ":1"})[0].evidenceText == "Fair sign-up sheet"

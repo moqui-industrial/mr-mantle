@@ -835,14 +835,19 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="website"><description>The honeypot: empty from a person</description></parameter>
             <parameter name="reCaptchaToken"/>
             <parameter name="fileList" type="List"><description>Uploaded files (FileItem)</description></parameter>
+            <parameter name="checkOnly" type="Boolean"><description>Only the checks: the form, the honeypot, the fields and
+                the hourly limits, with nothing made; wouldMake says whether a request would be (SEC-PSS-92: a site's form
+                stages its file only then)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="requestId"/>
             <parameter name="received" type="Boolean"/>
+            <parameter name="wouldMake" type="Boolean"/>
         </out-parameters>
         <actions><script><![CDATA[
             requestId = null
             received = false
+            wouldMake = false
             const L = (text) => ec.l10n.localize(text)
             const fail = (text) => { ec.message.addError(L(text)) }
             const wasDisabled = ec.artifactExecution.disableAuthz()
@@ -915,6 +920,8 @@ along with this software (see the LICENSE.md file). If not, see
                     }
                     fail('You sent several requests just now; try again in an hour'); return
                 }
+                // the checks alone, before a caller stages a file (SEC-PSS-92): nothing is made
+                if (checkOnly === true) { wouldMake = true; return }
                 if (queueForm) {
                     const made = channels.formRequest({target: queueForm, firstName: first, lastName: last, emailAddress: email, requestName: subject,
                         description: text, requestTypeEnumId: typeId})

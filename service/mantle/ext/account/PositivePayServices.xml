@@ -24,7 +24,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="fileDate" type="Timestamp" default="ec.user.nowTimestamp"><description>The date/time used
                 in various fields and set on PaymentMethodFile.fileDate</description></parameter>
             <parameter name="formatServiceName"><description>Extension mechanism, generally empty and determined based
-                on BankAccount.posPayFormatEnumId</description></parameter>
+                on BankAccount.posPayFormatEnumId; a generate# service with generate#PositivePayInterface's parameters
+                (FORMAT_INVALID for any other)</description></parameter>
             <parameter name="paymentIdList" type="List"><description>Only these payments (a payment run's), when
                 given</description></parameter>
         </in-parameters>
@@ -49,6 +50,15 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!bankAccount"><return error="true" message="Payment method ${paymentMethodId} is not a bank account"/></if>
             <if condition="!bankAccount.posPayFormatEnumId">
                 <return error="true" message="No Pos. Pay File Format set for bank account ${paymentMethodId}"/></if>
+            <!-- a format service a caller names is a generate# service with every parameter of generate#PositivePayInterface (as
+                one that implements it has), never another service run with this call's context (SEC-BOS-125) -->
+            <if condition="formatServiceName">
+                <set field="formatDefinition" from="ec.service.getServiceDefinition(String(formatServiceName))"/>
+                <set field="formatInterfaceNames" from="Array.from(ec.service.getServiceDefinition('mantle.ext.account.PositivePayServices.generate#PositivePayInterface').inParameterNames)"/>
+                <if condition="!formatDefinition || formatDefinition.verb != 'generate' ||
+                        !formatInterfaceNames.every(name => Array.from(formatDefinition.inParameterNames).includes(name))">
+                    <return error="true" message="FORMAT_INVALID: ${formatServiceName} is not a Positive Pay format service"/></if>
+            </if>
 
             <entity-find entity-name="mantle.account.payment.Payment" list="originalPaymentList" for-update="true">
                 <econdition field-name="fromPartyId" from="paymentMethod.ownerPartyId"/>
@@ -221,7 +231,9 @@ along with this software (see the LICENSE.md file). If not, see
                     let payeeName = ""
                     let otherParty = payment.toPartyId ? ec.entity.find("mantle.party.PartyDetail").condition("partyId", payment.toPartyId).one() : null
                     if (otherParty) {
-                        payeeName = otherParty.firstName ? otherParty.firstName + " " + otherParty.lastName : otherParty.organizationName
+                        // printable ASCII only (SEC-BOS-123): a line break or a control character in a name would split the record
+                        payeeName = String((otherParty.firstName ? otherParty.firstName + " " + otherParty.lastName : otherParty.organizationName) ?? "")
+                                .normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, " ")
                         if (payeeName.length > 43) payeeName = payeeName.substring(0, 43)
                     }
 
@@ -267,6 +279,7 @@ along with this software (see the LICENSE.md file). If not, see
                 let ftText = ''
                 for (const line of lines) {
                     if (line.length !== 80) ec.message.addError(`Generated line does not have exactly 80 chars: ${line}`)
+                    else if (/[^\x20-\x7E]/.test(line)) ec.message.addError(`Generated line holds a character outside printable ASCII: ${line}`)
                     ftText += line + '\n'
                 }
                 // get the String value
@@ -306,7 +319,9 @@ along with this software (see the LICENSE.md file). If not, see
                     let payeeName = ""
                     let otherParty = payment.toPartyId ? ec.entity.find("mantle.party.PartyDetail").condition("partyId", payment.toPartyId).one() : null
                     if (otherParty) {
-                        payeeName = otherParty.firstName ? otherParty.firstName + " " + otherParty.lastName : otherParty.organizationName
+                        // printable ASCII only (SEC-BOS-123): a line break or a control character in a name would split the record
+                        payeeName = String((otherParty.firstName ? otherParty.firstName + " " + otherParty.lastName : otherParty.organizationName) ?? "")
+                                .normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, " ")
                         if (payeeName.length > 50) payeeName = payeeName.substring(0, 50)
                     }
 
@@ -335,6 +350,7 @@ along with this software (see the LICENSE.md file). If not, see
                 let ftText = ''
                 for (const line of lines) {
                     if (line.length !== 87) ec.message.addError(`Generated line does not have exactly 87 chars: ${line}`)
+                    else if (/[^\x20-\x7E]/.test(line)) ec.message.addError(`Generated line holds a character outside printable ASCII: ${line}`)
                     ftText += line + '\n'
                 }
                 // get the String value
@@ -387,7 +403,9 @@ along with this software (see the LICENSE.md file). If not, see
                     let payeeName = ""
                     let otherParty = payment.toPartyId ? ec.entity.find("mantle.party.PartyDetail").condition("partyId", payment.toPartyId).one() : null
                     if (otherParty) {
-                        payeeName = otherParty.firstName ? otherParty.firstName + " " + otherParty.lastName : otherParty.organizationName
+                        // printable ASCII only (SEC-BOS-123): a line break or a control character in a name would split the record
+                        payeeName = String((otherParty.firstName ? otherParty.firstName + " " + otherParty.lastName : otherParty.organizationName) ?? "")
+                                .normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, " ")
                         if (payeeName.length > 40) payeeName = payeeName.substring(0, 40)
                     }
 
@@ -549,7 +567,9 @@ along with this software (see the LICENSE.md file). If not, see
                     let payeeName = ""
                     let otherParty = payment.toPartyId ? ec.entity.find("mantle.party.PartyDetail").condition("partyId", payment.toPartyId).one() : null
                     if (otherParty) {
-                        payeeName = otherParty.firstName ? otherParty.firstName + " " + otherParty.lastName : otherParty.organizationName
+                        // printable ASCII only (SEC-BOS-123): a line break or a control character in a name would split the record
+                        payeeName = String((otherParty.firstName ? otherParty.firstName + " " + otherParty.lastName : otherParty.organizationName) ?? "")
+                                .normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, " ")
                         if (payeeName.length > 30) payeeName = payeeName.substring(0, 30)
                     }
 
@@ -578,6 +598,7 @@ along with this software (see the LICENSE.md file). If not, see
                 let ftText = ''
                 for (const line of lines) {
                     if (line.length !== 80) ec.message.addError(`Generated line does not have exactly 80 chars: ${line}`)
+                    else if (/[^\x20-\x7E]/.test(line)) ec.message.addError(`Generated line holds a character outside printable ASCII: ${line}`)
                     ftText += line + '\n'
                 }
                 // get the String value
@@ -629,7 +650,9 @@ along with this software (see the LICENSE.md file). If not, see
                     let payeeName = ""
                     let otherParty = payment.toPartyId ? ec.entity.find("mantle.party.PartyDetail").condition("partyId", payment.toPartyId).one() : null
                     if (otherParty) {
-                        payeeName = otherParty.firstName ? otherParty.firstName + " " + otherParty.lastName : otherParty.organizationName
+                        // printable ASCII only (SEC-BOS-123): a line break or a control character in a name would split the record
+                        payeeName = String((otherParty.firstName ? otherParty.firstName + " " + otherParty.lastName : otherParty.organizationName) ?? "")
+                                .normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, " ")
                         if (payeeName.length > 40) payeeName = payeeName.substring(0, 40)
                     }
 
@@ -721,7 +744,9 @@ along with this software (see the LICENSE.md file). If not, see
                 let payeeName = ""
                 const otherParty = payment.toPartyId ? ec.entity.find("mantle.party.PartyDetail").condition("partyId", payment.toPartyId).one() : null
                 if (otherParty) {
-                    payeeName = otherParty.firstName ? otherParty.firstName + " " + otherParty.lastName : otherParty.organizationName
+                    // printable ASCII only (SEC-BOS-123): a line break or a control character in a name would split the record
+                        payeeName = String((otherParty.firstName ? otherParty.firstName + " " + otherParty.lastName : otherParty.organizationName) ?? "")
+                                .normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, " ")
                     if (payeeName.length > 40) payeeName = payeeName.substring(0, 40)
                 }
 

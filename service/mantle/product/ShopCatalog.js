@@ -49,7 +49,9 @@ const limits = {
     treeDepth: 4,
     treeNodes: 300,
     queryLength: 100,
-    quantity: 999
+    quantity: 999,
+    // searches a requester makes in ten minutes (SEC-PSS-08): each reads the store's published products and the index
+    searches: 120
 }
 // The stock band thresholds: at or below lowStock is "low stock".
 const lowStock = 5
@@ -566,6 +568,11 @@ function nameMatches(candidates, query) {
 function searchShop(p) {
     const shop = shopOf(p)
     const query = queryOf(p.query)
+    // counted against the requester, as cart and review writes are (SEC-PSS-08): a registered frontend's visitor by the
+    // address it forwards
+    ec.resource
+        .script("component://mr-mantle/service/mantle/party/ExternalAccess.js")
+        .throttle("shop-search", limits.searches, "Wait a few minutes before searching again")
     const sort = sortOf(p.sort)
     const size = pageSizeOf(p.limit)
     const offset = cursorOf(p.cursor)

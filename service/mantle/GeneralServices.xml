@@ -130,14 +130,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.party.PartyDetail" value-field="party">
                     <field-map field-name="pseudoId" from="lookupId"/></entity-find-one>
             </if>
-            <if condition="party == null">
-                <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="partyIdent">
-                    <field-map field-name="idValue" from="lookupId"/></entity-find-one>
-                <if condition="partyIdent?.partyId">
-                    <entity-find-one entity-name="mantle.party.PartyDetail" value-field="party">
-                        <field-map field-name="partyId" from="partyIdent.partyId"/></entity-find-one>
-                </if>
-            </if>
+            <!-- no party by an identification number (a tax or identity number): who holds a number is not answered to whoever
+                knows it (SEC-BAP-115); the screens that read identifications show them masked -->
             <if condition="party != null"><set field="partyId" from="party.partyId"/></if>
 
             <!-- PartyBadge -->

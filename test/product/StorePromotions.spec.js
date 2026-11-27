@@ -203,6 +203,9 @@ feature("a promotion takes only a registered rule, its parameters typed by the r
         )
         const storePromotionId = made.storePromotionId
         const badValue = manage("store#PromotionParameters", {storePromotionId, parameters: {discountPercent: "ten"}})
+        // SEC-BAP-129: a percent over 100 and a negative quantity are refused
+        const overPercent = manage("store#PromotionParameters", {storePromotionId, parameters: {discountPercent: "150"}})
+        const negative = manage("store#PromotionParameters", {storePromotionId, parameters: {getQuantity: "-1"}})
         const unknown = manage("store#PromotionParameters", {storePromotionId, parameters: {serviceName: "x"}})
         const partial = manage("store#PromotionParameters", {
             storePromotionId,
@@ -230,6 +233,8 @@ feature("a promotion takes only a registered rule, its parameters typed by the r
             otherStore,
             made,
             badValue,
+            overPercent,
+            negative,
             unknown,
             partial,
             saved,
@@ -252,6 +257,8 @@ feature("a promotion takes only a registered rule, its parameters typed by the r
         code(r.otherStore) == "RECORD_UNAVAILABLE"
         code(r.made) == ""
         code(r.badValue) == "VALUE_INVALID"
+        code(r.overPercent) == "VALUE_INVALID"
+        code(r.negative) == "VALUE_INVALID"
         code(r.unknown) == "VALUE_INVALID"
         r.partial.missing == ["getQuantity"]
         r.saved.missing == []

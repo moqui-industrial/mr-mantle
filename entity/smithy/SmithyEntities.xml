@@ -478,4 +478,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="approvedDate" type="date-time"/>
         <relationship type="one-nofk" related="moqui.resource.GitMergeRequest"/>
     </entity>
+    <!-- SEC-PFS-102: who set a webhook's address, or turned it on last: its deliveries are held to that account's rights -->
+    <extend-entity entity-name="GitWebhook" package="moqui.resource">
+        <field name="urlSetByUserId" type="id"><description>The Smithy Maintainer who set the URL, or turned the webhook on
+            last (SmithyGit.js storeWebhook); its deliveries stop once that account no longer holds the delete right
+            (SmithyCore.js pauseLostWebhooks).</description></field>
+    </extend-entity>
 </entities>

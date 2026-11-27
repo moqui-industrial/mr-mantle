@@ -869,27 +869,34 @@ function intakeCase(p, organizationPartyId, key, stage) {
         email: p.emailAddress
     })
     if (operation.old) return lib.previous(operation)
-    const staged = stage()
-    const out = ec.service
-        .sync()
-        .name("mantle.request.RequestServices.create#IntakeRequest")
-        .parameters({
-            token: p.token,
-            organizationPartyId,
-            firstName: p.firstName,
-            lastName: p.lastName,
-            emailAddress: p.emailAddress,
-            requestTypeEnumId: p.requestTypeEnumId || null,
-            requestName: p.requestName,
-            description: p.description,
-            website: p.website || null
-        })
-        .call()
-    if (ec.message.hasError()) {
-        const message = ec.message.getErrorsString().split("\n")[0]
-        ec.message.clearErrors()
-        fail("Unprocessable", message || "Your request could not be sent")
+    const intake = checkOnly => {
+        const out = ec.service
+            .sync()
+            .name("mantle.request.RequestServices.create#IntakeRequest")
+            .parameters({
+                token: p.token,
+                organizationPartyId,
+                firstName: p.firstName,
+                lastName: p.lastName,
+                emailAddress: p.emailAddress,
+                requestTypeEnumId: p.requestTypeEnumId || null,
+                requestName: p.requestName,
+                description: p.description,
+                website: p.website || null,
+                checkOnly
+            })
+            .call()
+        if (ec.message.hasError()) {
+            const message = ec.message.getErrorsString().split("\n")[0]
+            ec.message.clearErrors()
+            fail("Unprocessable", message || "Your request could not be sent")
+        }
+        return out
     }
+    // the form's checks first (the honeypot, the fields, the hourly limits): a post that makes nothing costs no write or scan
+    // of its file (SEC-PSS-92)
+    const staged = intake(true)?.wouldMake ? stage() : null
+    const out = intake(false)
     // a signed-in account filing with one of its own verified addresses is the address's owner: the case is confirmed as it
     // is filed (SEC-PSS-87; confirmSender takes it only when that account is the case's filer, the address's matched party)
     const confirmed =

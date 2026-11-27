@@ -487,13 +487,19 @@ feature("a preview needs the site's preview host and answers only its token on t
             hostname: previewHost,
             token: token.slice(0, -1) + (token.endsWith("Q") ? "R" : "Q")
         })
+        // a maker whose account was ended by its terminateDate has no preview (SEC-PSS-90)
+        const terminate = terminateDate =>
+            system(() => call("update#moqui.security.UserAccount", {userId: state.designer, terminateDate}))
+        terminate(new Date(Date.now() - 60000))
+        const ended = run(null, T + "get#ThemePreviewPage", {siteId: site, hostname: previewHost, token})
+        terminate(null)
         const hostKind = run(null, T + "get#PreviewHost", {siteId: site, hostname: previewHost})
         const row = one("mantle.public.PublicThemePreview", {previewId: made.previewId})
         const tokenShaped = /^[A-Za-z0-9]{20,80}$/.test(token)
-        Object.assign(state, {noHost, outsiderPreview, made, token, tokenShaped, page, asset, otherHost, forged, hostKind, row})
+        Object.assign(state, {noHost, outsiderPreview, made, token, tokenShaped, page, asset, otherHost, forged, ended, hostKind, row})
     },
     then() {
-        const {noHost, outsiderPreview, made, token, tokenShaped, page, asset, otherHost, forged, hostKind, row} = state
+        const {noHost, outsiderPreview, made, token, tokenShaped, page, asset, otherHost, forged, ended, hostKind, row} = state
         code(noHost) === "NO_PREVIEW_HOST"
         code(outsiderPreview) === "RECORD_UNAVAILABLE"
         made.error === ""
@@ -510,6 +516,7 @@ feature("a preview needs the site's preview host and answers only its token on t
         asset.asset.text === "body { color: #222; }"
         code(otherHost) === "NOT_AVAILABLE"
         code(forged) === "NOT_AVAILABLE"
+        code(ended) === "NOT_AVAILABLE"
         hostKind.preview === true && hostKind.restricted === true
     }
 })
@@ -554,5 +561,23 @@ feature("store#Mounts binds a preview host, never canonical, and a save that doe
         boundKind === "PshkPreview"
         pageUrl === "https://live.thmaut.example.test/"
         shopMount != null
+    }
+})
+// SEC-PSS-91: a theme's package is read and written at its own root by its id; a packageRoot a generic editor or an import
+// changed moves nothing
+feature("a theme's package is its own root by its id, whatever its stored packageRoot says (SEC-PSS-91)", {
+    when() {
+        const files = () =>
+            (run(state.designer, T + "get#ThemeDraft", {themeId: state.themeId}).files || []).map(file => file.path).sort()
+        const before = files()
+        const stored = one("mantle.public.PublicTheme", {themeId: state.themeId}).packageRoot
+        system(() => call("update#mantle.public.PublicTheme", {themeId: state.themeId, packageRoot: "dbresource://pss91-elsewhere"}))
+        const moved = files()
+        system(() => call("update#mantle.public.PublicTheme", {themeId: state.themeId, packageRoot: stored}))
+        return {before, moved}
+    },
+    then({before, moved}) {
+        before.length > 0
+        JSON.stringify(moved) === JSON.stringify(before)
     }
 })

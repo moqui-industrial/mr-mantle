@@ -202,3 +202,32 @@ feature("a department's employee reaches its parent's and a sibling department's
         visible == [made.Sibling, made.TopStaff]
     }
 })
+
+// SEC-DAT-88: with filterOrgIds unset a filter map's equality on it is IS NULL, which shows the rows of no organization; every
+// organization filter map names it as filterOrgIds || [] (an empty list matches none), and setup#UserOrganizationInfo sets
+// an empty list for an account with no party
+feature("an organization filter with no organizations matches no rows, and an account with no party has none", {
+    when() {
+        const bare = Array.from(
+            ec.entity.find("moqui.security.EntityFilter").condition("entityFilterSetId", "in", ["MANTLE_USER_ORG", "MANTLE_ACTIVE_ORG"]).list()
+        )
+            .filter(row => /(^|[^\w.])filterOrgIds(?!\s*\|\|)/.test(String(row.filterMap || "")))
+            .map(row => row.entityFilterId)
+        const username = "reach.noparty." + run
+        ec.service
+            .sync()
+            .name("create#moqui.security.UserAccount")
+            .parameters({userId: "REACH_NOPARTY_" + run, username, currentPassword: "16ac58bbfa332c1c55bd98b53e60720bfa90d394", passwordHashType: "SHA"})
+            .call()
+        login(username)
+        ec.user.context.filterOrgIds = null
+        ec.service.sync().name(P + "setup#UserOrganizationInfo").call()
+        const filterOrgIds = ec.user.context.filterOrgIds
+        login("john.doe")
+        return {bare, filterOrgIds}
+    },
+    then({bare, filterOrgIds}) {
+        bare == []
+        Array.isArray(filterOrgIds) && filterOrgIds.length == 0
+    }
+})

@@ -580,10 +580,23 @@ feature(
             )
             const approved = states(reserved.reference)
             const view = visitor("get#Registration", {siteId: siteB, token: reserved.token})
+            // the join link reaches a confirmed registrant only as an https address (SEC-PSF-84)
+            const joinWith = infoUrl => {
+                system(() =>
+                    ec.service
+                        .sync()
+                        .name("update#mantle.work.effort.WorkEffort")
+                        .parameters({workEffortId: ids.approval.workEffortId, infoUrl})
+                        .disableAuthz()
+                        .call()
+                )
+                return visitor("get#Registration", {siteId: siteB, token: reserved.token}).registration.joinUrl
+            }
+            const joins = [joinWith("javascript:alert(1)"), joinWith("https://meet.mkrg.example.test/room"), joinWith(null)]
             // a second order of the same offer, cancelled instead: its place is released once
             const next = reserve(siteB, ids.approval.registrationPolicyId, ids.approval.ticketTypeId, 1, "next@mkrg.example.test")
             const full = next.kind ? null : states(next.reference)
-            return {paid, placed, pending, stillPending, approved, view, next, full}
+            return {paid, placed, pending, stillPending, approved, view, joins, next, full}
         },
         then(r) {
             r.placed == "OrderPlaced"
@@ -593,6 +606,7 @@ feature(
             r.stillPending == "EvrPending"
             r.approved == "EvrConfirmed"
             r.view.registration.state == "confirmed" && r.view.registration.places[0].canShowCode
+            r.joins == [null, "https://meet.mkrg.example.test/room", null]
             r.full == "EvrWaitlisted"
         }
     }
@@ -796,7 +810,18 @@ feature(
             // the verified result confirms; the page is no longer offered
             const result = returned(siteC, reserved.token)
             const after = visitor("get#RegistrationPaymentForm", {siteId: siteC, token: reserved.token})
-            return {started, form, again, back, byKey, formByKey, otherSite, result, after}
+            // the key reads for a day after the payment settled, then nothing (SEC-PSS-94)
+            const settled = visitor("get#Registration", {siteId: siteC, reference: reserved.reference, key: returnKey})
+            system(() =>
+                ec.service
+                    .sync()
+                    .name("update#mantle.account.payment.PortalPaymentAttempt")
+                    .parameters({paymentId, settledDate: new Date(Date.now() - 2 * dayMs)})
+                    .disableAuthz()
+                    .call()
+            )
+            const dayLater = visitor("get#Registration", {siteId: siteC, reference: reserved.reference, key: returnKey})
+            return {started, form, again, back, byKey, formByKey, otherSite, result, after, settled, dayLater}
         },
         then(r) {
             r.started.payment.paymentState == "pending" && r.started.payment.provider.form == true
@@ -805,6 +830,10 @@ feature(
             String(r.again.form.fields.token) != String(r.form.form.fields.token)
             String(r.back).startsWith("https://mkrg-c.example.test/marketing/Register?ref=")
             r.byKey.registration.limited == true && r.byKey.registration.state == "held"
+            // the state alone: no date, amount or payment page (SEC-PSS-94)
+            r.byKey.registration.payment == null && r.byKey.registration.whenText == null
+            r.settled.registration.state == "confirmed"
+            r.dayLater.kind == "NotFound"
             r.formByKey.kind == "NotFound" && r.otherSite.kind == "NotFound"
             r.result.registration.state == "confirmed"
             r.after.kind == "NotFound"

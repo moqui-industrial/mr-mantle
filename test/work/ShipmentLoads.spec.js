@@ -171,6 +171,24 @@ feature("make the order conditions and create loads for the remaining approved o
     },
 })
 
+feature("a category id that is not a plain id is refused before it reaches the SQL (SEC-BAP-139)", {
+    when() {
+        // an existing category whose id ends in a backslash would end its quote on MySQL
+        ec.entity
+            .makeValue("mantle.product.category.ProductCategory")
+            .setAll({productCategoryId: "SLTEST\\", categoryName: "Backslash"})
+            .create()
+        const refused = errorOf("mantle.work.ShipmentWorkServices.make#ShipmentLoadOrderConditions", {
+            inventoryCategoryId: "SLTEST\\"
+        })
+        ec.entity.find("mantle.product.category.ProductCategory").condition("productCategoryId", "SLTEST\\").deleteAll()
+        return {refused}
+    },
+    then({refused}) {
+        refused != null && refused.includes("Invalid Category ID")
+    }
+})
+
 feature("setAll for the facility and a load for no shipments", {
     when() {
         call("mantle.work.ShipmentWorkServices.setAll#ShipmentLoadStatusFromShipments", { facilityId })

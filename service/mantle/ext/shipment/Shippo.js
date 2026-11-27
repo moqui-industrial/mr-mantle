@@ -183,8 +183,10 @@ function send(gw, method, path, body) {
             .addHeader("Shippo-API-Version", API_VERSION)
             .addHeader("Accept", "application/json")
         if (body != null) client = client.jsonObject(JSON.stringify(body))
-        if (gw.remote.allowPrivateNetwork === "N") client = client.denyInternal()
-        else if (gw.remote.allowPrivateNetwork === "Y") client = client.allowInternal()
+        // the token reaches an internal address only when the connection allows the private network (Y), on any
+        // instance (SEC-BAP-03)
+        if (gw.remote.allowPrivateNetwork === "Y") client = client.allowInternal()
+        else client = client.denyInternal()
         response = client.call()
     } catch (error) {
         return {lost: "No answer from Shippo: " + clip(errorText(error), 200)}

@@ -18,6 +18,7 @@ const orders = () => ec.resource.script("component://mr-mantle/service/mantle/or
 const access = () => ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js")
 const media = () => ec.resource.script("component://mr-mantle/service/mantle/party/PortalMedia.js")
 const {find, one, rows, call, ms} = lib
+const httpsUrl = lib.httpsUrl
 
 const HEADER = "mantle.order.return.ReturnHeader",
     ITEM = "mantle.order.return.ReturnItem",
@@ -400,7 +401,8 @@ function getCustomerReturn(p) {
             })),
         trackingList: labels
             .filter(row => row.trackingCode)
-            .map(row => ({trackingCode: row.trackingCode, trackingUrl: row.trackingUrl})),
+            // a tracking link only as an https address, as Sales answers one (SEC-PSF-84)
+            .map(row => ({trackingCode: row.trackingCode, trackingUrl: httpsUrl(row.trackingUrl)})),
         capabilities: {
             canAddEvidence: open || header.statusId === "ReturnShipped",
             canDownloadLabel: labels.some(row => row.hasLabel) && ["ReturnApproved", "ReturnShipped"].includes(header.statusId),

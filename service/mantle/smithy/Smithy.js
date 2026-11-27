@@ -869,7 +869,7 @@ methods.getCompare = p => {
     }
 }
 methods.findRefs = p => {
-    core.repository(p.repositoryId, p.siteId)
+    const r = core.repository(p.repositoryId, p.siteId)
     if (p.refType && !["branch", "tag"].includes(p.refType)) invalid("refType must be branch or tag")
     const pg = page(p, ["smithy-refs", p.repositoryId, p.refType, p.query, flag(p.namesOnly)].join(":"))
     const refs = git("get#GitRefs", {repositoryId: p.repositoryId, refType: p.refType || null})
@@ -889,6 +889,10 @@ methods.findRefs = p => {
     // ahead and behind the default branch, a rule's protection and the open merge request are the Branches page's: asked
     // with refType branch and without namesOnly; a ref picker asks for names
     const detailed = p.refType === "branch" && !flag(p.namesOnly)
+    // a hidden merge request's number is shown only to whom its list shows it (SmithyReviews listCondition): an Owner, the
+    // site's staff and its author (SEC-PFS-109)
+    const userId = core.actor().userId || null
+    const seesHidden = r.rank >= RANK.SmrOwner || !!r.access?.staff
     const openBySource = new Map(
         detailed
             ? Array.from(
@@ -896,7 +900,9 @@ methods.findRefs = p => {
                       .condition("statusId", "in", ["GmrDraft", "GmrOpen"])
                       .limit(SCAN_LIMIT)
                       .list()
-              ).map(request => [request.sourceRef, request.mergeRequestNum])
+              )
+                  .filter(request => seesHidden || !request.hiddenDate || (!!userId && request.authorUserId === userId))
+                  .map(request => [request.sourceRef, request.mergeRequestNum])
             : []
     )
     return {

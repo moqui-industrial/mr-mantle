@@ -602,3 +602,28 @@ feature("every product and category content type takes a location only in its re
         r.storeServed == true && r.outsideServed == false
     }
 })
+
+// SEC-PSS-08: a shop search is counted against its requester, 120 in ten minutes; past that it is refused as a rate limit
+feature("shop searches are counted against the requester (SEC-PSS-08)", {
+    when() {
+        const requester = ec.resource.script("component://framework/service/org/moqui/public/Account.js").requesterKey()
+        const window = Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 600000)
+        const bucketId = ec.user.singleUseCodeHash("shop-search:" + requester + ":" + window)
+        const bucket = () =>
+            ec.entity.find("moqui.security.public.AccountAttempt").condition({bucketId}).disableAuthz()
+        const before = read("search#Shop", {query: "Catalog"})
+        // the requester's window already holds 120 searches
+        system(() => {
+            const row = bucket().one()
+            row.set("attemptCount", 120)
+            row.update()
+        })
+        const past = read("search#Shop", {query: "Catalog"})
+        system(() => bucket().deleteAll())
+        return {before, past}
+    },
+    then({before, past}) {
+        !before.error
+        past.error.includes("RATE_LIMITED")
+    }
+})

@@ -756,6 +756,38 @@ feature("unsupported data is refused, not dropped; a refused document is retried
         out.shipTo = documentsOf(
             receive(interchange([{sets: [po("0002", "PO-9002", [lineA(1)], {shipTo: "9999"})]}])).systemMessageId
         )[0]
+        // SEC-BAP-117: a signed SAC05 is refused (the indicator says which way), and an order that comes to nothing is
+        // placed, not approved by the system: approving it is the seller's
+        out.signed = documentsOf(
+            receive(interchange([{sets: [po("0005", "PO-9005", [lineA(1)], {sacs: ["SAC*C*D240***-1000"]})]}])).systemMessageId
+        )[0]
+        const free = documentsOf(
+            receive(interchange([{sets: [po("0006", "PO-9006", [Object.assign(lineA(1), {price: 0})])]}])).systemMessageId
+        )[0]
+        // the auto-approval the placing runs (OrderPlacedAutoApprove), asked again: it leaves an EDI order placed
+        call("mantle.order.OrderServices.autoApprove#Order", {orderId: free.orderId})
+        out.freeStatus = one("mantle.order.OrderHeader", {orderId: free.orderId})?.statusId
+        // SEC-BAP-135: a profile row naming a grammar outside a component's edi/x12 directory, or a mapping that is no EDI
+        // document's service, is refused, not run
+        const docKey = {ediProfileId: profile, transactionSetId: "850", directionEnumId: "EdiDirIn"}
+        const pdoc = one("mantle.edi.EdiProfileDocument", docKey)
+        try {
+            call("update#mantle.edi.EdiProfileDocument", Object.assign({grammarLocation: "file:/tmp/edi-grammar.js"}, docKey))
+            out.grammar = documentsOf(receive(interchange([{sets: [po("0007", "PO-9007", [lineA(1)])]}])).systemMessageId)[0]
+            call(
+                "update#mantle.edi.EdiProfileDocument",
+                Object.assign(
+                    {grammarLocation: pdoc.grammarLocation, mappingServiceName: "mantle.party.PartyServices.create#Person"},
+                    docKey
+                )
+            )
+            out.mapping = documentsOf(receive(interchange([{sets: [po("0008", "PO-9008", [lineA(1)])]}])).systemMessageId)[0]
+        } finally {
+            call(
+                "update#mantle.edi.EdiProfileDocument",
+                Object.assign({grammarLocation: pdoc.grammarLocation, mappingServiceName: pdoc.mappingServiceName}, docKey)
+            )
+        }
         out.segment = documentsOf(
             receive(interchange([{sets: [po("0003", "PO-9003", [lineA(1)], {extra: ["SCH*1*EA****002*20261120"]}).map(s => s)]}]))
                 .systemMessageId
@@ -811,6 +843,10 @@ feature("unsupported data is refused, not dropped; a refused document is retried
         r.percent.statusId == "EdocException"
         r.percent.reasonCode == "SAC_UNSUPPORTED"
         r.shipTo.reasonCode == "SHIP_TO_UNKNOWN"
+        r.signed.reasonCode == "SAC_UNSUPPORTED"
+        r.freeStatus == "OrderPlaced"
+        JSON.stringify(r.grammar || {}).includes("GRAMMAR_INVALID")
+        r.mapping.reasonCode == "MAPPING_INVALID"
         r.segment.reasonCode == "UNSUPPORTED_SEGMENT"
         r.refused.statusId == "EdocRefused"
         r.refused.reasonCode == "SSCC_MISSING"

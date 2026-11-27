@@ -257,9 +257,10 @@ function accessToken(gw, fresh) {
             .addHeader("Cache-Control", "no-cache")
             .contentType("application/x-www-form-urlencoded")
             .text(form)
-        // a connection that may not use the private network (a delegated administrator's on a production instance)
-        if (gw.remote.allowPrivateNetwork === "N") client.denyInternal()
-        else if (gw.remote.allowPrivateNetwork === "Y") client.allowInternal()
+        // the gateway's credentials reach an internal address only when its connection allows the private network (Y),
+        // on any instance (SEC-BAP-03)
+        if (gw.remote.allowPrivateNetwork === "Y") client.allowInternal()
+        else client.denyInternal()
         response = client.call()
     } catch (_) {
         return {problem: "No answer from PayTrace's token endpoint"}
@@ -300,8 +301,10 @@ function api(gw, method, path, body) {
                 .addHeader("Accept", "application/json")
                 .addHeader("Cache-Control", "no-cache")
             if (body != null) client.jsonObject(JSON.stringify(body))
-            if (gw.remote.allowPrivateNetwork === "N") client.denyInternal()
-            else if (gw.remote.allowPrivateNetwork === "Y") client.allowInternal()
+            // the gateway's credentials reach an internal address only when its connection allows the private network (Y),
+            // on any instance (SEC-BAP-03)
+            if (gw.remote.allowPrivateNetwork === "Y") client.allowInternal()
+            else client.denyInternal()
             response = client.call()
         } catch (error) {
             return {unknown: "No answer from PayTrace: " + clip(error?.message ?? error, 200)}

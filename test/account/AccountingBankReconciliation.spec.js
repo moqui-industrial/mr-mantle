@@ -150,6 +150,30 @@ feature("a statement with a duplicate and a malformed row imports the rest and l
         preview.columns.join() == "When,What,Value" && preview.previewRows[0].transAmount == "-1.00"
     }
 })
+// SEC-BOS-124: a statement text over 10 MB is refused before it is parsed, and an amount of a long run of digits is a rejected
+// row, found in linear time, where the old pattern backtracked over every digit
+feature("a statement over 10 MB is refused, and a long amount is a rejected row", {
+    when() {
+        const preview = (statementText) => ({
+            paymentMethodId: f.bankId,
+            statementText,
+            dateColumn: "When",
+            amountColumn: "Value",
+            descriptionColumn: "What"
+        })
+        const tooLarge = rejected("preview#CsvStatement", preview("When,What,Value\n" + "x".repeat(10485760)))
+        const started = Date.now()
+        const longAmount = native("preview#CsvStatement", preview("When,What,Value\n" + f.day + ",Fee," + "1".repeat(20000) + "x\n" + f.day + ",Fee,-1.00"))
+        return {tooLarge, longAmount, millis: Date.now() - started}
+    },
+    then({tooLarge, longAmount, millis}) {
+        tooLarge.includes("STATEMENT_TOO_LARGE")
+        longAmount.previewRows[0].status == "rejected"
+        longAmount.previewRows[1].transAmount == "-1.00"
+        millis < 5000
+    }
+})
+
 feature("the same BAI2 file imported twice adds nothing the second time, through review and through import#BaiVersion2", {
     when() {
         const text = bai("BAI-REF-1")

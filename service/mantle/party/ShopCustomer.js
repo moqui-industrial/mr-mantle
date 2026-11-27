@@ -133,7 +133,10 @@ function claimGuestPurchases(shop, partyId) {
             ec.service
                 .sync()
                 .name("mantle.party.DuplicateServices.merge#Parties")
-                .parameters({toPartyId: partyId, fromPartyId: guest.partyId})
+                // the email was typed, never verified (SEC-PSS-04): the account takes the order, not the guest's contact data,
+                // so an address, number or email someone else typed with this email is never offered as the account's own (the
+                // order keeps its own copies, OrderContactMech); the merge, in its own transaction, copies none of them
+                .parameters({toPartyId: partyId, fromPartyId: guest.partyId, skipContactMechs: true})
                 .disableAuthz()
                 .requireNewTransaction(true)
                 .call()

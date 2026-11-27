@@ -69,7 +69,6 @@ along with this software (see the LICENSE.md file). If not, see
                 if (postalCode || country) uriBuilder.parameter("components", (postalCode ? "postal_code:" + postalCode : "") + (postalCode && country ? "|" : "") +  (country ? "country:" + country : ""))
                 if (resultType) uriBuilder.parameter("result_type", String(resultType.trim()))
                 uriBuilder.build()
-                // ec.logger.warn(`getUriString ${restClient.getUriString()}`)
 
                 const restResponse = restClient.call()
                 const responseMap = restResponse.jsonObject()
@@ -131,7 +130,6 @@ along with this software (see the LICENSE.md file). If not, see
                 if (region) uriBuilder.parameter("region", String(region.trim()))
                 // if (postalCode || country) uriBuilder.parameter("components", (postalCode ? "postal_code:" + postalCode : "") + (postalCode && country ? "|" : "") +  (country ? "country:" + country : ""))
                 uriBuilder.build()
-                ec.logger.warn(`getUriString ${restClient.getUriString()}`)
 
                 const restResponse = restClient.call()
                 const responseMap = restResponse.jsonObject()
@@ -183,7 +181,6 @@ along with this software (see the LICENSE.md file). If not, see
                         .parameter("place_id", String(placeId))
                         .parameter("fields", String(fields))
                 uriBuilder.build()
-                // ec.logger.warn(`getUriString ${restClient.getUriString()}`)
 
                 const restResponse = restClient.call()
                 const responseMap = restResponse.jsonObject()

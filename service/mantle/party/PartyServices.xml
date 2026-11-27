@@ -184,13 +184,15 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- NOTE: using entityFilterSetId is a hack that only works for these 'standard' filter sets, would be
                 better to pick apart filterMap to see what's used, but this is specific to activeOrgId and filterOrgIds anyway -->
             <set field="findFilters" from="ec.artifactExecution.getFindFiltersForUser('mantle.party.Party')"/>
-            <if condition="findFilters != null &amp;&amp; findFilters.length &gt; 0"><set field="entityFilterSetId" from="findFilters[0].entityFilterSetId"/></if>
+            <!-- every filter set of the user's authorization, in no set order: the organization set need not be the first
+                (MANTLE_PRIVATE_CONTACT and others beside it), so it is looked for among them all (SEC-DAT-86) -->
+            <set field="entityFilterSetIds" from="Array.from(findFilters || []).map(filter =&gt; filter.entityFilterSetId)"/>
             <!-- <log level="warn" message="Doing party search with activeOrgId ${activeOrgId} filterOrgIds ${filterOrgIds} entityFilterSetId ${entityFilterSetId}"/> -->
             <script><![CDATA[
                 // the org limit is a trusted filter, so it does not change scores and the user query cannot widen it
                 let ownerPartyIds = null;
-                if ('MANTLE_USER_ORG' === entityFilterSetId) ownerPartyIds = (filterOrgIds || []).concat(['_NA_']);
-                else if ('MANTLE_ACTIVE_ORG' === entityFilterSetId && activeOrgId) ownerPartyIds = [activeOrgId, '_NA_'];
+                if (entityFilterSetIds.includes('MANTLE_USER_ORG')) ownerPartyIds = (filterOrgIds || []).concat(['_NA_']);
+                else if (entityFilterSetIds.includes('MANTLE_ACTIVE_ORG') && activeOrgId) ownerPartyIds = [activeOrgId, '_NA_'];
                 // a personal contact (privateOwnerUserId) only for its owner, with or without an org filter, as trusted
                 const privateFilter = ec.user.userId ? {bool: {any: [{field: {name: 'privateOwnerUserId', op: 'exists', negate: true}},
                         {field: {name: 'privateOwnerUserId', op: 'eq', value: ec.user.userId}}]}}
@@ -550,6 +552,15 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="partyId" from="ec.user.userAccount?.partyId"/>
             <if condition="!partyId">
+                <!-- no organization, said so: an unset filterOrgIds would make each MANTLE_USER_ORG map's equality an IS NULL and
+                    show the rows with no organization (SEC-DAT-88); an empty list matches none -->
+                <script>
+                    ec.user.context.userOrgIds = []
+                    ec.user.context.filterOrgIds = []
+                    ec.user.context.activeOrgId = null
+                </script>
+                <set field="userOrgIds" from="[]"/>
+                <set field="filterOrgIds" from="[]"/>
                 <log level="warn" message="Cannot setup#UserOrganizationInfo, no user with partyId logged in"/>
                 <return/>
             </if>

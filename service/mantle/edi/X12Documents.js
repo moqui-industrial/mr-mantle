@@ -126,6 +126,12 @@ function sacAdjustment(sac, c, where) {
     const amount = el(sac, 5)
     if (!x.isN(amount))
         denied("SAC_UNSUPPORTED", where + ": SAC " + code + " has no amount (SAC05); percentages are not supported")
+    // the indicator (SAC01) says which way the amount goes: a signed SAC05 would turn a charge into an allowance (SEC-BAP-117)
+    if (amount.startsWith("-"))
+        denied(
+            "SAC_UNSUPPORTED",
+            where + ": SAC " + code + " has a signed amount (SAC05); the indicator says allowance or charge"
+        )
     if (!blank(el(sac, 6)) || !blank(el(sac, 7)) || !blank(el(sac, 8)))
         denied("SAC_UNSUPPORTED", where + ": SAC " + code + " has a percentage or rate (SAC06-08), which is not supported")
     const value = x.fromN2(amount)

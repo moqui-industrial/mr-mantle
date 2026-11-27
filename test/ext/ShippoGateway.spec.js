@@ -1035,3 +1035,49 @@ feature("no API token or webhook secret reaches a package, a gateway request or 
         !text.includes(SECRET)
     }
 })
+
+// SEC-BAP-03: the token reaches an internal address only when the connection allows the private network (Y), on any instance:
+// with the fixtures off (a test run reaches loopback), the client refuses the address before it connects; allowed, it tries
+feature("a connection at an internal address is refused unless it allows the private network", {
+    when() {
+        const remoteId = gateway + "_REMOTE"
+        // the warning that says why Shippo did not validate: the client's refusal, or the connection's failure
+        const validate = () => {
+            const before = Array.from(ec.message.messages || []).length
+            invoke("mantle.shipment.CarrierServices.validate#PostalAddress", {
+                contactMechId: "SHP_VALID",
+                partyId: customer,
+                shippingGatewayConfigId: gateway
+            })
+            return Array.from(ec.message.messages || [])
+                .slice(before)
+                .join(" | ")
+        }
+        let refused, allowed
+        http.disable()
+        try {
+            // a new address takes the token again (a changed sendUrl clears it)
+            call("update#moqui.service.message.SystemMessageRemote", {
+                systemMessageRemoteId: remoteId,
+                sendUrl: "http://127.0.0.1:9",
+                password: TOKEN
+            })
+            refused = validate()
+            call("update#moqui.service.message.SystemMessageRemote", {systemMessageRemoteId: remoteId, allowPrivateNetwork: "Y"})
+            allowed = validate()
+        } finally {
+            call("update#moqui.service.message.SystemMessageRemote", {
+                systemMessageRemoteId: remoteId,
+                sendUrl: API,
+                password: TOKEN,
+                allowPrivateNetwork: null
+            })
+            http.enable()
+        }
+        return {refused, allowed}
+    },
+    then({refused, allowed}) {
+        refused.includes("is an internal address and is not allowed")
+        allowed.includes("No answer from Shippo") && !allowed.includes("internal address")
+    }
+})

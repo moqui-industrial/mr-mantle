@@ -215,20 +215,26 @@ feature("a repository moves into its Owner's namespace by the site's policy, wit
         lib.set("mantle.smithy.SmithyRepository", {repositoryId: ids.deep}, {workEffortId: "SRN_PROJECT"})
         const shared = take()
         lib.set("mantle.smithy.SmithyRepository", {repositoryId: ids.deep}, {workEffortId: null})
+        // an Owner of the repository alone does not take it out of its group (SEC-PFS-108)
+        lib.account(SITE, "SRN_REPO_OWNER", {handle: "srnrepoowner"})
+        lib.role(SITE, {repositoryId: ids.deep}, "SRN_REPO_OWNER", "SmrOwner")
+        const repositoryOwner = op("SRN_REPO_OWNER", "transferRepository", {repositoryId: ids.deep, expectedRevision: revision(ids.deep)})
         return {
             policy,
             count,
             size,
             shared,
+            repositoryOwner,
             moved: take(),
             role: op("SRN_OWNER", "getRepository", {repositoryId: ids.deep}).myRole
         }
     },
-    then({policy, count, size, shared, moved, role}) {
+    then({policy, count, size, shared, repositoryOwner, moved, role}) {
         policy.reason == "policyRefused"
         count.reason == "quotaExceeded"
         size.reason == "quotaExceeded"
         shared.kind == "Conflict"
+        repositoryOwner.reason == "accessDenied"
         moved.repositoryPath == "srnowner/deep"
         role == "owner"
     }

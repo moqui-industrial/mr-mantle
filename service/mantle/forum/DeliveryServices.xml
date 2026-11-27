@@ -173,7 +173,7 @@
     <actions>
       <script><![CDATA[
         const was=ec.artifactExecution.disableAuthz()
-        try{result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').processInbound({emailAccountId,emailMessageId,headers,fields,bodyPartList,message,spamVerdict})}finally{if(!was)ec.artifactExecution.enableAuthz()}
+        try{result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').processInbound({emailAccountId,emailMessageId,emailServerId,headers,fields,bodyPartList,message,spamVerdict})}finally{if(!was)ec.artifactExecution.enableAuthz()}
       ]]></script>
     </actions>
   </service>

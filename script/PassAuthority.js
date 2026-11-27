@@ -502,7 +502,8 @@ function run(p) {
     return { result }
 }
 function accountAction(action, p, raw, siteId, registered, delegation) {
-    if (SSO_ACTIONS[action]) {
+    // own names only: a name of Object.prototype (`constructor`) is no action (SEC-PSA-13)
+    if (Object.hasOwn(SSO_ACTIONS, action)) {
         if (!registered)
             fail('Unauthorized', 'Registered sign-in client required')
         if (Object.keys(raw).some((k) => !SSO_FIELDS.includes(k)))
@@ -521,7 +522,7 @@ function accountAction(action, p, raw, siteId, registered, delegation) {
             ),
         }
     }
-    if (!ACCOUNT_ACTIONS[action]) fail('NotFound', 'Resource not found')
+    if (!Object.hasOwn(ACCOUNT_ACTIONS, action)) fail('NotFound', 'Resource not found')
     if (Object.keys(raw).some((k) => !ACCOUNT_FIELDS.includes(k)))
         fail('Unprocessable', 'Unsupported account field')
     return asSystem(() => {
