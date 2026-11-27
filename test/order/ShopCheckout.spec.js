@@ -690,6 +690,31 @@ feature("an address takes a few guest orders with nothing due on a site in an ho
     }
 })
 
+// SEC-PSS-93: a receipt's opt-in confirmation code is looked up only after the lookup counts against the requester, 100 in
+// ten minutes, as a list link's token is
+feature("a requester's opt-in confirmation lookups are counted (SEC-PSS-93)", {
+    when() {
+        const H = "mantle.public.AccountHubServices."
+        const requester = ec.resource.script("component://framework/service/org/moqui/public/Account.js").requesterKey()
+        const window = Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 600000)
+        const bucketId = ec.user.singleUseCodeHash("optin-code:" + requester + ":" + window)
+        const lookup = () => op(H + "get#EmailPreferences", {confirm: "SHCO_NONE." + "x".repeat(32)})
+        const room = lookup()
+        system(() => {
+            const row = ec.entity.find("moqui.security.public.AccountAttempt").condition({bucketId}).disableAuthz().one()
+            row.set("attemptCount", 100)
+            row.update()
+        })
+        const full = lookup()
+        system(() => ec.entity.find("moqui.security.public.AccountAttempt").condition({bucketId}).disableAuthz().deleteAll())
+        return {room, full}
+    },
+    then({room, full}) {
+        room.error.includes("NOT_AVAILABLE")
+        full.error.includes("RATE_LIMITED")
+    }
+})
+
 // Commerce P9 follow-up: the store's opt-ins (StoreTopics.js) are offered unchecked; a guest's choice waits as a pending
 // membership until the receipt's link confirms it; nothing checked records nothing; an order without a checkout gets no link
 feature("the store's opt-ins are offered unchecked; a guest's choice waits until the receipt's link confirms it", {

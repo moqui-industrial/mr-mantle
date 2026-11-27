@@ -973,6 +973,9 @@ function reach(p, scope = "RegistrationView") {
         throttleLookup()
         const row = one(RESERVATION, {reservationId: text(p.reference)})
         if (!row || !row.returnKeyDigest || row.returnKeyDigest !== ec.user.singleUseCodeHash(String(p.key))) unavailable()
+        // the return reads while the payment is pending or for a day after it settled, as Billing's does (SEC-PSS-94)
+        const attempt = row.paymentId ? one("mantle.account.payment.PortalPaymentAttempt", {paymentId: row.paymentId}) : null
+        if (attempt?.settledDate && nowMs() - Number(ms(attempt.settledDate)) > DAY) unavailable()
         reservationId = row.reservationId
         via = "return"
     } else if (!blank(p.reservationId) && ec.user.userAccount) {
@@ -1027,7 +1030,12 @@ function registrationView(reservation, policy, via, extra = {}) {
         ),
         payment: payments().paymentView(reservation.reservationId)
     }
-    if (via === "return") return Object.assign(base, {limited: true}, extra)
+    // the provider's return reads the reservation's state alone: no date, amount or payment page (SEC-PSS-94)
+    if (via === "return")
+        return Object.assign(
+            {reference: base.reference, title: base.title, state: base.state, stateText: base.stateText, limited: true},
+            extra
+        )
     const all = P.placesOf(reservation.reservationId)
     const workEffort = one("mantle.work.effort.WorkEffort", {workEffortId: policy.workEffortId})
     const confirmedAny = all.some(row => row.statusId === "EvrConfirmed")

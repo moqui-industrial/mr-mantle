@@ -422,6 +422,10 @@ function makeConfirmLink(p) {
 }
 // The checkout a confirmation code names, on this site, while its code is current (60 days), else null.
 function checkoutOfCode(siteId, code) {
+    // every lookup counts against the requester first, as a list link's token does (SEC-PSS-93)
+    ec.resource
+        .script("component://mr-mantle/service/mantle/party/ExternalAccess.js")
+        .throttle("optin-code", 100, "Too many links opened just now; wait a few minutes and try again")
     const value = text(code)
     const match = /^([A-Za-z0-9_-]{1,40})\.([A-Za-z0-9_-]{16,128})$/.exec(value)
     if (!match) return null

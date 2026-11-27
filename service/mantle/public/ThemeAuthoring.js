@@ -701,7 +701,7 @@ function knownTemplates(siteId, appMountId, productStoreId) {
     }
     if (productStoreId)
         for (const theme of rows(THEME, {productStoreId})) {
-            const ref = theme.packageRoot ? ec.resource.getLocationReference(theme.packageRoot + "/templates") : null
+            const ref = theme.packageRoot ? ec.resource.getLocationReference(themes.packageRootOf(theme) + "/templates") : null
             if (!ref || !ref.getExists()) continue
             for (const entry of ref.getDirectoryEntries()) {
                 const fileName = entry.getFileName()
@@ -984,7 +984,7 @@ function getThemeHistory(p) {
             refuse("PERMISSION_DENIED", "COMMERCE_THEME_CODE is required")
         const entries = themes.draftFiles(theme)
         const entry = entries.find(file => file.path === path)
-        const ref = ec.resource.getLocationReference(theme.packageRoot + "/" + path)
+        const ref = ec.resource.getLocationReference(themes.packageRootOf(theme) + "/" + path)
         out.versions = entry
             ? Array.from(ref.getVersionHistory() || [])
                   .slice(-30)
@@ -1122,8 +1122,11 @@ function getThemePreviewPage(p) {
     const preview = one(PREVIEW, {tokenDigest: digestOf(token)})
     if (!preview || preview.siteId !== p.siteId || lib.ms(preview.expireDate) <= lib.ms(ec.user.nowTimestamp)) notFound()
     if (!getPreviewHost(p).preview) notFound()
+    // the maker as they are now (SEC-PSS-90): an account disabled or ended by its terminateDate has no preview; a change of
+    // the maker's theme permissions or stores takes effect within the preview's twenty minutes
     const account = one("moqui.security.UserAccount", {userId: preview.userId})
     if (!account || account.disabled === "Y") notFound()
+    if (account.terminateDate && lib.ms(account.terminateDate) <= lib.ms(ec.user.nowTimestamp)) notFound()
     const theme = one(THEME, {themeId: preview.themeId})
     const site = one(SITE, {siteId: preview.siteId})
     const mount = one(SITE_APP, {siteId: preview.siteId, appMountId: preview.appMountId})

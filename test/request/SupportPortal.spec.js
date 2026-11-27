@@ -601,6 +601,56 @@ feature("a queue's form token files a request that reads no case; a forged token
     }
 })
 
+// SEC-PSS-92: a site's form runs its checks (the honeypot, the fields, the hourly limits) before it stages a file, so a post
+// that makes nothing costs no write or scan; one that makes a request stages its file
+feature("a queue's form stages a file only for a post that makes a request (SEC-PSS-92)", {
+    when() {
+        const intake = token("StageIntake")
+        capability("RequestCategory", state.queue, "CaseIntake", intake, null)
+        const post = (fields, n) => {
+            const wrote = []
+            logout()
+            ec.message.pushErrors()
+            try {
+                const out = ec.resource.script("component://mr-mantle/service/mantle/request/SupportPortal.js").execute("createCustomerCase", {
+                    siteId,
+                    token: intake,
+                    firstName: "Sam",
+                    lastName: "Stager",
+                    emailAddress: "stager" + n + "@visitor.example.test",
+                    requestName: "A file " + n,
+                    description: "With a photo",
+                    operationId: opId(),
+                    ...fields,
+                    file: {
+                        name: "photo.pdf",
+                        size: 20,
+                        contentType: "application/pdf",
+                        write: location => {
+                            wrote.push(location)
+                            ec.resource.getLocationReference(location).putText("%PDF-1.4 a case file")
+                        }
+                    }
+                })
+                return {received: !!out?.receipt?.received, wrote: wrote.length}
+            } catch (error) {
+                return {kind: error.moquiErrorKind || "Error", wrote: wrote.length}
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+                login("john.doe")
+                ec.artifactExecution.disableAuthz()
+            }
+        }
+        return {robot: post({website: "https://spam.example.test"}, 1), noName: post({firstName: ""}, 2), person: post({}, 3)}
+    },
+    then({robot, noName, person}) {
+        robot.received === true && robot.wrote === 0
+        noName.kind === "Unprocessable" && noName.wrote === 0
+        person.received === true && person.wrote === 1
+    }
+})
+
 feature("a signed-in account filing a queue's form with its own verified address has its case at once; another address waits (SEC-PSS-87)", {
     when() {
         const intake = token("SignedIntake")

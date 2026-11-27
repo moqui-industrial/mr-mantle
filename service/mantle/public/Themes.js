@@ -128,6 +128,9 @@ function fileText(location, path, versionName) {
     return streamBase64(ec.resource.getLocationReference(versionName ? location + "#" + versionName : location).openStream())
 }
 const rootOf = themeId => "dbresource://mantle/public/theme/" + themeId
+// A theme's package location: always its own root by its id, never the stored packageRoot as written (SEC-PSS-91), so a row
+// changed through a generic editor or an import does not move the reads and writes made as the system elsewhere.
+const packageRootOf = theme => rootOf(theme.themeId)
 // The binary type of a package path, by its extension.
 const binaryTypeOf = path => binaryTypes[path.slice(path.lastIndexOf(".") + 1).toLowerCase()]
 // The location of a package file, at its version when named.
@@ -211,7 +214,7 @@ function readPackage(location) {
 // The draft of a theme: each file's text, dbresource version and digest, in path order.
 function draftFiles(theme) {
     return asSystem(() => {
-        const root = theme.packageRoot
+        const root = packageRootOf(theme)
         const {files} = readPackage(root)
         return Object.keys(files)
             .sort()
@@ -228,7 +231,7 @@ function putDraftFiles(theme, changes, note) {
         for (const [path, content] of Object.entries(changes)) {
             if (!pathPattern.test(path) || path.split("/").includes("..") || !isPackagePath(path))
                 refuse("INVALID_PATH", path + " is not a theme file path")
-            const ref = ec.resource.getLocationReference(theme.packageRoot + "/" + path)
+            const ref = ec.resource.getLocationReference(packageRootOf(theme) + "/" + path)
             if (content == null) {
                 if (ref.getExists()) ref.delete()
             } else {
@@ -257,7 +260,7 @@ function releaseFiles(release, paths, byReference = false) {
     asSystem(() => {
         for (const file of pinned) {
             if (wanted && !wanted.has(file.filePath)) continue
-            const location = theme.packageRoot + "/" + file.filePath
+            const location = packageRootOf(theme) + "/" + file.filePath
             if (isBinaryPath(file.filePath) && bytesDigest(versioned(location, file.versionName)) === file.digest) {
                 out[file.filePath] = byReference
                     ? {digest: file.digest, size: Number(file.fileSize), contentType: binaryTypeOf(file.filePath)}
@@ -637,7 +640,7 @@ function makeRelease(theme, entries, files, engine, validationDigest) {
     // a binary file is pinned by the digest and size of its bytes at its version (Shop F55), read by digest
     const fileRows = entries.map(entry => {
         const binary = isBinaryPath(entry.path)
-        const digest = binary ? asSystem(() => bytesDigest(versioned(theme.packageRoot + "/" + entry.path, entry.versionName))) : null
+        const digest = binary ? asSystem(() => bytesDigest(versioned(packageRootOf(theme) + "/" + entry.path, entry.versionName))) : null
         if (binary && !digest) refuse("RELEASE_DAMAGED", entry.path + " cannot be read")
         return {
             path: entry.path,
@@ -777,7 +780,7 @@ function getShopThemeAsset(p) {
     const file = path && isBinaryPath(path) ? one(RELEASE_FILE, {releaseId: release.releaseId, filePath: path}) : null
     if (!file || !text(p.digest) || file.digest !== text(p.digest)) notFound()
     const theme = one(THEME, {themeId: release.themeId})
-    const location = versioned(theme.packageRoot + "/" + path, file.versionName)
+    const location = versioned(packageRootOf(theme) + "/" + path, file.versionName)
     if (asSystem(() => bytesDigest(location)) !== file.digest) notFound()
     return {
         releaseId: release.releaseId,
@@ -829,6 +832,7 @@ const operations = {
     compositionOf,
     sampleView,
     rootOf,
+    packageRootOf,
     requiredComponents,
     componentsOf,
     renderers,
