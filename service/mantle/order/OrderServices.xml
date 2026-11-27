@@ -1526,12 +1526,21 @@ General Order Placement and eCommerce Usage
             Sales' approval setting (impl-sales P11, §4 Nov 11, F52): an order with a sales part whose seller's SalesPolicy has
             orderApprovalRequired Y is never approved here; it stays placed (its payment authorized) for a holder of
             SALES_ORDER_APPROVE, whichever app placed it. With the setting off, its default, nothing changes.
+
+            An EDI purchase order (salesChannelEnumId ScEdi) is never approved here: approving it is the seller's decision, which
+            its 855 reports (SEC-BAP-117).
         </description>
         <in-parameters><parameter name="orderId" required="true"/></in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <if condition="orderHeader == null"><return error="true" message="Order ${orderId} not found"/></if>
             <if condition="orderHeader.statusId != 'OrderPlaced'"><return/></if>
+            <!-- a trading partner's purchase order (EDI) is the seller's to approve, which its 855 reports: it carries no payment,
+                so one whose lines and charges come to zero or less would pass the payment test (SEC-BAP-117) -->
+            <if condition="orderHeader.salesChannelEnumId == 'ScEdi'">
+                <log message="Not auto-approving Order ${orderId}: an EDI purchase order is approved by the seller"/>
+                <return/>
+            </if>
             <if condition="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').approvalWaits(orderId)">
                 <log message="Not auto-approving Order ${orderId}: its seller's sales orders wait for a Sales approver"/>
                 <return/>
