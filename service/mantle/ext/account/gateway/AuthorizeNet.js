@@ -118,9 +118,10 @@ function send(gw, requestName, body) {
     let response
     try {
         const client = ec.service.rest().method("POST").uri(gw.remote.sendUrl).timeout(40).jsonObject(JSON.stringify(request))
-        // a connection that may not use the private network (a delegated administrator's on a production instance)
-        if (gw.remote.allowPrivateNetwork === "N") client.denyInternal()
-        else if (gw.remote.allowPrivateNetwork === "Y") client.allowInternal()
+        // the gateway's credentials reach an internal address only when its connection allows the private network (Y),
+        // on any instance (SEC-BAP-03)
+        if (gw.remote.allowPrivateNetwork === "Y") client.allowInternal()
+        else client.denyInternal()
         response = client.call()
     } catch (error) {
         return {unknown: "No answer from Authorize.Net: " + clip(error?.message ?? error, 200)}
