@@ -634,3 +634,24 @@ feature("a credit release covers the exposure it was made on: a change raising t
         r.credits.length === 1
     }
 })
+
+// SEC-BAP-131: a line billed on a draft invoice before it shipped keeps the old price there, so a price change waits on
+// Accounting; an unbilled line's price changes (the features above)
+feature("a price change of a line on a draft invoice billed before shipment is a billing conflict", {
+    when() {
+        const orderId = salesOrder([["SOC_A", 1, 5]])
+        const invoiced = run(state.arChange, "mantle.account.InvoiceServices.create#InvoiceFromSource", {
+            orderId,
+            organizationPartyId: org,
+            operationKey: key()
+        })
+        const change = approvedCommercial(state.requester, orderId, "OckPrice", [{orderItemSeqId: "01", proposedUnitAmount: 4}])
+        return {invoiced, change, applied: salesApply(change), item: itemOf(orderId, "01")}
+    },
+    then(r) {
+        r.invoiced.error == "" && !!r.invoiced.invoiceId
+        r.change.preview.conflicts.some(row => row.code === "BILLING_CONFLICT")
+        code(r.applied) === "BILLING_CONFLICT"
+        n(r.item.unitAmount) === 5
+    }
+})

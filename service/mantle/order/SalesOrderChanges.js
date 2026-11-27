@@ -307,6 +307,17 @@ function checkLines(ch, lineRows, strict, tools) {
                         quantityText(facts.billedFinal) +
                         " on a finalized invoice; Accounting corrects it with a credit memo"
                 )
+            // a line on a draft invoice billed before it shipped (Accounting's invoice of the order) keeps the old price there:
+            // Accounting changes or cancels that invoice first; a packed shipment's draft invoice is released below (SEC-BAP-131)
+            if (facts.billedInProcess > 0 && facts.packed.size === 0)
+                conflict(
+                    "BILLING_CONFLICT",
+                    "Line " +
+                        orderItemSeqId +
+                        " has " +
+                        quantityText(facts.billedInProcess) +
+                        " on a draft invoice; Accounting changes or cancels it first"
+                )
             // between pack and ship: the packed quantity's draft invoice is released first, by a receivables editor's authority
             entry.release = []
             for (const shipmentId of facts.packed.keys()) {
