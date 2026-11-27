@@ -809,7 +809,10 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters><parameter name="toPartyId" required="true"/><parameter name="fromPartyId" required="true"/>
             <parameter name="claimRegistration" type="Boolean"><description>A verified account's claim of the person a public
                 reservation made for its address (EventRegistrationClaims.js): its live registrations move instead of refusing the
-                merge. Honored only for a caller with authorization off or the system.</description></parameter></in-parameters>
+                merge. Honored only for a caller with authorization off or the system.</description></parameter>
+            <parameter name="skipContactMechs" type="Boolean"><description>The from party's email, telecom and postal contact
+                mechanisms are not copied to the to party: a Shop guest's typed contact, never verified, when a verified account
+                claims the guest's purchase (ShopCustomer.js claimGuestPurchases, SEC-PSS-04). It only copies less.</description></parameter></in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.party.PartyRole" value-field="fromIntRole">
                 <field-map field-name="partyId" from="fromPartyId"/><field-map field-name="roleTypeId" value="OrgInternal"/></entity-find-one>
@@ -839,6 +842,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- disable from Party and set mergedToPartyId -->
             <service-call name="update#mantle.party.Party" in-map="{partyId:fromPartyId, disabled:'Y', mergedToPartyId:toPartyId}"/>
 
+            <if condition="skipContactMechs != true">
             <!-- Non-Duplicate ContactMech.infoString (email/other) -->
             <!-- get all purposes, dedup to share contactMechId? -->
             <entity-find entity-name="mantle.party.contact.PartyContactMechInfo" list="partyContactMechInfoList">
@@ -885,6 +889,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <service-call name="create#mantle.party.contact.PartyContactMech"
                         in-map="Object.assign({}, ppa, {partyId:toPartyId, fromDate:ec.user.nowTimestamp, thruDate:null})"/>
             </iterate>
+            </if>
 
             <script><![CDATA[
                 // the moves read without the caller's entity filters (impl-sales P3 review): the guards above decided who may merge

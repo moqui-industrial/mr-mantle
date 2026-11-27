@@ -222,9 +222,22 @@ feature("a site owner's regex rule matches in linear time, and look-around is no
         const took = Date.now() - started
         const censored = test("sp[a@]m", "no spam, no sp@m here")
         const lookAround = test("foo(?=bar)", "foobar")
-        return {backtracking, took, censored, lookAround}
+        // a rule stored before the linear matcher with look-around is listed as invalid (and skipped on posts, logged)
+        lib.make("mantle.forum.ForumRule", {
+            ruleId: "PMR_OLD_RULE",
+            siteId: SITE,
+            ruleType: "regex",
+            pattern: "pmrold(?=x)",
+            action: "flag",
+            enabled: "N",
+            priority: 900,
+            revision: 1
+        })
+        const listed = (lib.op("PMR_OWNER", SITE, "findRules", {}).ruleList || []).find(rule => rule.ruleId == "PMR_OLD_RULE")
+        return {backtracking, took, censored, lookAround, listed}
     },
-    then({backtracking, took, censored, lookAround}) {
+    then({backtracking, took, censored, lookAround, listed}) {
+        listed.invalid == true
         backtracking.matched == false
         took < 2000
         censored.matched == true && censored.censored == "no ■■■■, no ■■■■ here"

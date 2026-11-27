@@ -388,6 +388,8 @@ kit => {
             if (core.repositoryRights(repo, core.actor(null)).hidden)
                 return {allowed: false, message: "This repository is hidden by a moderator"}
             if (ownerSuspended(repo)) return {allowed: false, message: "This repository's account is suspended on this site"}
+            // before a push's webhook deliveries: a webhook whose setter lost the repository is turned off (SEC-PFS-102)
+            if (p.kind === "webhook") core.pauseLostWebhooks([repo.repositoryId])
             return {allowed: true, message: null}
         } catch (error) {
             ec.logger.error("Smithy's outbound check of repository " + p?.repositoryId + " failed: " + (error?.message || error))

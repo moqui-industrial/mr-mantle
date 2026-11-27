@@ -27,21 +27,7 @@ kit => {
 
     // ===== what the writes share =====
     const given = value => value !== undefined
-    /* SEC-PFS-102: a webhook sends a repository's pushes to the address its maker set. After a change of members (a role
-       set or removed, a group left, a transfer), each webhook of the repositories it touched whose maker no longer holds
-       the delete right there (a Maintainer or higher with a confirmed address, as a mirror's giver must) is turned off,
-       as the framework pauses such a mirror; a Maintainer turns it on again with the address checked. */
-    function pauseLostWebhooks(repositoryIds) {
-        const smithy = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js")
-        for (const repositoryId of new Set(repositoryIds)) {
-            for (const hook of Array.from(find("moqui.resource.GitWebhook", {repositoryId, active: "Y"}).list())) {
-                const held = hook.createdByUserId ? smithy.rights(repositoryId, hook.createdByUserId) : null
-                if (held && Number(held.rank || 0) >= RANK.SmrMaintainer && held.confirmed) continue
-                update(hook, {active: "N"})
-                ec.logger.info("Smithy webhook " + hook.webhookId + " of repository " + repositoryId + " turned off: its maker lost the repository")
-            }
-        }
-    }
+    const pauseLostWebhooks = repositoryIds => core.pauseLostWebhooks(repositoryIds)
     /* The repositories of a group and its subgroups (four levels at most). */
     function groupRepositoryIds(groupId) {
         const ids = []

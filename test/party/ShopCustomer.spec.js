@@ -240,24 +240,21 @@ feature("a guest's link and a verified account read their own orders; another or
                     }).consented
             )
         const optInBefore = one("mantle.order.StoreCheckout", {orderId: state.mine.orderId}).optInPending
-        // a shipping address the guest typed, which the claim does not hand to the account (SEC-PSS-04)
+        // a shipping address and a number the guest typed, which the claim does not hand to the account (SEC-PSS-04)
         const PCM = "mantle.party.contact.PartyContactMech"
         const typed = system(() => {
-            const contactMechId = call("create#mantle.party.contact.ContactMech", {contactMechTypeEnumId: "CmtPostalAddress"})
-                .contactMechId
-            make("mantle.party.contact.PostalAddress", {contactMechId, address1: "1 Typed Lane", city: "Elsewhere"})
-            make(PCM, {
-                partyId: state.mine.partyId,
-                contactMechId,
-                contactMechPurposeId: "PostalShippingDest",
-                fromDate: ec.user.nowTimestamp
-            })
-            return contactMechId
+            const address = call("create#mantle.party.contact.ContactMech", {contactMechTypeEnumId: "CmtPostalAddress"}).contactMechId
+            make("mantle.party.contact.PostalAddress", {contactMechId: address, address1: "1 Typed Lane", city: "Elsewhere", postalCode: "99999"})
+            const phone = call("create#mantle.party.contact.ContactMech", {contactMechTypeEnumId: "CmtTelecomNumber"}).contactMechId
+            make("mantle.party.contact.TelecomNumber", {contactMechId: phone, areaCode: "555", contactNumber: "0199"})
+            for (const [contactMechId, contactMechPurposeId] of [[address, "PostalShippingDest"], [phone, "PhonePrimary"]])
+                make(PCM, {partyId: state.mine.partyId, contactMechId, contactMechPurposeId, fromDate: ec.user.nowTimestamp})
+            return [address, phone]
         })
         // the verified account claims the guest purchase of its email, and only that
         const overview = op(ids.buyer, A + "get#Account", {})
-        const takenMechs = list(PCM, {partyId: ids.buyer, contactMechId: typed}).filter(row => !row.thruDate)
-        const guestMechs = list(PCM, {contactMechId: typed})
+        const takenMechs = list(PCM, {partyId: ids.buyer}).filter(row => !row.thruDate && typed.includes(row.contactMechId))
+        const guestMechs = list(PCM, {partyId: state.mine.partyId}).filter(row => typed.includes(row.contactMechId))
         const own = op(ids.buyer, A + "get#Order", {orderId: state.mine.orderId})
         const others = op(ids.buyer, A + "get#Order", {orderId: state.other.orderId})
         const invoices = op(ids.buyer, "mantle.account.PortalServices.find#Invoices", {})
@@ -292,8 +289,8 @@ feature("a guest's link and a verified account read their own orders; another or
         }
     },
     then(r) {
-        // the typed address moved with the merge, ended
-        r.guestMechs.length == 1 && !!r.guestMechs[0].thruDate
+        // the typed address and number stay the merged guest's; none is the account's
+        r.guestMechs.length == 2
         r.takenMechs.length == 0
         r.byLink.result.order.orderId == state.mine.orderId
         r.byLink.result.order.lines.length == 1

@@ -1250,7 +1250,8 @@ function ruleRegex(r) {
 function censor(html, re) {
     return String(html)
         .split(/(<[^>]*>)/)
-        .map((part) => (part.startsWith('<') ? part : re.mask(part)))
+        // a tag, or a piece with nothing to match (empty, white space), is kept as it is without a call
+        .map((part) => (part.startsWith('<') || !part.trim() ? part : re.mask(part)))
         .join('')
 }
 /* ---- Trust ---- */
@@ -1750,7 +1751,12 @@ function applyRules(siteId, contactListId, html) {
         try {
             re = ruleRegex(r)
         } catch (e) {
-            ec.logger.error('Forum rule ' + r.ruleId + ' is invalid; skipped')
+            // a rule stored before the linear matcher (SEC-PFS-90) may hold look-around or back references, which it does
+            // not take: named here, and answered as invalid in the rule list (findRules), until its owner edits it
+            ec.logger.error(
+                'Forum rule ' + r.ruleId + ' of site ' + siteId + ' is not a pattern the rule matcher takes (look-around ' +
+                    'and back references are not), so it is skipped: ' + String(e?.message || e).split('\n')[0],
+            )
             continue
         }
         if (!re.test(r.action === 'censor' ? plainText(out.body) : text))

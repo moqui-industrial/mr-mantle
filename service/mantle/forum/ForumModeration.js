@@ -1381,12 +1381,20 @@
                     .orderBy('priority,ruleId')
                     .limit(200)
                     .list(),
-            ).map((r) =>
-                pick(
+            ).map((r) => {
+                const row = pick(
                     r,
                     'ruleId contactListId ruleType pattern action enabled priority revision',
-                ),
-            ),
+                )
+                // a rule the matcher does not take (look-around, from before SEC-PFS-90) is skipped on every post: said
+                try {
+                    ruleRegex(r)
+                    row.invalid = false
+                } catch (e) {
+                    row.invalid = true
+                }
+                return row
+            }),
         }
     }
     /* A bounded test against sample text: what each action would do, with no post written. */

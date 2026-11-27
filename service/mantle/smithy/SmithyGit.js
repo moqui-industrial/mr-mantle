@@ -182,10 +182,13 @@ kit => {
         if (!hook || hook.repositoryId !== p.repositoryId) missing()
         return hook
     }
-    /* A webhook's address as Maintainers read it (SEC-PFS-65): its query, which may carry a token, masked; a user or
-       password in the address is refused when it is stored, as a mirror's is. Saving the masked address back keeps the
-       stored one. */
-    const maskedUrl = url => String(url || "").replace(/\?[^#]*/, "?…")
+    /* A webhook's address as Maintainers read it (SEC-PFS-65): its origin, and everything after it masked, since a token
+       may be in the path (Slack, Discord, Teams) as well as the query; a user or password in the address is refused when it
+       is stored, as a mirror's is. Saving the masked address back keeps the stored one. */
+    const maskedUrl = url => {
+        const found = /^([A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*)(.*)$/s.exec(String(url || ""))
+        return found ? found[1] + (found[2] ? "/…" : "") : "…"
+    }
     const USER_INFO = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*@/
     methods.findWebhooks = p => {
         maintained(p)
@@ -207,6 +210,8 @@ kit => {
     methods.storeWebhook = p => {
         repositoryFor(p, "SmrMaintainer")
         let url = text(p.url).trim()
+        let before = null
+        const turnedOn = p.active == null || p.active === "" || flag(p.active)
         const store = () => {
             const {out, problem} = called(GIT + "store#GitWebhook", {
                 webhookId: p.webhookId || null,
@@ -219,6 +224,20 @@ kit => {
                 description: text(p.description) || null
             })
             if (problem != null) invalid(problem.slice(0, 200))
+            // whoever sets the address, or turns the webhook on, answers for where its deliveries go: they stop once that
+            // account loses the repository (SEC-PFS-102, SmithyCore.js pauseLostWebhooks)
+            if (!before || before.url !== url || (before.active === "N" && turnedOn)) {
+                const was = ec.artifactExecution.disableAuthz()
+                try {
+                    const row = ec.entity.find("moqui.resource.GitWebhook").condition({webhookId: out.webhookId}).forUpdate(true).one()
+                    if (row) {
+                        row.set("urlSetByUserId", ec.user.userId)
+                        row.update()
+                    }
+                } finally {
+                    if (!was) ec.artifactExecution.enableAuthz()
+                }
+            }
             // the URL may carry a credential of its own, so the row names the hook and not where it goes
             maintainerAudit(p, "storeWebhook", out.webhookId)
             return {webhookId: out.webhookId}
@@ -227,6 +246,7 @@ kit => {
         if (USER_INFO.test(url)) invalid("url: Put a credential in the secret, not in the address")
         if (p.webhookId) {
             const hook = hookOf(p, p.webhookId)
+            before = hook
             // the masked address findWebhooks answered, saved back unchanged, is the stored one
             if (url === maskedUrl(hook.url)) url = hook.url
             return store()

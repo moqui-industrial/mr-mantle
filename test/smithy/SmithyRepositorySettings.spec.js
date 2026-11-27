@@ -276,28 +276,38 @@ feature("a webhook's query is masked and its address holds no credential; a make
         on("SRS_MAINTAINER", "storeWebhook", {webhookId: stored.webhookId, url: listed.url, description: "kept"})
         const kept = lib.row("moqui.resource.GitWebhook", {webhookId: stored.webhookId}).url
         on("SRS_MAINTAINER", "deleteWebhook", {webhookId: stored.webhookId})
-        // a Maintainer of one repository by its own role makes a webhook there, and an Owner then removes the role
+        // an Owner's webhook whose address a Maintainer of one repository (by its own role) set, and an Owner then removes
+        // the role: the webhook goes with the one who chose where it sends
         lib.account(SITE, "SRS_HOOKER", {handle: "srshooker"})
         op("SRS_OWNER", "setRepositoryMember", {repositoryId: ids.spare, handle: "srshooker", role: "maintainer"})
-        const hook = op("SRS_HOOKER", "storeWebhook", {
-            repositoryId: ids.spare,
-            url: "https://hooks.example.test/hooker",
-            operationId: "srs-hook-7"
-        })
-        const before = lib.row("moqui.resource.GitWebhook", {webhookId: hook.webhookId}).active
-        // a change that leaves the maker its right leaves the webhook on
+        const hook = op("SRS_OWNER", "storeWebhook", {repositoryId: ids.spare, url: "https://hooks.example.test/owner", operationId: "srs-hook-7"})
+        op("SRS_HOOKER", "storeWebhook", {repositoryId: ids.spare, webhookId: hook.webhookId, url: "https://hooker.example.test/x"})
+        const active = () => lib.row("moqui.resource.GitWebhook", {webhookId: hook.webhookId}).active
+        const before = active()
+        // a change that leaves the setter its right leaves the webhook on
         op("SRS_OWNER", "setRepositoryMember", {repositoryId: ids.spare, handle: "srsreporter", role: "developer"})
-        const unrelated = lib.row("moqui.resource.GitWebhook", {webhookId: hook.webhookId}).active
+        const unrelated = active()
         op("SRS_OWNER", "setRepositoryMember", {repositoryId: ids.spare, handle: "srshooker", role: "", expectedRevision: 1})
-        const after = lib.row("moqui.resource.GitWebhook", {webhookId: hook.webhookId}).active
-        return {withUser, listed, kept, before, unrelated, after}
+        const after = active()
+        // turned on again by an Owner, it is the Owner's; a setter whose account is disabled loses it at the next push
+        op("SRS_OWNER", "storeWebhook", {repositoryId: ids.spare, webhookId: hook.webhookId, url: "https://hooks.example.test/owner", active: "Y"})
+        const again = active()
+        lib.make("moqui.security.UserAccount", {userId: "SRS_LATER", username: "SRS_LATER", disabled: "Y"})
+        lib.set("moqui.resource.GitWebhook", {webhookId: hook.webhookId}, {urlSetByUserId: "SRS_LATER"})
+        const outbound = lib.run("mantle.smithy.SmithyGitServices.check#Outbound", {repositoryId: ids.spare, kind: "webhook", event: "push"})
+        const disabled = active()
+        return {withUser, listed, kept, before, unrelated, after, again, outbound, disabled}
     },
-    then({withUser, listed, kept, before, unrelated, after}) {
+    then({withUser, listed, kept, before, unrelated, after, again, outbound, disabled}) {
         withUser.kind == "Unprocessable"
-        listed.url == "https://hooks.example.test/ci?…"
+        // everything after the origin is masked: a token may be in the path as well as the query
+        listed.url == "https://hooks.example.test/…"
         kept == "https://hooks.example.test/ci?token=srs-hook-token"
         before == "Y" && unrelated == "Y"
         after == "N"
+        again == "Y"
+        outbound.allowed == true
+        disabled == "N"
     }
 })
 feature("an Owner archives a repository, which then takes no write and no push", {

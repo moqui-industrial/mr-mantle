@@ -130,21 +130,13 @@ function claimGuestPurchases(shop, partyId) {
         if (!anonymousGuest(guest.partyId, checkout)) continue
         ec.message.pushErrors()
         try {
-            // the email was typed, never verified (SEC-PSS-04): the account takes the order, not the guest's contact data,
-            // so an address or number someone else typed with this email is never offered as the account's own. The order
-            // keeps its own copies (OrderContactMech); the guest's rows are ended before the merge moves them.
-            for (const row of rows(PCM, {partyId: guest.partyId}).filter(item => lib.active(item)))
-                call("update#" + PCM, {
-                    partyId: row.partyId,
-                    contactMechId: row.contactMechId,
-                    contactMechPurposeId: row.contactMechPurposeId,
-                    fromDate: row.fromDate,
-                    thruDate: ec.user.nowTimestamp
-                })
             ec.service
                 .sync()
                 .name("mantle.party.DuplicateServices.merge#Parties")
-                .parameters({toPartyId: partyId, fromPartyId: guest.partyId})
+                // the email was typed, never verified (SEC-PSS-04): the account takes the order, not the guest's contact data,
+                // so an address, number or email someone else typed with this email is never offered as the account's own (the
+                // order keeps its own copies, OrderContactMech); the merge, in its own transaction, copies none of them
+                .parameters({toPartyId: partyId, fromPartyId: guest.partyId, skipContactMechs: true})
                 .disableAuthz()
                 .requireNewTransaction(true)
                 .call()

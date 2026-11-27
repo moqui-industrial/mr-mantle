@@ -920,8 +920,8 @@ function reconcile(p) {
         )
     return { state: v?.state }
 }
-/* At most max of rows (oldest first) taken a site at a time in turn (SEC-PFS-107): a site with thousands of every-post
-   subscribers does not put every other site's notices behind its own. */
+/* At most max of rows (oldest first within a site) taken a site at a time in turn (SEC-PFS-107): a site with thousands
+   of every-post subscribers does not put every other site's notices behind its own. */
 function bySiteTurns(rows, max) {
     const sites = new Map()
     for (const row of rows) {
@@ -933,6 +933,21 @@ function bySiteTurns(rows, max) {
     for (let i = 0; out.length < max && queues.some((queue) => i < queue.length); i++)
         for (const queue of queues) if (i < queue.length && out.length < max) out.push(queue[i])
     return out
+}
+/* The oldest rows of each site that has any, read site by site (SEC-PFS-107): the sites first (at most 1,000), then a
+   share of max rows of each, oldest first, so one site's backlog cannot fill the read; bySiteTurns then takes them in
+   turn. query() is the entity find with its conditions. */
+function oldestBySite(query, orderBy, max) {
+    const sites = Array.from(query().selectField('siteId').distinct(true).limit(1000).list())
+        .map((row) => row.siteId)
+        .filter(Boolean)
+    const share = Math.max(5, Math.ceil(max / Math.max(1, sites.length)))
+    return bySiteTurns(
+        sites.flatMap((siteId) =>
+            Array.from(query().condition('siteId', siteId).orderBy(orderBy).limit(share).list()),
+        ),
+        max,
+    )
 }
 function dispatch() {
     const failures = []
@@ -962,15 +977,7 @@ function dispatch() {
             failures.push(item.deliveryId)
         }
     }
-    let open = bySiteTurns(
-        Array.from(
-            find(F + 'ForumOutbox', { state: 'pending' })
-                .orderBy('createdAt,outboxId')
-                .limit(500)
-                .list(),
-        ),
-        100,
-    )
+    let open = oldestBySite(() => find(F + 'ForumOutbox', { state: 'pending' }), 'createdAt,outboxId', 100)
     // Each page is its own transaction; one page of each outbox in turn, sites taking turns, until done or the run's time
     // budget is spent (SEC-PFS-107: a large list's outbox no longer takes the whole run)
     const deadline = time() + 20000
@@ -998,13 +1005,11 @@ function dispatch() {
         }
         open = more
     }
-    for (const item of bySiteTurns(Array.from(
-        find(F + 'ForumDelivery', {})
-            .condition('state', 'in', ['pending', 'retry'])
-            .orderBy('dueAt,deliveryId')
-            .limit(500)
-            .list(),
-    ), 100)) {
+    for (const item of oldestBySite(
+        () => find(F + 'ForumDelivery', {}).condition('state', 'in', ['pending', 'retry']),
+        'dueAt,deliveryId',
+        100,
+    )) {
         try {
             const c = ec.service
                 .sync()
