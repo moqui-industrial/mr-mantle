@@ -70,7 +70,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="Preferences" allow-remote="false">
         <description>Save the organization's finance preferences from settings (the preference fields only), audit logged,
             making an error journal when it has none of its own; answers as get#Preferences. Refuses a user without
-            finance administration, a stale revision, a flag that is not Y or N, reviewed gateway payments without
+            finance administration, a stale revision, a flag that is not Y or N, turning self approval on without
+            ACCOUNTING_SELF_APPROVAL (SELF_APPROVAL_PERMISSION), reviewed gateway payments without
             settlement controls, a unit that is not a currency, a change of base currency, costing or fiscal year start
             once entries are posted, an invalid fiscal year start, an error journal of another organization or type, a
             document template that is not approved, an unknown sales tax gateway and an invoice sequence other than the standard
@@ -112,6 +113,14 @@ along with this software (see the LICENSE.md file). If not, see
                     .find(field => preferenceValues[field] != null &amp;&amp; !['Y', 'N'].includes(preferenceValues[field]))"/>
             <if condition="invalidFlag">
                 <return error="true" message="Choose Enabled or Disabled for ${invalidFlag}"/>
+            </if>
+            <!-- turning self approval on is a separation-of-duty decision no finance bundle makes for itself (SEC-BOS-06): it
+                takes ACCOUNTING_SELF_APPROVAL, which no BOSS bundle holds (ADMIN's), so an administrator who enters and
+                approves bills cannot turn it on and approve their own; keeping it on, or turning it off, needs only admin -->
+            <set field="selfApprovalBefore" from="(oldPreference ?? policy.preference(scope.organizationPartyId)).allowAccountingSelfApproval == 'Y'"/>
+            <if condition="preferenceValues.allowAccountingSelfApproval == 'Y' &amp;&amp; !selfApprovalBefore &amp;&amp;
+                    !ec.user.hasPermission('ACCOUNTING_SELF_APPROVAL')">
+                <return error="true" message="SELF_APPROVAL_PERMISSION: ACCOUNTING_SELF_APPROVAL is required to turn self approval on"/>
             </if>
             <!-- the write-off tolerance (SEC-BOS-127): an amount of 0 or more, empty for none -->
             <if condition="preferenceValues.writeOffToleranceAmount === ''"><script>preferenceValues.writeOffToleranceAmount = null</script></if>

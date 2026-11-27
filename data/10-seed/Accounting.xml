@@ -25,6 +25,10 @@
         for, and selects only one of those as active. ADMIN's alone (the user's call of Nov 16, 2026, SEC-BOS-02). -->
     <moqui.security.UserPermission userPermissionId="ACCOUNTING_ALL_ORGANIZATIONS" description="Accounting in every organization"/>
     <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="ACCOUNTING_ALL_ORGANIZATIONS" fromDate="0"/>
+    <!-- turning an organization's allowAccountingSelfApproval on (store#Preferences), a separation-of-duty decision no finance
+        bundle makes for itself: ADMIN's alone (SEC-BOS-06) -->
+    <moqui.security.UserPermission userPermissionId="ACCOUNTING_SELF_APPROVAL" description="Allow accounting self approval"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="ACCOUNTING_SELF_APPROVAL" fromDate="0"/>
     <moqui.security.UserPermission userPermissionId="BANK_RECONCILE" description="Bank Reconcile"/>
     <moqui.security.UserPermission userPermissionId="BUDGET_APPROVE" description="Budget Approve"/>
     <moqui.security.UserPermission userPermissionId="BUDGET_EDIT" description="Budget Edit"/>

@@ -491,3 +491,33 @@ feature("a credit on an open item posts to the account mapped to opening balance
     }
 })
 
+// SEC-BOS-06: a finance administrator does not turn self approval on for their own organization; ACCOUNTING_SELF_APPROVAL
+// does, and the administrator then saves with it on and turns it off
+feature("turning self approval on takes ACCOUNTING_SELF_APPROVAL; keeping it on or turning it off takes finance administration", {
+    when() {
+        login("john.doe")
+        const permitted = helper().user({org}, "SELFAPP", ["ACCOUNTING_ADMIN", "ACCOUNTING_SELF_APPROVAL"])
+        const save = value => ({
+            organizationPartyId: org,
+            settings: {allowAccountingSelfApproval: value},
+            changeReason: "Spec self approval",
+            lastUpdatedStamp: one("mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: org})?.lastUpdatedStamp
+        })
+        login(users.admin)
+        const adminOn = refused("store#Preferences", save("Y"))
+        login(permitted)
+        setup("store#Preferences", save("Y"))
+        const turnedOn = one("mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: org}).allowAccountingSelfApproval
+        login(users.admin)
+        setup("store#Preferences", save("Y"))
+        setup("store#Preferences", save("N"))
+        const turnedOff = one("mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: org}).allowAccountingSelfApproval
+        login("john.doe")
+        return {adminOn, turnedOn, turnedOff}
+    },
+    then({adminOn, turnedOn, turnedOff}) {
+        adminOn.includes("SELF_APPROVAL_PERMISSION")
+        turnedOn == "Y"
+        turnedOff == "N"
+    }
+})
