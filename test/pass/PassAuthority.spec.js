@@ -376,3 +376,94 @@ feature("a theme asset by digest is a registered frontend's download, and only i
         !cache("getShopThemeAsset", "public, max-age=31536000")
     }
 })
+// SEC-PSA-12: handle#Call takes its client as verified only when the gRPC transport put that client in the user context for
+// the call; the clientVerified parameter alone, which any in-process caller could pass, is not enough
+feature("handle#Call trusts clientVerified only for the client the transport checked (SEC-PSA-12)", {
+    when() {
+        const viaService = () =>
+            ec.service
+                .sync()
+                .name("mantle.pass.PassAuthorityServices.handle#Call")
+                .parameters({operation: "getSiteInfo", siteId: OTHER_SITE, input: {}, clientId: CLIENT, clientVerified: true})
+                .call()
+        const alone = viaService()
+        ec.user.context.passTransportClient = CLIENT
+        try {
+            return {alone, checked: viaService()}
+        } finally {
+            ec.user.context.remove("passTransportClient")
+        }
+    },
+    then({alone, checked}) {
+        // unverified and with no secret the client is no registered client: an anonymous read of the site
+        !alone.error
+        alone.result.site.siteId == OTHER_SITE
+        // verified, the client is held to its own sites (SEC-PSA-05): another site is Not Found
+        checked.error.status == 404
+    }
+})
+// SEC-PSA-13: an account or sign-in action is a name of its own table, never one Object.prototype has
+feature("an account action named for a property of every object is Not Found (SEC-PSA-13)", {
+    when() {
+        return {
+            statuses: ["constructor", "toString", "__proto__", "hasOwnProperty"].map(
+                action => handle({operation: "account." + action, clientId: CLIENT, clientVerified: true}).error?.status
+            )
+        }
+    },
+    then({statuses}) {
+        statuses == [404, 404, 404, 404]
+    }
+})
+// SEC-PSA-81: a client whose secret is left as the conf's CHANGEME placeholder is no client, with that secret or any
+feature("a client secret left as the CHANGEME placeholder registers no client (SEC-PSA-81)", {
+    when() {
+        const account = ec.resource.script("component://framework/service/org/moqui/public/Account.js")
+        setConf("pass-authority/client[paspec_placeholder]@secret", "CHANGEME")
+        setConf("pass-authority/client[paspec_placeholder]@sites", SITE)
+        setConf("pass-authority/client[paspec_suffix]@secret", "pass-CHANGEME")
+        setConf("pass-authority/client[paspec_suffix]@sites", SITE)
+        return {
+            placeholder: account.clientRegistered("paspec_placeholder", "CHANGEME", SITE),
+            suffix: account.clientRegistered("paspec_suffix", "pass-CHANGEME", SITE),
+            real: account.clientRegistered(CLIENT, "pass-authority-spec-secret", SITE)
+        }
+    },
+    then({placeholder, suffix, real}) {
+        placeholder == false
+        suffix == false
+        real == true
+    }
+})
+// SEC-PSA-08: a REST download is written a window at a time, never read whole into the script first
+feature("a REST download is streamed in windows of a mebibyte (SEC-PSA-08)", {
+    when() {
+        const location = "dbresource://pass-authority-spec/big.bin"
+        const size = 2 * 1024 * 1024 + 5
+        sys(() => ec.resource.getLocationReference(location).putText("x".repeat(size)))
+        const writes = []
+        const response = {
+            headers: {},
+            setStatus() {},
+            setHeader(name, value) {
+                this.headers[name.toLowerCase()] = value
+            },
+            setContentType(type) {
+                this.headers["content-type"] = type
+            },
+            write(bytes) {
+                writes.push(bytes.length)
+            }
+        }
+        ec.resource.script("component://mr-mantle/script/PassApi.js").respond(response, {
+            result: {},
+            download: {location, contentType: "application/octet-stream", filename: "big.bin", disposition: "attachment"}
+        })
+        return {writes, size, headers: response.headers}
+    },
+    then({writes, size, headers}) {
+        writes == [1048576, 1048576, 5]
+        writes.reduce((sum, length) => sum + length, 0) == size
+        headers["content-disposition"] == 'attachment; filename="big.bin"'
+    }
+})

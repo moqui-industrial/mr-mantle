@@ -198,33 +198,38 @@ function respond(response, answer) {
     if (answer.download) {
         const file = answer.download
         // the authority checked the asker; the file is read as the authority (a record's content may sit in the database
-        // resource store, which the delegated public account may not read itself), before anything is written
+        // resource store, which the delegated public account may not read itself), a window at a time as the ranged
+        // download is (SEC-PSA-08): the first window is read before anything is written, so a file that cannot be read
+        // answers as an error, not as a partial download
         const wasDisabled = ec.artifactExecution.disableAuthz()
-        let bytes
         try {
             const stream = ec.resource
                 .getLocationReference(file.location)
                 .openStream()
+            if (!stream) throw new Error('The file of a download is not there: ' + file.location)
             try {
-                bytes = stream.readAllBytes()
+                let bytes = stream.read(0, RANGE_WINDOW)
+                response.setContentType(file.contentType)
+                if (sandboxed(file.contentType, file.disposition)) response.setHeader('Content-Security-Policy', SANDBOX)
+                // Shop P8 (F75): a public product image of the current generation is the one file a shared cache may keep
+                response.setHeader('Cache-Control', file.cacheControl || 'no-store')
+                response.setHeader(
+                    'Content-Disposition',
+                    file.disposition +
+                        '; filename="' +
+                        String(file.filename).replace(/["\\\r\n]/g, '_') +
+                        '"',
+                )
+                for (let at = 0; bytes.length; bytes = stream.read(at, RANGE_WINDOW)) {
+                    response.write(bytes)
+                    at += bytes.length
+                }
             } finally {
                 stream.close()
             }
         } finally {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
-        response.setContentType(file.contentType)
-        if (sandboxed(file.contentType, file.disposition)) response.setHeader('Content-Security-Policy', SANDBOX)
-        // Shop P8 (F75): a public product image of the current generation is the one file a shared cache may keep
-        response.setHeader('Cache-Control', file.cacheControl || 'no-store')
-        response.setHeader(
-            'Content-Disposition',
-            file.disposition +
-                '; filename="' +
-                String(file.filename).replace(/["\\\r\n]/g, '_') +
-                '"',
-        )
-        response.write(bytes)
         return
     }
     response.setContentType('application/json')
@@ -233,6 +238,8 @@ function respond(response, answer) {
 ;({
     // Shop P4: the list PassAuthority.js and PASS's Transport.js keep equal
     TOKEN_WRITES,
+    // an authority's answer as HTTP (the windowed download's spec, SEC-PSA-08)
+    respond,
     service(request, response) {
         const authority = ec.resource.script(
             'component://mr-mantle/script/PassAuthority.js',
@@ -362,7 +369,8 @@ function respond(response, answer) {
                         response.sendRedirect(result.redirectUrl)
                     return
                 }
-                if (authority.SSO_ACTIONS[path[1]]) {
+                // own names only: a name of Object.prototype (`constructor`) is no action (SEC-PSA-13)
+                if (Object.hasOwn(authority.SSO_ACTIONS, path[1])) {
                     if (method !== 'POST' || !registeredClient)
                         fail(
                             'Unauthorized',
@@ -370,7 +378,7 @@ function respond(response, answer) {
                         )
                 } else if (
                     method !== 'POST' ||
-                    !authority.ACCOUNT_ACTIONS[path[1]]
+                    !Object.hasOwn(authority.ACCOUNT_ACTIONS, path[1])
                 ) {
                     fail('NotFound', 'Resource not found')
                 }

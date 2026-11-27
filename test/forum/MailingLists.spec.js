@@ -1032,3 +1032,26 @@ feature("a route's mail is read only from an account the operator names as the f
         unlisted.handled == false
     }
 })
+// SEC-PFS-103: a message a poll of an EmailServer read reaches the rule with no account and no stored message; the forum
+// does not read it, however its headers authenticate the sender
+feature("a route's mail polled from an email server, with no account, is not read (SEC-PFS-103)", {
+    when() {
+        const polled = (emailServerId, n) =>
+            lib.run("mantle.forum.DeliveryServices.process#Inbound", {
+                emailServerId,
+                emailMessageId: null,
+                headers: {
+                    "delivered-to": "dev@" + LISTS,
+                    "message-id": "<mls-polled-" + n + "@mls.test>",
+                    "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test"
+                },
+                fields: {from: "mls_member@smithy.test", subject: "Polled " + n, toList: ["dev@" + LISTS]},
+                bodyPartList: [{contentType: "text/plain", contentText: "MLS-POLLED " + n}]
+            }).result
+        return {polled: polled("MLS_POP_SERVER", 1), posted: list("mantle.forum.ForumPostSearch", {siteId: SITE})}
+    },
+    then({polled, posted}) {
+        polled.handled == false
+        !posted.some(row => String(row.body).includes("MLS-POLLED"))
+    }
+})

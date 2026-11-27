@@ -5322,6 +5322,16 @@ function processInbound(ctx) {
         }
     }
     if (!route) return { handled: false }
+    // a message a poll of an EmailServer read (poll#EmailServer runs the rules with no account and no stored message) is
+    // not the forum's: its headers are the caller's alone, and no account of mantle@forum-inbound-accounts holds it
+    // (SEC-PFS-103)
+    if (ctx.emailServerId && !ctx.emailAccountId && !ctx.emailMessageId) {
+        ec.logger.warn(
+            'Forum route ' + route.address + ': mail polled from email server ' + ctx.emailServerId +
+                ' is not read; the forum reads only the mail of mantle@forum-inbound-accounts',
+        )
+        return { handled: false }
+    }
     // a rule's message is stored in an account: only the forum's own inbound account for the route is read
     const stored = ctx.emailMessageId
         ? one('moqui.basic.email.EmailMessage', {
