@@ -646,10 +646,12 @@ feature("get#FullCalendarData answers a year and refuses a range of more than 40
             year: call(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2027-12-31", partyId: party.Ada}).eventList,
             wide: errorOf(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2029-01-01", partyId: party.Ada}),
             internal: errorOf(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2029-01-01", partyId: party.Ada, maxRangeDays: 0}),
+            negative: errorOf(`${EV}.get#FullCalendarData`, {start: "2027-01-01", end: "2029-01-01", partyId: party.Ada, maxRangeDays: -1}),
             longBooking: errorOf(`${EV}.book#Resource`, {workEffortId: long, facilityId: "CS_ROOM_B"})
         }
     },
-    then({year, wide, internal, longBooking}) {
+    then({year, wide, internal, negative, longBooking}) {
+        negative.includes("at most 400 days")
         year.length > 0
         wide.includes("at most 400 days")
         internal == null
