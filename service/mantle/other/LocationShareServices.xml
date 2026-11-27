@@ -60,7 +60,8 @@ along with this software (see the LICENSE.md file). If not, see
             organization's time zone): once the technician's app confirmed the share, or at once in a browser. The share
             must be active, its record pass create#RecordGuestShare's checks again, linkSecret be its own link's secret
             (the fragment of linkUrl), and the link not have been mailed. mailSent false with mailReason
-            NO_CUSTOMER_EMAIL, NO_SENDER (the organization has no email address), NO_MAIL_SERVER (the mail is queued:
+            NO_CUSTOMER_EMAIL, NO_SENDER (the organization has no email address and this server's web root no host: else
+            the mail is from no-reply at that host), NO_MAIL_SERVER (the mail is queued:
             its server has no host) or MAIL_FAILED. Refused: SHARE_NOT_FOUND, SHARE_ENDED, LINK_MISMATCH, ALREADY_SENT,
             NO_SITE_ROOT, and the record's refusals.</description>
         <in-parameters>

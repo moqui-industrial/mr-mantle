@@ -207,7 +207,9 @@ function sendLink(p) {
     const to = emailOf(record.customerPartyId)
     if (!to) return {mailSent: false, mailReason: "NO_CUSTOMER_EMAIL"}
     const organizationName = partyName(record.organizationPartyId)
-    const fromAddress = emailOf(record.organizationPartyId)
+    // the organization's address, else no-reply at this server's own host (its conf's web root, never a request's)
+    const host = /^https?:\/\/([^/:]+)/.exec(root)?.[1]
+    const fromAddress = emailOf(record.organizationPartyId) || (host ? "no-reply@" + host : null)
     if (!fromAddress) return {mailSent: false, mailReason: "NO_SENDER"}
     const sharer = partyName(ec.user.userAccount?.partyId) || ec.user.username
     const zone = zoneFor(record.customerPartyId, record.organizationPartyId)
