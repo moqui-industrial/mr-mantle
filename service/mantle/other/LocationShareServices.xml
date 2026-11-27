@@ -29,7 +29,8 @@ along with this software (see the LICENSE.md file). If not, see
             Maintenance work order, recordId its WorkEffort or a step of it) to which the caller is assigned (a current
             Assignee row) with MAINTENANCE_EXECUTE or MAINTENANCE_SUPERVISE, open (not complete, closed or cancelled), with a
             planned end (estimatedCompletionDate) not yet past and a customer (a customer repair's claim customer). The
-            share ends at thruDate (after now, no later than the planned end; the planned end when not given), exact or
+            share ends at thruDate (after now, no later than the planned end; when not given, the planned end within
+            location@max-share-hours of now), exact or
             approximate (precisionEnumId), with the caller's purposeText (an ETA); it is the framework's create#Share with a
             link audience, made as the caller, and names the work order and its planned end (store#ShareRecord), so no
             extension passes that end and the work order's completion or cancellation stops it. The link (linkUrl: this
@@ -87,10 +88,14 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="blank" noun="RecordGuestLinkMail" authenticate="anonymous-all" allow-remote="false" transaction="force-new">
         <description>A guest share for a record ended or stopped (the EECA LocationShareGuestEnded, however it ended: its
-            end, its owner's stop, its record's completion, its device's revoke): the link's secret is blanked from the
+            end, its owner's stop, its record's completion, its device's revoke), or its guest link alone taken out (the
+            EECA LocationShareGuestLinkRevoked, audienceSeqId): the link's secret is blanked from the
             body of the mail that carried it (/location/selector#ended), whose EmailMessage row stays for the mail queue.
             In a transaction of its own, so it never fails the end: an error is logged. Out: blankedCount.</description>
-        <in-parameters><parameter name="shareId" required="true"/></in-parameters>
+        <in-parameters>
+            <parameter name="shareId" required="true"/>
+            <parameter name="audienceSeqId"><description>Only this link of the share: its link taken out alone</description></parameter>
+        </in-parameters>
         <out-parameters><parameter name="blankedCount" type="Integer"/></out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/other/LocationRecordShares.js').execute('blankMail', context))</script></actions>
     </service>

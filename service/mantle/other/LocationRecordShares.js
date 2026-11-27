@@ -107,7 +107,8 @@ function workOrderFor(workEffortId) {
     return {root, organizationPartyId: work.organizationPartyId, plannedEnd, customerPartyId}
 }
 
-/** This server's https web root, the start of the link; never a request's parameter. */
+/** This server's https web root, the start of the link: the conf's host, or the request's only where a root-screen
+ * pattern names it as one of the configured sites; never a parameter. */
 function siteRoot() {
     const root = ec.web ? String(ec.web.getWebappRootUrl("webroot", null, true, true) || "") : ""
     return root.replace(/\/+$/, "") || null
@@ -141,7 +142,9 @@ function createShare(p) {
     if (kind !== "workOrder") denied("RECORD_KIND_UNKNOWN", "Share your location for a work order")
     const record = workOrderFor(p.recordId)
     const now = ms(ec.user.nowTimestamp)
-    const until = ms(p.thruDate) ?? record.plannedEnd
+    // an end not given: the planned end, within location@max-share-hours of now
+    const maxHours = Number(ec.factory.getConfValue("location@max-share-hours")) || 24
+    const until = ms(p.thruDate) ?? Math.min(record.plannedEnd, now + maxHours * 3600000)
     if (until <= now) denied("BAD_UNTIL", "The share ends after now")
     if (until > record.plannedEnd)
         denied("END_AFTER_PLANNED", "The share ends no later than the work order's planned end")
@@ -170,13 +173,17 @@ function createShare(p) {
 }
 
 /** The mails that carry a link, by its selector: the template's rows whose body holds the guest page's path. */
-const mailsOf = selector =>
-    Array.from(
+// The LIKE takes the selector only up to its first "_" (LIKE's one-character wildcard; a selector holds no "%"), so no
+// wildcard of it reaches the database, whatever its escape character; the exact path is then matched here.
+const mailsOf = selector => {
+    const prefix = String(selector).split("_")[0]
+    return Array.from(
         find(MESSAGE)
             .condition("emailTemplateId", TEMPLATE)
-            .condition("body", "like", "%/location/" + selector + "#%")
+            .condition("body", "like", "%/location/" + prefix + "%")
             .list()
-    )
+    ).filter(row => String(row.body || "").includes("/location/" + selector + "#"))
+}
 
 /**
  * send#RecordGuestLink: the link of a guest share of the caller's own, for a record, mailed to the record's customer: the
@@ -184,7 +191,8 @@ const mailsOf = selector =>
  */
 function sendLink(p) {
     if (!ec.user.userId) denied("PERMISSION_DENIED", "Sign in first")
-    const share = find(SHARE).condition("shareId", text(p.shareId) || "").one()
+    // locked, so two sends at once cannot both mail the link: the second waits, then finds the first's mail
+    const share = find(SHARE).condition("shareId", text(p.shareId) || "").forUpdate(true).one()
     if (!share || share.ownerUserId !== ec.user.userId || share.recordAdapterKey !== ADAPTER_KEY)
         denied("SHARE_NOT_FOUND", "Location share not found")
     const now = ms(ec.user.nowTimestamp)
@@ -207,7 +215,8 @@ function sendLink(p) {
     const to = emailOf(record.customerPartyId)
     if (!to) return {mailSent: false, mailReason: "NO_CUSTOMER_EMAIL"}
     const organizationName = partyName(record.organizationPartyId)
-    // the organization's address, else no-reply at this server's own host (its conf's web root, never a request's)
+    // the organization's address, else no-reply at this server's own host (the web root's: the conf's, or a configured
+    // site's; never a parameter)
     const host = /^https?:\/\/([^/:]+)/.exec(root)?.[1]
     const fromAddress = emailOf(record.organizationPartyId) || (host ? "no-reply@" + host : null)
     if (!fromAddress) return {mailSent: false, mailReason: "NO_SENDER"}
@@ -270,16 +279,20 @@ function endShares(p) {
 }
 
 /**
- * blank#RecordGuestLinkMail: a guest share for a record has ended or was stopped (the LocationShare EECA): the link's
- * secret is blanked from the body of every mail that carried it, which stays for the mail queue. Never fails the end.
+ * blank#RecordGuestLinkMail: a guest share for a record has ended or was stopped, or its link alone was taken out (the
+ * LocationShare and LocationShareAudience EECAs): the link's secret is blanked from the body of every mail that carried
+ * it, which stays for the mail queue. Never fails the end.
  */
 function blankMail(p) {
     let blanked = 0
     try {
-        const links = Array.from(find(AUDIENCE).condition({shareId: text(p.shareId) || "", audienceTypeEnumId: "LsaLink"}).list())
+        // the share's links, or the one link revoked (audienceSeqId)
+        let links = find(AUDIENCE).condition({shareId: text(p.shareId) || "", audienceTypeEnumId: "LsaLink"})
+        if (text(p.audienceSeqId)) links = links.condition("audienceSeqId", text(p.audienceSeqId))
+        links = Array.from(links.list())
         for (const link of links) {
             if (!link.tokenSelector) continue
-            const pattern = new RegExp("/location/" + link.tokenSelector.replace(/[-]/g, "\\-") + "#[A-Za-z0-9_-]+", "g")
+            const pattern = new RegExp("/location/" + link.tokenSelector + "#[A-Za-z0-9_-]+", "g")
             for (const mail of mailsOf(link.tokenSelector)) {
                 const replace = value => (value == null ? value : String(value).replace(pattern, "/location/" + link.tokenSelector + "#" + ENDED_SECRET))
                 mail.body = replace(mail.body)

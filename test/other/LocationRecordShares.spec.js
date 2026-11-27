@@ -125,6 +125,7 @@ spec({
         state.plain = workOrder("PLAIN", false)
         state.overdue = workOrder("OVERDUE", true, org, [state.tech], -1)
         state.cancelled = workOrder("CANCEL", true)
+        state.revoked = workOrder("REVOKE", true)
         const template = one("moqui.basic.email.EmailTemplate", {emailTemplateId: TEMPLATE})
         const server = template && one("moqui.basic.email.EmailServer", {emailServerId: template.emailServerId})
         state.mailServer = !!(server && server.smtpHost)
@@ -220,5 +221,31 @@ feature("a cancellation stops the work order's share too", {
     then({made, live, share}) {
         made.error == "" && live == null
         share.endedDate != null
+    }
+})
+
+feature("the guest link alone taken out blanks its mail, the share going on; an omitted end is within max-share-hours", {
+    when() {
+        const made = withConf("location@max-share-hours", "2", () => create(state.tech, state.revoked))
+        const link = partsOf(made.linkUrl)
+        const sent = run(state.tech, "send", {shareId: made.shareId, linkSecret: link.secret})
+        const before = mailsOf(link.selector).map(row => String(row.body))
+        const entry = one("moqui.maps.LocationShareAudience", {shareId: made.shareId, audienceTypeEnumId: "LsaLink"})
+        login(state.tech)
+        ec.service.sync().name(F + "revoke#Audience").parameters({shareId: made.shareId, audienceSeqId: entry.audienceSeqId}).call()
+        ec.message.clearErrors()
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        const after = mailsOf(link.selector).map(row => String(row.body))
+        return {made, link, sent, before, after, share: shareOf(made.shareId), now: nowMs()}
+    },
+    then({made, link, sent, before, after, share, now}) {
+        // the planned end is four hours out: the end not given is two hours (max-share-hours here), to the minute
+        made.error == "" && Math.abs(made.thruDate - (now + 2 * hour)) < 2 * 60000
+        sent.error == ""
+        before.length == 1 && before[0].includes(link.secret)
+        after.length == 1 && !after[0].includes(link.secret) && after[0].includes("/location/" + link.selector + "#ended")
+        // the share itself goes on
+        share.endedDate == null
     }
 })
