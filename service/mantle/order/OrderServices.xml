@@ -1527,18 +1527,18 @@ General Order Placement and eCommerce Usage
             orderApprovalRequired Y is never approved here; it stays placed (its payment authorized) for a holder of
             SALES_ORDER_APPROVE, whichever app placed it. With the setting off, its default, nothing changes.
 
-            An EDI purchase order (salesChannelEnumId ScEdi) is never approved here: approving it is the seller's decision, which
-            its 855 reports (SEC-BAP-117).
+            An EDI purchase order (salesChannelEnumId ScEdi) whose total is zero or less is never approved here: it has no payment,
+            so the payment test would pass it; the seller approves it, which its 855 reports (SEC-BAP-117).
         </description>
         <in-parameters><parameter name="orderId" required="true"/></in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <if condition="orderHeader == null"><return error="true" message="Order ${orderId} not found"/></if>
             <if condition="orderHeader.statusId != 'OrderPlaced'"><return/></if>
-            <!-- a trading partner's purchase order (EDI) is the seller's to approve, which its 855 reports: it carries no payment,
-                so one whose lines and charges come to zero or less would pass the payment test (SEC-BAP-117) -->
-            <if condition="orderHeader.salesChannelEnumId == 'ScEdi'">
-                <log message="Not auto-approving Order ${orderId}: an EDI purchase order is approved by the seller"/>
+            <!-- a trading partner's purchase order (EDI) carries no payment, so one whose lines and charges come to zero or less would
+                pass the payment test: it waits for the seller, whose decision the 855 reports (SEC-BAP-117) -->
+            <if condition="orderHeader.salesChannelEnumId == 'ScEdi' &amp;&amp; toDecimal(orderHeader.grandTotal ?? 0).compare(0) &lt;= 0">
+                <log message="Not auto-approving Order ${orderId}: an EDI purchase order of zero or less is approved by the seller"/>
                 <return/>
             </if>
             <if condition="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').approvalWaits(orderId)">
