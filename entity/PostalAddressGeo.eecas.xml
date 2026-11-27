@@ -13,7 +13,7 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/mr-entity-eca.xsd">
-    <!-- A postal address's postalCodeGeoId (mr-moqui plans/Maps.md §6.3), read by sales tax, checkout and segments as one of the
+    <!-- A postal address's postalCodeGeoId (mr-moqui plans/archive/Maps.md §6.3), read by sales tax, checkout and segments as one of the
         address's geos: the postal code's Geo from the local Geo data (GeoPostalCode by the country and the code as the framework's
         normalize#PostalCode reads it; MapPlaces.js resolvePostalCodeGeo), read directly so no lookup service runs inside the
         address's transaction. Set when a new address has a code and country, and when an address's code or country changes in
