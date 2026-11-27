@@ -3292,6 +3292,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="recordId" required="true"/>
             <parameter name="notifyFollowers" type="Boolean" default="false"/>
             <parameter name="recordUrl"><description>The record's screen, for the follower notification's link</description></parameter>
+            <parameter name="accessScreenLocation"><description>For the follower notification, the writer's screens when the call
+                runs from none of them (notify#RecordFollowers)</description></parameter>
             <parameter name="checkRecord" type="Boolean" default="true"><description>false only with authorization disabled</description></parameter>
         </in-parameters>
         <out-parameters>
@@ -3357,7 +3359,8 @@ along with this software (see the LICENSE.md file). If not, see
 
             if (created && notifyFollowers) ec.service.sync().name('mantle.party.CommunicationServices.notify#RecordFollowers').parameters({
                 recordEntityName: recordEntityName, recordId: recordId, kind: commEvent.communicationEventTypeId === 'Comment' ? 'notes' : 'messages',
-                communicationEventId: communicationEventId, subject: commEvent.subject, body: commEvent.body, recordUrl: recordUrl}).call()
+                communicationEventId: communicationEventId, subject: commEvent.subject, body: commEvent.body, recordUrl: recordUrl,
+                accessScreenLocation: accessScreenLocation || null}).call()
         ]]></script></actions>
     </service>
     <service verb="unlink" noun="CommunicationEventRecord">
@@ -3475,11 +3478,15 @@ along with this software (see the LICENSE.md file). If not, see
 
             if (checked.length) {
                 const now = ec.user.nowTimestamp
+                // the screens the user sends from: the filing after the send has none, and its follower notices are checked under these
+                const screens = Array.from(new Set(Array.from(ec.artifactExecution.getStackArray() || [])
+                        .filter((frame) => frame.typeEnumId === 'AT_XML_SCREEN').map((frame) => String(frame.name)))).join(',')
                 for (const row of ec.entity.find(RECORD).condition('emailMessageId', emailMessageId).list()) {
                     if (!checked.some((record) => record.recordEntityName === row.recordEntityName && record.recordId === row.recordId)) row.delete()
                 }
                 for (const record of checked) {
-                    const fields = {linkedByUserId: ec.user.userId, linkedDate: now, notifyFollowers: notifyFollowers ? 'Y' : 'N', recordUrl: recordUrl || null}
+                    const fields = {linkedByUserId: ec.user.userId, linkedDate: now, notifyFollowers: notifyFollowers ? 'Y' : 'N',
+                        recordUrl: recordUrl || null, accessScreenLocation: screens || null}
                     const existing = ec.entity.find(RECORD).condition({emailMessageId: emailMessageId, recordEntityName: record.recordEntityName,
                         recordId: record.recordId}).one()
                     if (existing != null) {
@@ -3563,7 +3570,8 @@ along with this software (see the LICENSE.md file). If not, see
                     try {
                         const linked = ec.service.sync().name('mantle.party.CommunicationServices.link#CommunicationEventRecord').parameters({
                             communicationEventId: communicationEventId, recordEntityName: row.recordEntityName, recordId: row.recordId,
-                            checkRecord: false, notifyFollowers: row.notifyFollowers === 'Y', recordUrl: row.recordUrl})
+                            checkRecord: false, notifyFollowers: row.notifyFollowers === 'Y', recordUrl: row.recordUrl,
+                            accessScreenLocation: row.accessScreenLocation || null})
                             .requireNewTransaction(true).disableAuthz().call()
                         if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
                         // the generic link names the user who chose the record, not the one whose run filed it
@@ -4134,8 +4142,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>
             Chatter's Log note: a Comment communication event from the user (create#Message), filed on the record
             (link#CommunicationEventRecord). The users mentioned are notified on topic ChatterMention, and the record's
-            followers of notes on topic RecordFollow, leaving out the author and those mentioned. A failed notification
-            is logged; the note stays.
+            followers of notes on topic RecordFollow, leaving out the author and those mentioned; one who may not open the
+            record, or whose access could not be confirmed, is told without it (notify#RecordMention), and is in
+            mentionedUserIds and withheldUserIds. A failed
+            notification is logged; the note stays.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -4152,10 +4162,12 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="communicationEventId"/>
             <parameter name="linkEntityName"/>
             <parameter name="mentionedUserIds" type="List"/>
+            <parameter name="withheldUserIds" type="List"><description>The users mentioned who were told without the record</description></parameter>
             <parameter name="notifiedFollowerUserIds" type="List"/>
         </out-parameters>
         <actions><script><![CDATA[
             mentionedUserIds = []
+            withheldUserIds = []
             notifiedFollowerUserIds = []
             let rootCommEventId = null
             if (parentCommEventId) {
@@ -4180,6 +4192,7 @@ along with this software (see the LICENSE.md file). If not, see
                         .parameters(Object.assign({mentionUserIds: mentionUserIds, mentionPartyIds: mentionPartyIds}, notifyParameters)).call()
                 if (ec.message.hasError()) return
                 mentionedUserIds = mentionOut.notifiedUserIds
+                withheldUserIds = Array.from(mentionOut.withheldUserIds || [])
             }
             const followerOut = ec.service.sync().name('mantle.party.CommunicationServices.notify#RecordFollowers')
                     .parameters(Object.assign({kind: 'notes', excludeUserIds: mentionedUserIds}, notifyParameters)).call()
@@ -4274,7 +4287,8 @@ along with this software (see the LICENSE.md file). If not, see
             on a request through its own join is changed by mantle.request.RequestServices.update#RequestComment, any other by
             the communication event's update. Only the users mentioned now who were not mentioned before are notified, on
             topic ChatterMention (notify#RecordMention): a mention in the old body is a data-mention-id of its rich text (a
-            userId, or a partyId whose users count). The record's followers are not told again.
+            userId, or a partyId whose users count). The record's followers are not told again. One who may not open the record
+            (or whose access could not be confirmed) is told without it, and is in mentionedUserIds and withheldUserIds.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -4291,9 +4305,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="communicationEventId"/>
             <parameter name="editedDate" type="Timestamp"/>
             <parameter name="mentionedUserIds" type="List"><description>The users notified: mentioned now and not before</description></parameter>
+            <parameter name="withheldUserIds" type="List"><description>Of those, the users told without the record</description></parameter>
         </out-parameters>
         <actions><script><![CDATA[
             mentionedUserIds = []
+            withheldUserIds = []
             editedDate = null
             const access = ec.service.sync().name('mantle.party.CommunicationServices.check#RecordNoteAccess').parameters({
                 recordEntityName: recordEntityName, recordId: recordId, communicationEventId: communicationEventId, action: 'update'}).call()
@@ -4334,6 +4350,7 @@ along with this software (see the LICENSE.md file). If not, see
                 mentionUserIds: added, subject: newSubject, body: body, recordUrl: recordUrl}).call()
             if (ec.message.hasError()) return
             mentionedUserIds = Array.from(mentionOut?.notifiedUserIds || [])
+            withheldUserIds = Array.from(mentionOut?.withheldUserIds || [])
         ]]></script></actions>
     </service>
     <service verb="delete" noun="RecordNote">
@@ -4476,8 +4493,11 @@ along with this software (see the LICENSE.md file). If not, see
             users of mentionPartyIds, less the author. The message has recordEntityName, recordId, recordName,
             communicationEventId, authorUserId, authorName, subject and summary; the link is recordUrl, since the
             record's screen belongs to the app. A record of a ConfidentialRecordType (check#ConfidentialRecordType) is told to
-            those users alone (directOnly: a subscription to every ChatterMention message receives none). A failed send is
-            logged and notifies no one.
+            those users alone (directOnly: a subscription to every ChatterMention message receives none). Only a user found to
+            open the record (filter#RecordVisibleUsers, as themselves under accessScreenLocation or the caller's screens) gets
+            it, a subscriber included; the others are told on ChatterMentionHidden, with the author's name alone: no record,
+            text or link (SH-UI-009; send#RecordNotices). notifiedUserIds is everyone told, withheldUserIds those told without
+            the record. A failed send is logged and notifies no one.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -4488,14 +4508,19 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="subject"/>
             <parameter name="body" allow-html="any"/>
             <parameter name="recordUrl"/>
+            <parameter name="accessScreenLocation"><description>Internal, for trusted code: the writer's screens, comma-separated,
+                for a call from no screen; a recipient's access is checked under their grant of one (filter#RecordVisibleUsers)</description></parameter>
             <parameter name="authorUserId" default="ec.user.userId"/>
         </in-parameters>
         <out-parameters>
             <parameter name="notifiedUserIds" type="List"/>
+            <parameter name="withheldUserIds" type="List"><description>The users told without the record: they may not open it, or that
+                could not be confirmed</description></parameter>
             <parameter name="notificationMessageId"/>
         </out-parameters>
         <actions><script><![CDATA[
             notifiedUserIds = []
+            withheldUserIds = []
             // IronStone People P21: a note on a confidential case tells its people alone, on PeopleCaseUpdate (no name, no text)
             if (recordEntityName === 'mantle.request.Request' && ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').isCase(recordId)) {
                 notifiedUserIds = Array.from(ec.service.sync().name('mantle.request.RequestServices.notify#PeopleCaseUpdate')
@@ -4516,18 +4541,14 @@ along with this software (see the LICENSE.md file). If not, see
             const message = ec.service.sync().name('mantle.party.CommunicationServices.make#RecordNotificationMessage').parameters({
                 recordEntityName: recordEntityName, recordId: recordId, communicationEventId: communicationEventId, subject: subject,
                 body: body, authorUserId: authorUserId}).call().message
-            try {
-                const nm = ec.makeNotificationMessage().topic('ChatterMention').message(message).userIds(Array.from(userIds))
-                if (recordUrl) nm.link(recordUrl)
-                // a confidential record's notice is its recipients' alone (ConfidentialRecordType, People follow-up 1)
-                if (ec.service.sync().name('mantle.party.CommunicationServices.check#ConfidentialRecordType')
-                        .parameter('recordEntityName', recordEntityName).call()?.confidential) nm.directOnly()
-                nm.send()
-                notificationMessageId = nm.getNotificationMessageId()
-                notifiedUserIds = Array.from(nm.getNotifyUserIds() ?? [])
-            } catch (err) {
-                ec.logger.error(`Mention notification for ${recordEntityName} ${recordId} not sent: ${err}`)
-            }
+            // SH-UI-009: the record, its text and its link go only to the users who may open it; the others are told who wrote
+            const sent = ec.service.sync().name('mantle.party.CommunicationServices.send#RecordNotices').parameters({recordEntityName: recordEntityName,
+                recordId: recordId, userIds: Array.from(userIds), topic: 'ChatterMention', message: message, recordUrl: recordUrl || null,
+                hiddenTopic: 'ChatterMentionHidden', hiddenMessage: {authorUserId: authorUserId ?? null, authorName: message.authorName},
+                accessScreenLocation: accessScreenLocation || null}).call()
+            notificationMessageId = sent?.notificationMessageId ?? null
+            notifiedUserIds = Array.from(sent?.notifiedUserIds || [])
+            withheldUserIds = Array.from(sent?.withheldUserIds || [])
         ]]></script></actions>
     </service>
     <service verb="notify" noun="RecordFollowers">
@@ -4535,7 +4556,9 @@ along with this software (see the LICENSE.md file). If not, see
             Notifies the followers of a record whose RecordFollower row has the kind on (notifyMessages, notifyNotes,
             notifyActivities, notifyChanges), on topic RecordFollow, less the author and excludeUserIds. The message is
             that of notify#RecordMention plus kind and workEffortId; a record of a ConfidentialRecordType is told to the
-            followers alone (directOnly), as there. A failed send is logged and notifies no one.
+            followers alone (directOnly), as there. A follower not found to open the record now is told on RecordFollowHidden
+            instead, with the author's name and the kind alone (SH-UI-009), as notify#RecordMention does. notifiedUserIds is
+            everyone told, withheldUserIds those told without the record. A failed send is logged and notifies no one.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -4547,14 +4570,17 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="body" allow-html="any"/>
             <parameter name="recordUrl"/>
             <parameter name="excludeUserIds" type="List"/>
+            <parameter name="accessScreenLocation"><description>As notify#RecordMention's</description></parameter>
             <parameter name="authorUserId" default="ec.user.userId"/>
         </in-parameters>
         <out-parameters>
             <parameter name="notifiedUserIds" type="List"/>
+            <parameter name="withheldUserIds" type="List"/>
             <parameter name="notificationMessageId"/>
         </out-parameters>
         <actions><script><![CDATA[
             notifiedUserIds = []
+            withheldUserIds = []
             // IronStone People P21: a note or message on a confidential case tells its people alone, on PeopleCaseUpdate
             if (recordEntityName === 'mantle.request.Request' && ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').isCase(recordId)) {
                 notifiedUserIds = Array.from(ec.service.sync().name('mantle.request.RequestServices.notify#PeopleCaseUpdate')
@@ -4579,18 +4605,161 @@ along with this software (see the LICENSE.md file). If not, see
                 body: body, authorUserId: authorUserId}).call().message
             message.kind = kind
             message.workEffortId = workEffortId ?? null
+            // SH-UI-009: the record, its text and its link go only to the followers who may open it now
+            const sent = ec.service.sync().name('mantle.party.CommunicationServices.send#RecordNotices').parameters({recordEntityName: recordEntityName,
+                recordId: recordId, userIds: userIds, topic: 'RecordFollow', message: message, recordUrl: recordUrl || null,
+                hiddenTopic: 'RecordFollowHidden', hiddenMessage: {authorUserId: authorUserId ?? null, authorName: message.authorName, kind: kind},
+                accessScreenLocation: accessScreenLocation || null}).call()
+            notificationMessageId = sent?.notificationMessageId ?? null
+            notifiedUserIds = Array.from(sent?.notifiedUserIds || [])
+            withheldUserIds = Array.from(sent?.withheldUserIds || [])
+        ]]></script></actions>
+    </service>
+    <service verb="filter" noun="RecordVisibleUsers" allow-remote="false">
+        <description>The users of userIds who may open a record, for a notice that names it (notify#RecordMention,
+            notify#RecordFollowers; SH-UI-009). The screens to check under are the screens of the caller's artifact stack,
+            innermost first, or with none (the filing of mail after its send, on a worker) accessScreenLocation: one or more,
+            comma-separated, the screens of the user who wrote, kept from the send. Internal, for trusted code only: the screen
+            decides whose grant's entity filters the check runs under, so it is never taken from a request, and a passed one is
+            ignored where the caller has screens of its own. Each user is checked as themselves in a scope of their own (runAsSystem, signed in as the user): the
+            first of those screens their own groups' authorization rows allow for all actions is chosen from the rows alone, so a
+            screen they do not hold records no authorization failure (none at all when a row of theirs denies any of the screens), and get#RecordLinkInfo checkOnly runs under their grant of
+            it (runAsUser). So the caller's grants are never theirs: an author's always-allow would make every record visible. A
+            user who cannot sign in now, holds none of the screens, or whose check fails in any way is not one; with no screen to
+            check under, none is. A user who may open the record only in another app, through a screen the writer did not use,
+            is not found either: the notice withholds the record without saying why. Never an error: a failure is logged.</description>
+        <in-parameters>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="userIds" type="List"/>
+            <parameter name="accessScreenLocation"/>
+        </in-parameters>
+        <out-parameters><parameter name="visibleUserIds" type="List"/></out-parameters>
+        <actions><script><![CDATA[
+            visibleUserIds = []
+            const wanted = Array.from(new Set(Array.from(userIds || []).map((id) => String(id)).filter((id) => id)))
+            if (!wanted.length) return
+            const stacked = Array.from(ec.artifactExecution.getStackArray() || []).filter((frame) => frame.typeEnumId === 'AT_XML_SCREEN')
+                    .map((frame) => String(frame.name))
+            // the kept screens only for a caller with none (the filing after a send): never in place of the caller's own
+            const given = stacked.length ? [] : String(accessScreenLocation || '').split(',').map((location) => location.trim())
+                    .filter((location) => location)
+            const screens = Array.from(new Set(stacked.length ? stacked : given))
+            if (!screens.length) return
+            const accounts = Array.from(ec.entity.find('moqui.security.UserAccount').condition('userId', 'in', wanted)
+                    .selectField('userId,username').disableAuthz().list())
+            // the first screen the signed-in user's groups allow for all actions with no deny, by their rows alone
+            const heldScreen = () => {
+                const groupIds = Array.from(ec.user.getUserGroupIdSet() || [])
+                if (!groupIds.length) return null
+                const rows = Array.from(ec.entity.find('moqui.security.ArtifactAuthzCheckView').condition('userGroupId', 'in', groupIds)
+                        .condition('artifactTypeEnumId', 'AT_XML_SCREEN').condition('authzActionEnumId', 'in', ['AUTHZA_ALL', 'AUTHZA_VIEW'])
+                        .disableAuthz().list())
+                const names = (row, location) => {
+                    if (row.nameIsPattern !== 'Y') return row.artifactName === location
+                    try { return new RegExp(`^(?:${row.artifactName})$`).test(location) } catch (err) { return false }
+                }
+                // a deny of any of the screens (an app root around an allowed inner screen) leaves none: fails closed
+                if (rows.some((row) => row.authzTypeEnumId === 'AUTHZT_DENY' && screens.some((location) => names(row, location)))) return null
+                return screens.find((location) => rows.some((row) => names(row, location) && row.authzActionEnumId === 'AUTHZA_ALL'
+                        && ['AUTHZT_ALLOW', 'AUTHZT_ALWAYS'].includes(row.authzTypeEnumId))) || null
+            }
+            // whether the user opens the record under that screen: any failure, a refusal of the screen included, is no
+            const opens = (account) => {
+                if (ec.user.internalLoginUser(account.username) !== true || ec.user.userId !== account.userId) return false
+                const location = heldScreen()
+                if (!location) return false
+                let visible = false
+                try {
+                    ec.artifactExecution.runAsUser(location, () => {
+                        const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
+                                .parameters({recordEntityName: recordEntityName, recordId: recordId, checkOnly: true}).call()
+                        visible = !ec.message.hasError() && info?.recordVisible === true
+                    })
+                } catch (err) {
+                    ec.logger.warn(`Whether user ${account.userId} may open ${recordEntityName} ${recordId} under ${location} was not found: ${err}`)
+                    return false
+                }
+                return visible
+            }
+            const visible = []
             try {
-                const nm = ec.makeNotificationMessage().topic('RecordFollow').message(message).userIds(userIds)
+                ec.artifactExecution.runAsSystem(() => {
+                    for (const account of accounts) {
+                        try {
+                            if (opens(account)) visible.push(account.userId)
+                        } catch (err) {
+                            ec.logger.warn(`Whether user ${account.userId} may open ${recordEntityName} ${recordId} was not found: ${err}`)
+                        } finally {
+                            // a refused sign-in or check is not the caller's error
+                            ec.message.clearErrors()
+                        }
+                    }
+                    if (ec.user.userId) ec.user.logoutLocal()
+                })
+            } catch (err) {
+                ec.logger.error(`Who may open ${recordEntityName} ${recordId} was not found, so no one is told of it: ${err}`)
+                return
+            }
+            visibleUserIds = visible
+        ]]></script></actions>
+    </service>
+    <service verb="send" noun="RecordNotices">
+        <description>Internal, for notify#RecordMention and notify#RecordFollowers (SH-UI-009): the notice that names the record
+            (topic, with message and link) to the users of userIds who may open it (filter#RecordVisibleUsers), and to the topic's
+            subscribers to every message (NotificationTopicUser allNotifications) who may, unless the record type is confidential;
+            sent directly to them alone, and not at all when none may, so no notice holding its text is kept for nobody. The other
+            users of userIds get hiddenTopic with hiddenMessage, which names no record and holds no text, and no link.
+            notifiedUserIds is everyone told; withheldUserIds those told without the record. A failed send is logged.</description>
+        <in-parameters>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="userIds" type="List"/>
+            <parameter name="topic" required="true"/>
+            <parameter name="message" type="Map" required="true"/>
+            <parameter name="recordUrl"/>
+            <parameter name="hiddenTopic" required="true"/>
+            <parameter name="hiddenMessage" type="Map" required="true"/>
+            <parameter name="accessScreenLocation"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="notifiedUserIds" type="List"/>
+            <parameter name="withheldUserIds" type="List"/>
+            <parameter name="notificationMessageId"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            notifiedUserIds = []
+            withheldUserIds = []
+            const direct = Array.from(new Set(Array.from(userIds || []).map((id) => String(id))))
+            const confidential = !!ec.service.sync().name('mantle.party.CommunicationServices.check#ConfidentialRecordType')
+                    .parameter('recordEntityName', recordEntityName).call()?.confidential
+            // a subscriber to every message of the topic is told only of what they may open, and never of a confidential record
+            const subscribers = confidential ? [] : Array.from(ec.entity.find('moqui.security.user.NotificationTopicUser').condition('topic', topic)
+                    .condition('allNotifications', 'Y').selectField('userId').disableAuthz().list()).map((row) => String(row.userId))
+                    .filter((id) => !direct.includes(id))
+            const visible = new Set(Array.from(ec.service.sync().name('mantle.party.CommunicationServices.filter#RecordVisibleUsers').parameters({
+                recordEntityName: recordEntityName, recordId: recordId, userIds: direct.concat(subscribers),
+                accessScreenLocation: accessScreenLocation || null}).call()?.visibleUserIds || []))
+            const told = new Set()
+            const shown = direct.concat(subscribers).filter((id) => visible.has(id))
+            if (shown.length) try {
+                const nm = ec.makeNotificationMessage().topic(topic).message(message).userIds(shown).directOnly()
                 if (recordUrl) nm.link(recordUrl)
-                // a confidential record's notice is its followers' alone (ConfidentialRecordType, People follow-up 1)
-                if (ec.service.sync().name('mantle.party.CommunicationServices.check#ConfidentialRecordType')
-                        .parameter('recordEntityName', recordEntityName).call()?.confidential) nm.directOnly()
                 nm.send()
                 notificationMessageId = nm.getNotificationMessageId()
-                notifiedUserIds = Array.from(nm.getNotifyUserIds() ?? [])
+                for (const id of Array.from(nm.getNotifyUserIds() ?? [])) told.add(id)
             } catch (err) {
-                ec.logger.error(`Follower notification for ${recordEntityName} ${recordId} not sent: ${err}`)
+                ec.logger.error(`${topic} notification for ${recordEntityName} ${recordId} not sent: ${err}`)
             }
+            const hidden = direct.filter((id) => !visible.has(id))
+            if (hidden.length) try {
+                ec.makeNotificationMessage().topic(hiddenTopic).message(hiddenMessage).userIds(hidden).directOnly().send()
+                for (const id of hidden) told.add(id)
+                withheldUserIds = hidden
+            } catch (err) {
+                ec.logger.error(`${hiddenTopic} notification for ${recordEntityName} ${recordId} not sent: ${err}`)
+            }
+            notifiedUserIds = Array.from(told)
         ]]></script></actions>
     </service>
     <service verb="make" noun="RecordNotificationMessage">
