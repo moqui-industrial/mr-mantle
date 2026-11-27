@@ -190,6 +190,11 @@ function typedValue(kind, value, name) {
     }
     if (kind === "number") {
         if (!Number.isFinite(Number(raw))) denied("VALUE_INVALID", name + " is a number")
+        // a percent from 0 to 100 and an amount or quantity of 0 or more, so a discount neither exceeds its line nor becomes
+        // a surcharge (SEC-BAP-129)
+        if (/percent$/i.test(name) && (Number(raw) < 0 || Number(raw) > 100))
+            denied("VALUE_INVALID", name + " is a percent from 0 to 100")
+        if (/(amount|quantity)$/i.test(name) && Number(raw) < 0) denied("VALUE_INVALID", name + " is 0 or more")
         return raw
     }
     if (raw.length > 255 || /[\r\n\x00]/.test(raw)) denied("VALUE_INVALID", name + " is one line of at most 255 characters")
