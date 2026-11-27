@@ -657,3 +657,39 @@ feature(
         }
     }
 )
+
+// SEC-BOS-119: who entered a claim's amounts for the employee (Bob's manager, given HR's expense permission here) does not
+// decide it; a claim Bob made himself the same manager decides
+feature("the HR officer who made an employee's claim and its lines does not decide it; a claim the employee made, they do", {
+    when() {
+        for (const permission of ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_EXPENSE_MANAGE"])
+            call("create#moqui.security.UserGroupPermission", {
+                userGroupId: state.uMgr,
+                userPermissionId: permission,
+                fromDate: since
+            })
+        const entered = newClaim(state.uMgr, state.bob)
+        line(state.uMgr, entered.invoiceId, "20")
+        run(state.uBob, E + "submit#Claim", {invoiceId: entered.invoiceId})
+        const refused = run(state.uMgr, E + "decide#Claim", {invoiceId: entered.invoiceId, decision: "approve"})
+        const own = newClaim(state.uBob, state.bob)
+        line(state.uBob, own.invoiceId, "20")
+        run(state.uBob, E + "submit#Claim", {invoiceId: own.invoiceId})
+        const decided = run(state.uMgr, E + "decide#Claim", {invoiceId: own.invoiceId, decision: "approve"})
+        return {
+            entered,
+            refused,
+            enteredState: claimRow(entered.invoiceId).statusEnumId,
+            changers: claimRow(entered.invoiceId).changedByUserIds,
+            decided
+        }
+    },
+    then({entered, refused, enteredState, changers, decided}) {
+        entered.error == ""
+        refused.error != ""
+        enteredState == "EcsSubmitted"
+        changers.split(",").includes(state.uMgr)
+        decided.error == ""
+        decided.statusEnumId == "EcsApproved"
+    }
+})

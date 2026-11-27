@@ -159,8 +159,15 @@ function changeableClaim(userScope, invoiceId) {
         denied("CLAIM_LOCKED", "This claim is " + (claimStatusTexts[claim.statusEnumId] || claim.statusEnumId).toLowerCase())
     return Object.assign(found, {claim})
 }
-// a change of the claim or its lines moves its revision, so a request names what it was made at
-const touch = invoiceId => call("update#" + CLAIM, {invoiceId, changedDate: ec.user.nowTimestamp})
+// a change of the claim or its lines moves its revision, so a request names what it was made at, and names its user among the
+// claim's changers, who do not decide it (SEC-BOS-119: Approvals' PakExpenseClaim selfPartyIds)
+const touch = invoiceId =>
+    call("update#" + CLAIM, Object.assign({invoiceId, changedDate: ec.user.nowTimestamp}, changers(invoiceId)))
+function changers(invoiceId) {
+    const ids = text(one(CLAIM, {invoiceId})?.changedByUserIds).split(",").map(text).filter(Boolean)
+    if (ec.user.userId && !ids.includes(ec.user.userId)) ids.push(ec.user.userId)
+    return ids.length ? {changedByUserIds: ids.join(",")} : {}
+}
 
 // ===== the claim's stage, as the lists and the claim show it =====
 // Draft, business-approved, finance-approved and paid are distinct labels (design §9 ExpenseClaims).
@@ -292,7 +299,10 @@ function storeClaim(p) {
         invoiceChanges.currencyUomId = text(p.currencyUomId)
     }
     if (Object.keys(invoiceChanges).length) call("update#" + INVOICE, Object.assign({invoiceId: claim.invoiceId}, invoiceChanges))
-    call("update#" + CLAIM, Object.assign({invoiceId: claim.invoiceId, changedDate: ec.user.nowTimestamp}, changesOf))
+    call(
+        "update#" + CLAIM,
+        Object.assign({invoiceId: claim.invoiceId, changedDate: ec.user.nowTimestamp}, changers(claim.invoiceId), changesOf)
+    )
     return {invoiceId: claim.invoiceId}
 }
 

@@ -291,6 +291,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="changedDate" type="date-time"><description>The last change of the claim or its lines, so a request names the
             revision it was made at</description></field>
         <field name="createdByUserId" type="id"/>
+        <field name="changedByUserIds" type="text-long"><description>Each user who changed the claim or its lines (comma
+            separated), with createdByUserId the claim's authors, who do not decide it (SEC-BOS-119)</description></field>
         <field name="createdDate" type="date-time"/>
         <field name="operationKey" type="text-medium"/>
         <relationship type="one" related="mantle.account.invoice.Invoice" short-alias="invoice"/>
