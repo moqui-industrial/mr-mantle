@@ -475,7 +475,7 @@ const moneyText = (value, currencyUomId) =>
     value == null ? "" : ec.l10n.formatCurrency(ec.l10n.roundCurrency(toDecimal(value), currencyUomId), currencyUomId)
 const statusName = statusId => (statusId ? one("moqui.basic.StatusItem", {statusId})?.description || "" : "")
 const enumName = enumId => (enumId ? one("moqui.basic.Enumeration", {enumId})?.description || "" : "")
-const httpsUrl = value => (/^https:\/\/[^\s"'<>]+$/i.test(String(value || "")) ? String(value) : null)
+const httpsUrl = lib.httpsUrl
 // The order's sales part when it is a customer's order of the organization as above, else null.
 function customerOrderPart(order, organizationPartyId, customerPartyId) {
     if (!order || order.productStoreId || !order.placedDate || order.recurCronExpression) return null

@@ -224,6 +224,9 @@ function complete(op, resultEntityName, resultId, result) {
         resultJson: JSON.stringify(result)
     })
 }
+// A link a customer's page writes to an href (a tracking link, an event's join link): an https address with no quote, space
+// or angle bracket, else null (SEC-PSF-84).
+const httpsUrl = value => (/^https:\/\/[^\s"'<>]+$/i.test(String(value || "")) ? String(value) : null)
 function previous(op) {
     return op.old ? Object.assign(json(op.old.resultJson, {}), {alreadyApplied: true}) : null
 }
@@ -255,5 +258,6 @@ function previous(op) {
     operationEntity,
     operation,
     complete,
-    previous
+    previous,
+    httpsUrl
 })

@@ -73,7 +73,9 @@ const limits = {
     lookupEveryMs: 1000,
     placementTries: 5,
     orderLinkDays: 366,
-    reconcileBatch: 200
+    reconcileBatch: 200,
+    // guest orders with nothing due an address takes on a site in an hour (SEC-PSS-06)
+    freeGuestOrders: 5
 }
 const openStatuses = ["ScoEditing", "ScoReady", "ScoReviewRequired", "ScoPaymentPending", "ScoPlacementPending"]
 const editableStatuses = ["ScoEditing", "ScoReady", "ScoReviewRequired"]
@@ -1084,6 +1086,19 @@ function visitorKeyHashOf(visitorKey, checkout, part) {
 // freeze: under the order's and the checkout's locks, every price, line, quote, tax, promotion limit and the terms checked
 // again; a change is recorded (the cart repriced, the quote applied, the checkout reviewRequired) and answered, else the
 // snapshot is bound to the frozen revision and committed with the payment and its attempt (nothing due: no payment).
+// Counts a guest order with nothing due against its address on its site (record#Attempt, in a transaction of its own, so a
+// refused freeze still counts); past the limit it is refused as a rate limit.
+function freeGuestLimit(checkout) {
+    const key = "shop-free-order:" + checkout.siteId + ":" + text(checkout.contactEmail).toLowerCase()
+    const allowed = ec.service
+        .sync()
+        .throwOnError(true)
+        .name("org.moqui.public.AccountServices.record#Attempt")
+        .parameters({input: {key, limit: limits.freeGuestOrders, windowMillis: 3600000}})
+        .requireNewTransaction(true)
+        .call().result.allowed
+    if (!allowed) refuse("Tarpit", "RATE_LIMITED", "Too many orders for this email address; try again later")
+}
 function freeze(p) {
     const checkout = checkoutRow(p.checkoutId, true)
     const order = find("mantle.order.OrderHeader", {orderId: checkout.orderId}).forUpdate(true).one()
@@ -1210,6 +1225,9 @@ function freeze(p) {
     if ((order.marketingVisitorKeyHash || null) !== (p.visitorKeyHash || null))
         call("update#mantle.order.OrderHeader", {orderId: order.orderId, marketingVisitorKeyHash: p.visitorKeyHash || null})
     if (due.compare(0) <= 0) {
+        // a guest's order with nothing due mails its receipt to an address typed and never verified, with no payment behind
+        // it: an address takes a few of them on a site in an hour (SEC-PSS-06)
+        if (checkout.accountCheckout !== "Y") freeGuestLimit(checkout)
         // nothing due: no gateway, placement next
         call("update#" + C, Object.assign(values, {statusId: "ScoPlacementPending", paymentId: null}))
         return {paymentId: null}

@@ -80,6 +80,7 @@ const RECEIPT =
 
 const blank = value => value == null || String(value).trim() === ""
 const text = value => (blank(value) ? null : String(value).trim())
+const httpsUrl = lib.httpsUrl
 const nowMs = () => Number(ms(ec.user.nowTimestamp))
 const L = words => ec.l10n.localize(words)
 const fail = (kind, message) => {
@@ -1082,7 +1083,8 @@ function registrationView(reservation, policy, via, extra = {}) {
                     : ""
             })),
             // the link to join goes to confirmed registrants only, never to a pending or waitlisted place
-            joinUrl: confirmedAny && workEffort?.infoUrl ? workEffort.infoUrl : null,
+            // and only as an https address (SEC-PSF-84): the occurrence's infoUrl is staff's or a calendar import's text
+            joinUrl: confirmedAny ? httpsUrl(workEffort?.infoUrl) : null,
             canCancel: !occurrenceStarted && [...cancelTerms.values()].some(decision => decision.allowed),
             cancellationTerms: (terms ? terms.cancellationTerms : policy.cancellationTerms) || "",
             // the rule in words: the accepted revision's once completed, else the offer's now (which completing accepts)

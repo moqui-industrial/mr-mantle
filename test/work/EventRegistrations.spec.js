@@ -580,10 +580,23 @@ feature(
             )
             const approved = states(reserved.reference)
             const view = visitor("get#Registration", {siteId: siteB, token: reserved.token})
+            // the join link reaches a confirmed registrant only as an https address (SEC-PSF-84)
+            const joinWith = infoUrl => {
+                system(() =>
+                    ec.service
+                        .sync()
+                        .name("update#mantle.work.effort.WorkEffort")
+                        .parameters({workEffortId: ids.approval.workEffortId, infoUrl})
+                        .disableAuthz()
+                        .call()
+                )
+                return visitor("get#Registration", {siteId: siteB, token: reserved.token}).registration.joinUrl
+            }
+            const joins = [joinWith("javascript:alert(1)"), joinWith("https://meet.mkrg.example.test/room"), joinWith(null)]
             // a second order of the same offer, cancelled instead: its place is released once
             const next = reserve(siteB, ids.approval.registrationPolicyId, ids.approval.ticketTypeId, 1, "next@mkrg.example.test")
             const full = next.kind ? null : states(next.reference)
-            return {paid, placed, pending, stillPending, approved, view, next, full}
+            return {paid, placed, pending, stillPending, approved, view, joins, next, full}
         },
         then(r) {
             r.placed == "OrderPlaced"
@@ -593,6 +606,7 @@ feature(
             r.stillPending == "EvrPending"
             r.approved == "EvrConfirmed"
             r.view.registration.state == "confirmed" && r.view.registration.places[0].canShowCode
+            r.joins == [null, "https://meet.mkrg.example.test/room", null]
             r.full == "EvrWaitlisted"
         }
     }

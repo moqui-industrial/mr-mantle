@@ -240,8 +240,24 @@ feature("a guest's link and a verified account read their own orders; another or
                     }).consented
             )
         const optInBefore = one("mantle.order.StoreCheckout", {orderId: state.mine.orderId}).optInPending
+        // a shipping address the guest typed, which the claim does not hand to the account (SEC-PSS-04)
+        const PCM = "mantle.party.contact.PartyContactMech"
+        const typed = system(() => {
+            const contactMechId = call("create#mantle.party.contact.ContactMech", {contactMechTypeEnumId: "CmtPostalAddress"})
+                .contactMechId
+            make("mantle.party.contact.PostalAddress", {contactMechId, address1: "1 Typed Lane", city: "Elsewhere"})
+            make(PCM, {
+                partyId: state.mine.partyId,
+                contactMechId,
+                contactMechPurposeId: "PostalShippingDest",
+                fromDate: ec.user.nowTimestamp
+            })
+            return contactMechId
+        })
         // the verified account claims the guest purchase of its email, and only that
         const overview = op(ids.buyer, A + "get#Account", {})
+        const takenMechs = list(PCM, {partyId: ids.buyer, contactMechId: typed}).filter(row => !row.thruDate)
+        const guestMechs = list(PCM, {contactMechId: typed})
         const own = op(ids.buyer, A + "get#Order", {orderId: state.mine.orderId})
         const others = op(ids.buyer, A + "get#Order", {orderId: state.other.orderId})
         const invoices = op(ids.buyer, "mantle.account.PortalServices.find#Invoices", {})
@@ -270,10 +286,15 @@ feature("a guest's link and a verified account read their own orders; another or
             claimedConsent,
             claimedPending,
             ownConfirmed,
-            ownConsent
+            ownConsent,
+            guestMechs,
+            takenMechs
         }
     },
     then(r) {
+        // the typed address moved with the merge, ended
+        r.guestMechs.length == 1 && !!r.guestMechs[0].thruDate
+        r.takenMechs.length == 0
         r.byLink.result.order.orderId == state.mine.orderId
         r.byLink.result.order.lines.length == 1
         r.linkOther.error.includes("NOT_AVAILABLE")
@@ -508,6 +529,49 @@ feature("a signed-in customer turns a store's cart reminders on and off; a guest
         unverifiedOffer == "reviewRequests"
         link.unsubscribeUrl.startsWith("https://" + ids.host + "/account/EmailPreferences?token=")
         link.oneClickUrl.includes("/account/EmailPreferences/oneClick?token=")
+    }
+})
+
+// SEC-PSF-89: a site's own preferences page shows and ends the account's memberships of the lists of the organizations the
+// site serves (here its store's) and of lists of no organization, never another organization's
+feature("a site's preferences page shows and ends only the lists of the organizations the site serves", {
+    when() {
+        const H = "mantle.public.AccountHubServices."
+        const lists = system(() => {
+            make("mantle.party.Party", {partyId: prefix + "_ELSEWHERE", partyTypeEnumId: "PtyOrganization"})
+            const listOf = (name, ownerPartyId) => {
+                const contactListId = call("create#mantle.marketing.contact.ContactList", {contactListName: name, ownerPartyId})
+                    .contactListId
+                call("create#mantle.marketing.contact.ContactListParty", {
+                    contactListId,
+                    partyId: ids.buyer,
+                    fromDate: ec.user.nowTimestamp,
+                    statusId: "CLPT_ACCEPTED"
+                })
+                return contactListId
+            }
+            return {
+                own: listOf("Store organization news", ids.org),
+                shared: listOf("Unowned news", null),
+                elsewhere: listOf("Another organization's news", prefix + "_ELSEWHERE")
+            }
+        })
+        const shown = op(ids.buyer, H + "get#EmailPreferences", {}).result.lists.map(list => list.contactListId)
+        const ended = op(ids.buyer, H + "store#EmailPreferences", {
+            choices: JSON.stringify({lists: {[lists.own]: false, [lists.elsewhere]: false}})
+        })
+        const current = contactListId =>
+            list("mantle.marketing.contact.ContactListParty", {contactListId, partyId: ids.buyer}).some(
+                row => !row.thruDate && row.statusId === "CLPT_ACCEPTED"
+            )
+        return {lists, shown, ended, own: current(lists.own), elsewhere: current(lists.elsewhere)}
+    },
+    then(r) {
+        r.shown.includes(r.lists.own) && r.shown.includes(r.lists.shared)
+        !r.shown.includes(r.lists.elsewhere)
+        !r.ended.error
+        r.own == false
+        r.elsewhere == true
     }
 })
 
