@@ -1,4 +1,4 @@
-// Mantle's map adapters (mantle.other.MapPlaceServices; mr-moqui plans/Maps.md §3.2, §6.1, §6.3, §8, docs/tools/Maps.md "Record
+// Mantle's map adapters (mantle.other.MapPlaceServices; mr-moqui plans/archive/Maps.md §3.2, §6.1, §6.3, §8, docs/tools/Maps.md "Record
 // adapters"): the place of a postal address, a party, a facility and an asset for the framework's local-map dialog, the save of a
 // point a user chose for one, and the facilities and assets of a viewport for a record layer. The framework resolves an adapter
 // by its key (moqui.maps.MapAdapter, data/10-seed/MapPlaces.xml) and calls these services as the user; nothing of the

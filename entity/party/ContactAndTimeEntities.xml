@@ -385,7 +385,7 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="POSTAL_CODE_IDX"><index-field name="postalCode"/></index>
     </entity>
 
-    <!-- How a record's own point was obtained (mr-moqui plans/Maps.md §6.1, §6.3): the precision, who chose it and when, and for
+    <!-- How a record's own point was obtained (mr-moqui plans/archive/Maps.md §6.1, §6.3): the precision, who chose it and when, and for
         an address's point the fingerprint of the address it was chosen for. One row for the GeoPoint of a PostalAddress, a
         PartyGeoPoint, a Facility or an Asset, written by the map adapters' store services (mantle/other/MapPlaces.js) with the
         point's dataSourceId; kept beside PostalAddress, whose points are most of them, it serves the facility, asset and party
