@@ -214,3 +214,25 @@ feature("an account with no password to give again signs in again instead", {
         recent.fingerprint.startsWith("SHA256:")
     }
 })
+
+feature("the SSH address an account is shown is the server's while its SSH server is on and serves git, and none while it is off or serves none", {
+    when() {
+        setConf("ssh-server@public-host", "git.sgaspec.example")
+        setConf("ssh-server@public-port", "2200")
+        setConf("ssh-server@enabled", "false")
+        const off = access("SGA_ONE").sshAddress
+        setConf("ssh-server@enabled", "true")
+        const on = access("SGA_ONE").sshAddress
+        setConf("ssh-server@git-enabled", "false")
+        const noGit = access("SGA_ONE").sshAddress
+        setConf("ssh-server@git-enabled", "true")
+        const gitAgain = access("SGA_ONE").sshAddress
+        return {off, on, noGit, gitAgain}
+    },
+    then({off, on, noGit, gitAgain}) {
+        off == null
+        on.startsWith("ssh://") && on.endsWith("@git.sgaspec.example:2200/")
+        noGit == null
+        gitAgain == on
+    }
+})

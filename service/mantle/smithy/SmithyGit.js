@@ -348,9 +348,14 @@ kit => {
         if (refused) fail("AuthenticationRequired", "signInRequired: Enter your password again to change your git access")
     }
     /* Where git over SSH is reached, as the framework builds a clone address (get#GitCloneUrls) from the server's
-       settings: what stands before a repository's path; none where the SSH server has no port. */
+       settings: what stands before a repository's path; none while the SSH server is off (its switch,
+       ssh-server@enabled), serves no git (ssh-server@git-enabled, which is off unless empty or true, as the server
+       reads it) or has no port. */
     function sshAddress() {
         const setting = selector => text(ec.factory.getConfValue(selector)).trim()
+        if (setting("ssh-server@enabled").toLowerCase() !== "true") return null
+        const git = setting("ssh-server@git-enabled").toLowerCase()
+        if (git && git !== "true") return null
         const port = setting("ssh-server@public-port") || setting("ssh-server@port")
         if (!port || port === "0") return null
         const host =

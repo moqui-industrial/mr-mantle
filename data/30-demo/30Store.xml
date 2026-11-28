@@ -101,7 +101,7 @@
 
     <!-- demo override server and client footer pages -->
     <!-- the server footer is an html page as the client one is: a wiki page renders by its type, never as a template
-        (plans/Security-Review.md SEC-SCR-81), so it names no signed-in user -->
+        (plans/archive/Security-Review.md SEC-SCR-81), so it names no signed-in user -->
     <moqui.resource.DbResource filename="footer.html" isFile="Y" resourceId="zzwr_srv_footer" parentResourceId="zzwrt_server_dir">
         <file mimeType="text/html" versionName="01" rootVersionName="01">
             <fileData><![CDATA[

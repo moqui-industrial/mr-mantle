@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
 <entity-facade-xml type="seed">
-    <!-- The sales access profile of CalcGrid (mr-moqui plans/IronCalc-DB.md, Access and row scope; docs/tools/Database.md,
+    <!-- The sales access profile of CalcGrid (mr-moqui plans/archive/IronCalc-DB.md, Access and row scope; docs/tools/Database.md,
         CalcGrid and access profiles): what a person who is not an administrator may put on a spreadsheet's data sheet, as
         authorization data. The group holds the profile artifact, which CalcGrid enters before it reads, and an artifact
         org.moqui.calc.entity.[entityName] for each entity and view offered; an offer is CalcGrid's own name and grants

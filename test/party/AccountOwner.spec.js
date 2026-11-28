@@ -1,5 +1,5 @@
 // mantle.party.PartyServices.update#Account changes the caller's own account, or any account for a holder of
-// ADMIN_IDENTITY_MANAGE (plans/Security-Review.md SEC-RTE-81: a screen that passed a posted userId reached another
+// ADMIN_IDENTITY_MANAGE (plans/archive/Security-Review.md SEC-RTE-81: a screen that passed a posted userId reached another
 // account's email address). A user without the permission changes their own name and is refused another account, by its
 // userId or its partyId; an administrator (john.doe, ADMIN) changes another's. Authorization stays on for the calls.
 // Run: ./moq test mr-mantle --spec AccountOwner

@@ -1387,7 +1387,7 @@ kit => {
             .userIds(userIds)
             .record(M + "SmithyRepository", repositoryId)
             // the title is a template expanded with the message's fields: values go in the message, never in the text,
-            // where a name holding ${...} would run as script (plans/Security-Review.md SEC-SCR-05)
+            // where a name holding ${...} would run as script (plans/archive/Security-Review.md SEC-SCR-05)
             .title("The deployment of ${where} ${commitShort} to ${environment} waits for approval")
             .message({
                 deploymentId: deployment.deploymentId,
