@@ -2,8 +2,9 @@
 // crates/moqui-calc/src/profile.rs), through org.moqui.calc.CalcServices as a screen would call them, with authorization on:
 // a holder of the profile reads the orders of the organizations they work in and none of another's, on a data sheet over a
 // view; an entity the profile does not offer, and an offered one no organization filter applies to, are refused; a user
-// with no organization reads no row; a document saved by an author and shared with the group shows each reader their own
-// rows; only an author makes and saves one; and without the profile there is no access. New spec, no Groovy original.
+// with no organization reads no row; a payroll-origin invoice or payment is on no sheet and in no summary (CALC_NO_PAYROLL);
+// a document saved by an author and shared with the group shows each reader their own rows; only an author makes and saves
+// one; and without the profile there is no access. New spec, no Groovy original.
 const CALC = "org.moqui.calc.CalcServices"
 const effectiveTime = Date.now()
 const dayMillis = 86400000
@@ -75,7 +76,8 @@ feature("two organizations with an order each, and users: an author and a viewer
                     authzTypeEnumId: "AUTHZT_ALLOW", authzActionEnumId: "AUTHZA_ALL" })
             call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: `${groupId}_SALES`, userGroupId: groupId, artifactGroupId: "CALC_PROFILE_SALES",
                     authzTypeEnumId: "AUTHZT_ALWAYS", authzActionEnumId: "AUTHZA_VIEW" })
-            call("create#moqui.security.ArtifactAuthzFilter", { artifactAuthzId: `${groupId}_SALES`, entityFilterSetId: "MANTLE_USER_ORG" })
+            for (const entityFilterSetId of ["MANTLE_USER_ORG", "CALC_NO_PAYROLL"])
+                call("create#moqui.security.ArtifactAuthzFilter", { artifactAuthzId: `${groupId}_SALES`, entityFilterSetId })
         }
         // a group that holds CalcGrid and no profile
         call("create#moqui.security.UserGroup", { userGroupId: "CGS_NOPROFILE", description: "CalcGrid with no profile" })
@@ -109,6 +111,37 @@ feature("two organizations with an order each, and users: an author and a viewer
     },
     then({ users }) {
         Object.keys(users).length == 5
+    },
+})
+
+feature("an invoice and a payment of the first organization, and its payroll's: a person's pay is never on a sheet, nor in a summary", {
+    when() {
+        // a sale to Paul, and Vic's pay: the payroll invoice and its payment, marked payrollOrigin as the pay run marks them
+        for (const [invoiceId, toPartyId, invoiceTotal, payrollOrigin] of [["CGS-I1", parties.Paul, 50, null], ["CGS-PAY1", parties.Vic, 999, "Y"]])
+            call("create#mantle.account.invoice.Invoice", { invoiceId, invoiceTypeEnumId: "InvoiceSales", fromPartyId: "CGS_ORG", toPartyId,
+                    statusId: "InvoiceInProcess", currencyUomId: "USD", invoiceDate: ec.user.nowTimestamp, invoiceTotal, unpaidTotal: invoiceTotal, payrollOrigin })
+        for (const [paymentId, toPartyId, amount, payrollOrigin] of [["CGS-PM1", parties.Paul, 20, null], ["CGS-PAYPM1", parties.Vic, 999, "Y"]])
+            call("create#mantle.account.payment.Payment", { paymentId, fromPartyId: "CGS_ORG", toPartyId, amount, amountUomId: "USD", payrollOrigin })
+        const invoices = as("cgs.ann", () => readEntity("mantle.account.invoice.Invoice"))
+        const payments = as("cgs.ann", () => readEntity("mantle.account.payment.Payment"))
+        const summary = as("cgs.ann", () => readEntity("mantle.account.invoice.InvoiceSummary"))
+        return { invoices, payments, summary }
+    },
+    then({ invoices, payments, summary }) {
+        invoices.errors == ""
+        invoices.texts.includes("CGS-I1")
+        !invoices.texts.includes("CGS-PAY1")
+        payments.errors == ""
+        payments.texts.includes("CGS-PM1")
+        !payments.texts.includes("CGS-PAYPM1")
+        // the summary, which a payroll filter reads through its payrollOrigin alias: Paul's sale, nothing of Vic's pay
+        summary.errors == ""
+        summary.dataRows == 1
+        summary.texts.includes(parties.Paul)
+        !summary.texts.includes(parties.Vic)
+        summary.texts.includes("50")
+        !summary.texts.includes("999")
+        !summary.texts.includes("1049")
     },
 })
 
