@@ -1,8 +1,9 @@
 // The accounting access profile of CalcGrid (data/10-seed/Accounting.xml; mr-moqui plans/IronCalc-DB2.md CG5, docs/tools/Database.md
 // CalcGrid and access profiles), through org.moqui.calc.CalcServices as a screen would call them, with authorization on, as
 // test/order/CalcGridSales.spec.js holds the sales profile: a holder reads the invoices and ledger transactions of the
-// organization they work in and none of another's, through a view too; a payroll-origin invoice (CALC_NO_PAYROLL) is never on
-// the sheet; an entity the profile does not offer is refused. New spec, no Groovy original.
+// organization they work in and none of another's, through a view and the invoices' summary too; a payroll-origin invoice,
+// payment or transaction (CALC_NO_PAYROLL) is never on the sheet; an entity the profile does not offer, and a view's member
+// with no filter of its own, are refused. New spec, no Groovy original.
 const CALC = "org.moqui.calc.CalcServices"
 const effectiveTime = Date.now()
 const dayMillis = 86400000
@@ -83,12 +84,16 @@ feature("two organizations with an invoice and a ledger transaction each, a payr
             ["CGA-I2", "CGA_ORG2", parties.Ann, null], ["CGA-PAY1", "CGA_ORG", parties.Ann, "Y"]])
             call("create#mantle.account.invoice.Invoice", { invoiceId, invoiceTypeEnumId: "InvoiceSales", fromPartyId, toPartyId,
                     statusId: "InvoiceInProcess", currencyUomId: "USD", invoiceDate: ec.user.nowTimestamp, payrollOrigin })
-        for (const [acctgTransId, organizationPartyId] of [["CGA-T1", "CGA_ORG"], ["CGA-T2", "CGA_ORG2"]]) {
+        for (const [acctgTransId, organizationPartyId, payrollOrigin] of [["CGA-T1", "CGA_ORG", null], ["CGA-T2", "CGA_ORG2", null],
+            ["CGA-TPAY1", "CGA_ORG", "Y"]]) {
             call("create#mantle.ledger.transaction.AcctgTrans", { acctgTransId, organizationPartyId, acctgTransTypeEnumId: "AttInternal",
-                    transactionDate: ec.user.nowTimestamp, isPosted: "N", amountUomId: "USD" })
+                    transactionDate: ec.user.nowTimestamp, isPosted: "N", amountUomId: "USD", payrollOrigin })
             call("create#mantle.ledger.transaction.AcctgTransEntry", { acctgTransId, acctgTransEntrySeqId: "01", glAccountId: "111100000",
                     debitCreditFlag: "D", amount: 10 })
         }
+        // a payment of the first organization's and its payment of Ann's pay
+        for (const [paymentId, toPartyId, payrollOrigin] of [["CGA-PM1", parties.Otto, null], ["CGA-PAYPM1", parties.Ann, "Y"]])
+            call("create#mantle.account.payment.Payment", { paymentId, fromPartyId: "CGA_ORG", toPartyId, amount: 30, amountUomId: "USD", payrollOrigin })
         return { users }
     },
     then({ users }) {
@@ -103,10 +108,15 @@ feature("a holder reads their own organization's invoices and transactions, a vi
         const annLedger = as("cga.ann", () => readEntity("mantle.ledger.transaction.AcctgTransAndEntry"))
         const ottoLedger = as("cga.otto", () => readEntity("mantle.ledger.transaction.AcctgTrans"))
         const orders = as("cga.ann", () => readEntity("mantle.order.OrderPart"))
+        const entries = as("cga.ann", () => readEntity("mantle.ledger.transaction.AcctgTransEntry"))
+        const payments = as("cga.ann", () => readEntity("mantle.account.payment.Payment"))
+        const summary = as("cga.ann", () => readEntity("mantle.account.invoice.InvoiceSummary"))
+        const partyOf = (userId) => ec.entity.find("moqui.security.UserAccount").condition("userId", userId).one().partyId
+        const parties = { ann: partyOf(users.Ann), otto: partyOf(users.Otto) }
         const profileIds = as("cga.ann", () => Array.from(calc("get#CalcProfiles", {}).out.profiles || []).map((profile) => profile.profileId))
-        return { annInvoices, ottoInvoices, annLedger, ottoLedger, orders, profileIds }
+        return { annInvoices, ottoInvoices, annLedger, ottoLedger, orders, profileIds, entries, payments, summary, parties }
     },
-    then({ annInvoices, ottoInvoices, annLedger, ottoLedger, orders, profileIds }) {
+    then({ annInvoices, ottoInvoices, annLedger, ottoLedger, orders, profileIds, entries, payments, summary, parties }) {
         profileIds.includes("accounting")
         annInvoices.errors == ""
         annInvoices.texts.includes("CGA-I1")
@@ -124,5 +134,16 @@ feature("a holder reads their own organization's invoices and transactions, a vi
         !ottoLedger.texts.includes("CGA-T1")
         orders.errors.includes("Not available")
         orders.texts.length == 0
+        // the entries are a plain member of the view: no organization filter of their own
+        entries.errors.includes("Not available")
+        // no payroll-origin transaction, payment or invoice: in the view, the payments, the invoices' summary
+        !annLedger.texts.includes("CGA-TPAY1")
+        payments.errors == ""
+        payments.texts.includes("CGA-PM1")
+        !payments.texts.includes("CGA-PAYPM1")
+        summary.errors == ""
+        summary.dataRows == 1
+        summary.texts.includes(parties.otto)
+        !summary.texts.includes(parties.ann)
     },
 })

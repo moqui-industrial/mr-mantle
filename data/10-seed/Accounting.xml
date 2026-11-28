@@ -269,9 +269,10 @@
         entries, through the view) and time periods on a spreadsheet's data sheet, as authorization data. Each entity offered
         has an organization filter (15-seed-initial/OrganizationFilters.xml: invoices and payments by their from and to party,
         financial accounts, transactions by their organization, time periods by their party); the entries are a plain member
-        of the view, refused on their own. Left out: an invoice's or a payment's views that have no payrollOrigin alias
-        (InvoiceSummary), which CALC_NO_PAYROLL refuses, and the entities with no organization filter (InvoiceItem alone,
-        PaymentApplication, FinancialAccountTrans, GlAccount).
+        of the view, refused on their own, and InvoiceSummary is read through the invoice's filter and its payrollOrigin
+        alias. Left out: an invoice's or a payment's views that have no payrollOrigin alias, which CALC_NO_PAYROLL refuses,
+        and the entities with no organization filter (InvoiceItem alone, PaymentApplication, FinancialAccountTrans,
+        GlAccount).
 
         No grant is here: an application grants the group to its finance groups, AUTHZT_ALWAYS for view, with MANTLE_USER_ORG
         (and MANTLE_ACTIVE_ORG) for the row scope and CALC_NO_PAYROLL beside them. -->
@@ -279,6 +280,7 @@
     <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
             artifactName="org.moqui.calc.profile.accounting"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.invoice.Invoice"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.invoice.InvoiceSummary"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.payment.Payment"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.financial.FinancialAccount"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.ledger.transaction.AcctgTrans"/>
