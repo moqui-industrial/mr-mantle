@@ -263,4 +263,38 @@
     <moqui.basic.Enumeration enumId="PccValuationTieOut" enumTypeId="PeriodCloseCheck" sequenceNum="84"
             description="Inventory valuation against the inventory accounts" optionIndicator="N"
             enumCode="mantle.product.InventoryReportServices.check#ValuationClose"/>
+
+    <!-- The accounting access profile of CalcGrid (mr-moqui plans/IronCalc-DB2.md CG5; docs/tools/Database.md, CalcGrid and
+        access profiles), as Sales.xml defines sales: invoices, payments, financial accounts, ledger transactions (with their
+        entries, through the view) and time periods on a spreadsheet's data sheet, as authorization data. Each entity offered
+        has an organization filter (15-seed-initial/OrganizationFilters.xml: invoices and payments by their from and to party,
+        financial accounts, transactions by their organization, time periods by their party); the entries are a plain member
+        of the view, refused on their own. Left out: an invoice's or a payment's views that have no payrollOrigin alias
+        (InvoiceSummary), which CALC_NO_PAYROLL refuses, and the entities with no organization filter (InvoiceItem alone,
+        PaymentApplication, FinancialAccountTrans, GlAccount).
+
+        No grant is here: an application grants the group to its finance groups, AUTHZT_ALWAYS for view, with MANTLE_USER_ORG
+        (and MANTLE_ACTIVE_ORG) for the row scope and CALC_NO_PAYROLL beside them. -->
+    <moqui.security.ArtifactGroup artifactGroupId="CALC_PROFILE_ACCOUNTING" description="Accounting: invoices, payments, financial accounts, ledger transactions and time periods"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            artifactName="org.moqui.calc.profile.accounting"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.invoice.Invoice"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.payment.Payment"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.financial.FinancialAccount"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.ledger.transaction.AcctgTrans"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.ledger.transaction.AcctgTransEntry"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.ledger.transaction.AcctgTransAndEntry"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_ACCOUNTING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.party.time.TimePeriod"/>
+    <!-- No payroll-origin document on a data sheet (AC-23, service/mantle/account/PayrollOrigin.js): an invoice, a payment or a
+        transaction marked payrollOrigin Y is a person's pay, which only PAYROLL_VIEW reads, and CalcGrid reads the entities
+        themselves, not the finance services that leave them out. ANDed with the organization filters on a CalcGrid profile's
+        grant; a view of these entities without a payrollOrigin alias is refused (allowMissingAlias N), never read whole. -->
+    <moqui.security.EntityFilterSet entityFilterSetId="CALC_NO_PAYROLL" description="CalcGrid: no payroll-origin document" allowMissingAlias="N">
+        <filters entityFilterId="CALC_NO_PAYROLL_INV" entityName="mantle.account.invoice.Invoice"
+                filterMap="({_join: 'or', _list: [{payrollOrigin: null}, {payrollOrigin: 'Y', _comp: '!='}]})"/>
+        <filters entityFilterId="CALC_NO_PAYROLL_PMT" entityName="mantle.account.payment.Payment"
+                filterMap="({_join: 'or', _list: [{payrollOrigin: null}, {payrollOrigin: 'Y', _comp: '!='}]})"/>
+        <filters entityFilterId="CALC_NO_PAYROLL_ATX" entityName="mantle.ledger.transaction.AcctgTrans"
+                filterMap="({_join: 'or', _list: [{payrollOrigin: null}, {payrollOrigin: 'Y', _comp: '!='}]})"/>
+    </moqui.security.EntityFilterSet>
 </entity-facade-xml>
