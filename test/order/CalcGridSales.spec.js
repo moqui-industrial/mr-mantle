@@ -339,3 +339,46 @@ feature("a range of a document read as a report's table is the caller's own rows
         badChoice.includes("Not available")
     },
 })
+
+// mr-moqui plans/IronCalc-DB2.md CG4.4: an author's workbook is the overlay of a new document over an entity the profile
+// offers; its formulas over the data read the rows her organizations give, and a sheet of the data sheet's name, whose rows
+// would stand below the data, is refused
+feature("a workbook an author uploads over the orders reads her organization's rows only; one holding a sheet of the orders, or a viewer's, is refused", {
+    when() {
+        // workbooks made elsewhere (here an administrator's Tools room, written as an xlsx): one whose Summary names the orders
+        // before it has them, and one that also holds a sheet of every organization's orders under the data sheet's name
+        const workbook = (entityName) => {
+            const room = calc("open#CalcDocument", { source: { type: "entity", entityName } }).out.roomId
+            calc("edit#CalcDocument", { roomId: room, ops: [{ op: "addSheet" }, { op: "renameSheet", sheet: 1, name: "Summary" },
+                { op: "input", sheet: 1, row: 1, column: 1, value: "=SUM(OrderHeaderAndPart[grandTotal])" },
+                { op: "input", sheet: 1, row: 2, column: 1, value: "=COUNTA(OrderHeaderAndPart!A:A)-1" }] })
+            const bytes = calc("export#CalcDocument", { roomId: room }).out.contentBytes
+            calc("close#CalcDocument", { roomId: room })
+            return bytes
+        }
+        const own = workbook("moqui.basic.Enumeration")
+        const planted = workbook(ORDERS)
+        const upload = (username, workbookBytes) => as(username, () => {
+            const opened = calc("open#CalcDocument", { profileId: "sales", source: { type: "entity", entityName: ORDERS }, workbookBytes, workbookName: "sales.xlsx" })
+            if (!opened.out.roomId) return { errors: opened.errors, sums: [] }
+            const summary = Array.from(opened.out.sheets || []).find((sheet) => sheet.name == "Summary") || { index: -1 }
+            const block = calc("get#CalcCells", { roomId: opened.out.roomId, profileId: "sales", sheet: summary.index, row: 1, column: 1, width: 1, height: 2 })
+            const texts = block.errors ? [] : Array.from(JSON.parse(String(block.out.blockJson)).texts || [])
+            const data = Array.from(opened.out.sheets || []).find((sheet) => sheet.data) || {}
+            calc("close#CalcDocument", { roomId: opened.out.roomId })
+            return { errors: opened.errors + block.errors, sums: [1, 2].map((row) => (texts.find((text) => text.row === row) || {}).text || ""), dataRows: data.dataRows }
+        })
+        return { ann: upload("cgs.ann", own), otto: upload("cgs.otto", own), planted: upload("cgs.ann", planted), vic: upload("cgs.vic", own) }
+    },
+    then({ ann, otto, planted, vic }) {
+        ann.errors == ""
+        ann.dataRows == 1
+        ann.sums.join(",") == "110,1"
+        otto.errors == ""
+        otto.sums.join(",") == "220,1"
+        planted.errors.includes("sheet named OrderHeaderAndPart")
+        planted.sums.length == 0
+        vic.errors.includes("Not available")
+        vic.sums.length == 0
+    },
+})
