@@ -320,4 +320,26 @@
             ownerApp="Commerce" targetVersion="1" scopeLabel="Organization"
             findService="mantle.product.StoreChannelServices.find#ChannelImportRuns"
             ownerRoute="commerceChannelImport" sequenceNum="30"/>
+
+    <!-- The marketing access profile of CalcGrid (mr-moqui plans/IronCalc-DB2.md CG5; docs/tools/Database.md, CalcGrid and
+        access profiles), as Sales.xml defines sales: campaigns, contact lists and market segments on a spreadsheet's data
+        sheet, as authorization data. Each has an organization filter (15-seed-initial/OrganizationFilters.xml: a campaign by
+        its organization, a segment and a list by their owner). No list's members (ContactListParty) nor any person: those
+        wait for a privacy review.
+
+        No grant is here: an application grants the group to its marketing groups, AUTHZT_ALWAYS for view, with
+        MANTLE_USER_ORG (and MANTLE_ACTIVE_ORG) for the row scope and CALC_NO_MAILBOX beside them. -->
+    <moqui.security.ArtifactGroup artifactGroupId="CALC_PROFILE_MARKETING" description="Marketing: campaigns, contact lists and market segments"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_MARKETING" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            artifactName="org.moqui.calc.profile.marketing"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_MARKETING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.marketing.campaign.MarketingCampaign"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_MARKETING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.marketing.contact.ContactList"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_MARKETING" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.marketing.segment.MarketSegment"/>
+    <!-- No mailbox on a data sheet: the organization filters let every mailbox list through (a mailbox is the internal Inbox's,
+        left to ContactListServices get#ContactListAccess), and CalcGrid reads the entity itself. ANDed with the organization
+        filters on a CalcGrid profile's grant; a view of contact lists without the type's alias is refused. -->
+    <moqui.security.EntityFilterSet entityFilterSetId="CALC_NO_MAILBOX" description="CalcGrid: no mailbox contact list" allowMissingAlias="N">
+        <filters entityFilterId="CALC_NO_MAILBOX_CLST" entityName="mantle.marketing.contact.ContactList"
+                filterMap="({_join: 'or', _list: [{contactListTypeEnumId: null}, {contactListTypeEnumId: 'MAILBOX', _comp: '!='}]})"/>
+    </moqui.security.EntityFilterSet>
 </entity-facade-xml>

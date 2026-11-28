@@ -14,7 +14,9 @@
         applies to, so the plain members are not read on their own (an order header has no organization; its part has), and
         a view is read through the filter on its scoped member: orders by OrderPart's vendor and customer, invoices by their
         from and to party, returns by vendor and customer, payments by from and to party, parties and products by owner,
-        stores by organization. -->
+        stores by organization. Beside those, an application puts CALC_NO_PAYROLL (10-seed/Accounting.xml) on the grant: an
+        invoice or a payment of payroll is a person's pay, which only PAYROLL_VIEW reads (AC-23), and it fails closed on a view
+        without the payrollOrigin alias (InvoiceSummary has it). -->
     <moqui.security.ArtifactGroup artifactGroupId="CALC_PROFILE_SALES" description="Sales: orders, returns, invoices, payments, customers and products"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
             artifactName="org.moqui.calc.profile.sales"/>
