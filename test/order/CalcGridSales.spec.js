@@ -1,4 +1,4 @@
-// The sales access profile of CalcGrid (data/10-seed/Sales.xml; mr-moqui plans/IronCalc-DB.md, Access and row scope,
+// The sales access profile of CalcGrid (data/10-seed/Sales.xml; mr-moqui plans/archive/IronCalc-DB.md, Access and row scope,
 // crates/moqui-calc/src/profile.rs), through org.moqui.calc.CalcServices as a screen would call them, with authorization on:
 // a holder of the profile reads the orders of the organizations they work in and none of another's, on a data sheet over a
 // view; an entity the profile does not offer, and an offered one no organization filter applies to, are refused; a user
